@@ -218,7 +218,7 @@ Presets: Q = `quick`, S = `standard`, F = `full`. `custom` can use any orientati
 - In portrait, gravity cannot tell "toward" from "away".
 - In landscape, a facing error shows up as a `top_left`/`top_right` swap.
 - `free` has no instructed rotation, so the match is null.
-- If `gravity_sign` was not calibrated, the check assumes the W3C sign. On iPhones that inverts the result: an upright phone reads as upside down. Calibration step a must therefore succeed (§6).
+- If calibration was skipped or its flat step found no sign, the check uses the sign the browser engine is known to report: −1 for WebKit (every iOS browser outside the EU) and +1 for Blink and Gecko. The same applies when the flat sign contradicts the engine. Only an unknown engine falls back to the W3C sign, which would read an upright iPhone as upside down. Calibration step a is still recommended, because it measures the sign instead of assuming it (§6).
 
 ### 3.7 Posture
 

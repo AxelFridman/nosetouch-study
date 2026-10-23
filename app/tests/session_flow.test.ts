@@ -421,6 +421,40 @@ describe('trial set-up helpers', () => {
     expect(calibrationForDetection(unknown)?.gravity_sign).toBeNull();
   });
 
+  it('orientation detection uses the engine sign when calibration was skipped or measured no sign', async () => {
+    const s0 = await createSession({ ...CUSTOM, custom: TWO_TRIALS });
+    const skipped: SessionRecord = { ...s0, device: { ...s0.device, engine: 'webkit' }, calibration: null };
+    const p0 = plannedTrials(skipped)[0];
+    const o = buildTrialOptions(skipped, p0, 1, { source: fakeSource('browser'), cues: { play: vi.fn() } });
+    expect(o.calibration?.gravity_sign).toBe(-1); // WebKit's known sign, not the W3C default
+    expect(skipped.calibration).toBeNull(); // nothing is stored
+    const android: SessionRecord = { ...skipped, device: { ...skipped.device, engine: 'blink' } };
+    expect(calibrationForDetection(android)?.gravity_sign).toBe(1);
+    const unknown: SessionRecord = { ...skipped, device: { ...skipped.device, engine: 'unknown' } };
+    expect(calibrationForDetection(unknown)).toBeNull();
+
+    const noSign: SessionRecord = {
+      ...skipped,
+      calibration: {
+        performed_at: s0.started_at,
+        flat: null,
+        upright: null,
+        gravity_sign: null, // the flat step failed (moving, not flat)
+        gravity_magnitude: null,
+        upright_check: null,
+        gyro_bias_dps: null,
+        notes: ['flat: moving'],
+        axis_check: null,
+      },
+    };
+    expect(calibrationForDetection(noSign)?.gravity_sign).toBe(-1);
+    expect(calibrationForDetection(noSign)?.notes).toEqual(['flat: moving']);
+    expect(noSign.calibration?.gravity_sign).toBeNull(); // the stored calibration is unchanged
+
+    const measured: SessionRecord = { ...noSign, calibration: { ...noSign.calibration!, gravity_sign: -1, notes: [] } };
+    expect(calibrationForDetection(measured)).toBe(measured.calibration); // a trusted measurement passes through
+  });
+
   it('applyDecision / asUnreviewed / asFailedAttempt', async () => {
     const s = await createSession(CUSTOM);
     const t = makeTrialRecord(s, plannedTrials(s)[0], 1);

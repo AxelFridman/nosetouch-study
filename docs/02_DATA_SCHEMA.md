@@ -342,7 +342,7 @@ Overrides: `slow` trials lower the thresholds and extend `end_sustain_ms` (450) 
 
 | Field | Meaning |
 |---|---|
-| `rotation_start` | Phone rotation inferred from `baseline.gravity` (`upright` / `upside_down` / `top_left` / `top_right` / `flat` / `unknown`), given the calibrated sign and the instructed screen facing |
+| `rotation_start` | Phone rotation inferred from `baseline.gravity` (`upright` / `upside_down` / `top_left` / `top_right` / `flat` / `unknown`), given the calibrated sign (without one, the browser engine's known sign) and the instructed screen facing |
 | `rotation_end` | Same, from the mean accg of the last 200 ms before `stop_ms`. That window is in the post-roll and may already include the arm lowering |
 | `tilt_change_deg` | Angle between the start and end gravity vectors (nullable) |
 | `orientation_match` | `rotation_start` equals the instructed rotation; `null` when it cannot be checked (e.g. `free`). Screen facing cannot be verified from gravity |

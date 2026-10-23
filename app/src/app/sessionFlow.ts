@@ -214,16 +214,32 @@ export interface TrialRunDeps {
 
 /** Options for createTrialController for one attempt of a planned trial of this session. */
 /**
- * The calibration the trial controller uses to classify how the phone is held. A flat step whose sign
- * contradicts the browser engine (FLAT_SIGN_CONTRADICTS_ENGINE, typically done screen-down) is not
- * trusted for that: the engine's known sign is used instead, so the review does not show a "held
- * differently" warning on every trial. session.calibration itself is stored unchanged — the analysis
+ * The calibration the trial controller uses to classify how the phone is held. The browser engine's
+ * known sign replaces the measured one when the flat step contradicts the engine
+ * (FLAT_SIGN_CONTRADICTS_ENGINE, typically done screen-down) and when no sign was measured at all
+ * (calibration skipped, or its flat step failed: the W3C default would read an upright iPhone as
+ * upside down). Either way the review does not show a "held differently" warning on every trial; an
+ * unknown engine keeps the W3C default. session.calibration itself is stored unchanged — the analysis
  * resolves the sign from the trial data (analysis/motionlab/conventions.resolve_gravity_sign).
  */
 export function calibrationForDetection(session: SessionRecord): CalibrationResult | null {
   const cal = session.calibration;
-  if (!cal || !cal.notes.includes(FLAT_SIGN_CONTRADICTS_ENGINE)) return cal;
-  return { ...cal, gravity_sign: engineGravitySign(session.device.engine) };
+  if (cal && cal.gravity_sign !== null && !cal.notes.includes(FLAT_SIGN_CONTRADICTS_ENGINE)) return cal;
+  const engineSign = engineGravitySign(session.device.engine);
+  if (cal) return { ...cal, gravity_sign: engineSign };
+  if (engineSign === null) return null;
+  // calibration skipped: a detection-only stand-in that carries just the engine's sign (never stored)
+  return {
+    performed_at: session.started_at,
+    flat: null,
+    upright: null,
+    gravity_sign: engineSign,
+    gravity_magnitude: null,
+    upright_check: null,
+    gyro_bias_dps: null,
+    notes: [],
+    axis_check: null,
+  };
 }
 
 export function buildTrialOptions(
