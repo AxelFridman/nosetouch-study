@@ -22,7 +22,7 @@ for (const [lang, strings, dir] of [
         },
       });
     }, BROWSER_MESSAGE);
-    await page.goto(`/?sim=1&lang=${lang}`);
+    await page.goto(`./?sim=1&lang=${lang}`);
     const screen = page.getByTestId('screen-boot-failed');
     await expect(screen).toBeVisible();
     await expect(screen.locator('h1')).toHaveText(strings.common.appName);

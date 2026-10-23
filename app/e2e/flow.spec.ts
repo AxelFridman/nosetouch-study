@@ -15,7 +15,7 @@ test('simulated participant: full journey ends with a valid export', async ({ pa
   page.on('pageerror', (e) => pageErrors.push(e.message));
   await disableWebShare(page);
 
-  await page.goto('/?sim=1&lang=en');
+  await page.goto('./?sim=1&lang=en');
 
   // welcome → consent
   await page.getByTestId('btn-start').click();
@@ -75,7 +75,7 @@ test('simulated participant: full journey ends with a valid export', async ({ pa
 });
 
 test('Hebrew UI is right-to-left', async ({ page }) => {
-  await page.goto('/?sim=1&lang=he');
+  await page.goto('./?sim=1&lang=he');
   await expect(page.getByTestId('btn-start')).toBeVisible();
   await expect.poll(() => page.evaluate(() => document.documentElement.dir)).toBe('rtl');
   expect(await page.evaluate(() => document.documentElement.lang)).toBe('he');

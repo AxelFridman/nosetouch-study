@@ -13,6 +13,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "e2e": "playwright test",
+    "e2e:live": "playwright test --config playwright.live.config.ts",
     "synth": "tsx scripts/synth.ts",
     "eval:seg": "tsx scripts/evalSegmentation.ts",
     "icons": "py -3 scripts/make_icons.py"

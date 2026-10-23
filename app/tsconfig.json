@@ -23,5 +23,5 @@
       "react-dom": ["./node_modules/preact/compat/"]
     }
   },
-  "include": ["src", "tests", "scripts", "e2e", "vite.config.ts", "playwright.config.ts"]
+  "include": ["src", "tests", "scripts", "e2e", "vite.config.ts", "playwright.config.ts", "playwright.live.config.ts"]
 }

@@ -30,7 +30,7 @@ for (const lang of LANGS) {
     page.on('pageerror', (e) => errors.push(e.message));
     await disableWebShare(page);
 
-    await page.goto(`/?sim=1&lang=${lang}`);
+    await page.goto(`./?sim=1&lang=${lang}`);
     await expect(page.getByTestId('btn-start')).toBeVisible();
     await snap('welcome');
     await page.getByTestId('btn-start').click();

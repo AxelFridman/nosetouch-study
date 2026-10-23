@@ -9,7 +9,7 @@ import { TAP_GUARD_MS } from '../src/app/state';
 import { chooseTwoTrialProtocol, fillProfile, inputOf, tapFresh } from './helpers';
 
 test('the second tap of a double tap never presses the next step’s button', async ({ page }) => {
-  await page.goto('/?sim=1&lang=en');
+  await page.goto('./?sim=1&lang=en');
   await page.getByTestId('btn-start').click();
   await page.getByTestId('chk-consent').click();
   await expect(await inputOf(page.getByTestId('chk-consent'))).toBeChecked();

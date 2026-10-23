@@ -150,7 +150,7 @@ export async function chooseTwoTrialProtocol(page: Page): Promise<void> {
 
 /** welcome → consent → profile → sensor check → calibration (skipped) → the setup screen, simulated. */
 export async function onboardToSetup(page: Page, lang = 'en'): Promise<void> {
-  await page.goto(`/?sim=1&lang=${lang}`);
+  await page.goto(`./?sim=1&lang=${lang}`);
   await page.getByTestId('btn-start').click();
   const consent = page.getByTestId('chk-consent');
   await consent.click();
