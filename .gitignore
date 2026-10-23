@@ -14,6 +14,8 @@ app/coverage/
 
 # NEVER commit participant data. Synthetic data is regenerated on demand.
 /data/
+/nosetouch_*.json
+/nosetouch_*.zip
 analysis/data/*
 !analysis/data/README.md
 analysis/reports/*

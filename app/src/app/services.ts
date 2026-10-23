@@ -3,7 +3,7 @@
  */
 import { openLocalStore, type LocalStore } from '../core/storage';
 import { createUploadQueue, type UploadQueue } from '../core/uploader';
-import { createCueSink, createWakeLockGuard, type AppCueSink, type WakeLockGuard } from '../core/cues';
+import { createCueSink, createWakeLockGuard, isAutomatedBrowser, type AppCueSink, type WakeLockGuard } from '../core/cues';
 import { createBrowserSensorSource } from '../core/sensors';
 import { effectiveUpload, redactSession } from '../core/config';
 import { makeRng, randomSeed } from '../core/util';
@@ -55,7 +55,13 @@ function seedFromId(id: string | undefined): number {
 export async function initServices(): Promise<Services> {
   const st = getState();
   const store = await openLocalStore();
-  const cues = createCueSink({ audio: st.settings.audio, vibrate: st.settings.vibrate, speech: st.settings.speech });
+  // A computer running the simulator, CI or Playwright must never talk or beep: the researcher is
+  // working next to it. ?audio=1 opts back in for a deliberate listening check.
+  const audioOptIn = new URLSearchParams(globalThis.location?.search ?? '').get('audio') === '1';
+  const cues = createCueSink(
+    { audio: st.settings.audio, vibrate: st.settings.vibrate, speech: st.settings.speech },
+    { silenced: () => !audioOptIn && (getState().settings.simulate || isAutomatedBrowser()) },
+  );
   const uploader = createUploadQueue(
     store,
     () => effectiveUpload(getState().config, getState().settings.upload_override),

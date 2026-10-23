@@ -21,6 +21,8 @@ export default defineConfig({
     trace: 'retain-on-failure',
     screenshot: 'only-on-failure',
     acceptDownloads: true,
+    // silent: see playwright.config.ts
+    launchOptions: { args: ['--mute-audio'] },
   },
   projects: [{ name: 'android-chromium', use: { ...devices['Pixel 7'] } }],
 });

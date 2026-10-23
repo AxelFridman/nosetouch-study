@@ -51,6 +51,15 @@ export interface AppCueSink extends CueSink {
   setOptions(o: CueOptions): void;
 }
 
+export interface CueSinkEnv {
+  /**
+   * Checked on every cue: while it returns true, play(), say() and unlock() make no sound, no
+   * speech and no vibration, whatever the options say. The app uses it so a computer running the
+   * simulator or an automated browser never talks or beeps.
+   */
+  silenced?: () => boolean;
+}
+
 export interface CueTone {
   freq: number; // Hz
   start: number; // s after the cue
@@ -155,6 +164,7 @@ interface CueGlobals {
   speechSynthesis?: SynthLike;
   SpeechSynthesisUtterance?: unknown;
   navigator?: {
+    webdriver?: boolean;
     vibrate?: (pattern: number[]) => boolean;
     audioSession?: { type?: string };
     wakeLock?: { request?: (type: 'screen') => Promise<SentinelLike> } | null;
@@ -171,6 +181,19 @@ function G(): CueGlobals {
 }
 
 const noop = (): void => undefined;
+
+/**
+ * True in browsers driven by automation (Playwright, Puppeteer, Selenium all set
+ * navigator.webdriver). Chrome on Windows speaks through the OS speech engine, so even a headless
+ * or --mute-audio browser can talk out loud: the app itself must stay quiet there.
+ */
+export function isAutomatedBrowser(): boolean {
+  try {
+    return G().navigator?.webdriver === true;
+  } catch {
+    return false;
+  }
+}
 
 // ───────────────────────────── voices ─────────────────────────────
 
@@ -203,9 +226,16 @@ export function pickVoice<V extends VoiceLike>(voices: readonly V[], lang: Langu
 
 // ───────────────────────────── cue sink ─────────────────────────────
 
-export function createCueSink(o: CueOptions): AppCueSink {
+export function createCueSink(o: CueOptions, env: CueSinkEnv = {}): AppCueSink {
   let opts: CueOptions = { ...o };
   let ctx: AudioContextLike | null = null;
+  const isSilenced = (): boolean => {
+    try {
+      return env.silenced?.() === true;
+    } catch {
+      return false;
+    }
+  };
   let voicesFor: SynthLike | null = null;
   let voices: VoiceLike[] = [];
 
@@ -262,6 +292,7 @@ export function createCueSink(o: CueOptions): AppCueSink {
   }
 
   function unlock(): Promise<void> {
+    if (isSilenced()) return Promise.resolve();
     // Synchronous part first: it must run while the user gesture is still being processed.
     const g = G();
     try {
@@ -296,6 +327,7 @@ export function createCueSink(o: CueOptions): AppCueSink {
 
   function play(kind: CueKind): void {
     try {
+      if (isSilenced()) return;
       if (kind === 'block_start' && opts.vibrate) {
         const nav = G().navigator;
         if (nav && typeof nav.vibrate === 'function') nav.vibrate(BLOCK_START_VIBRATION);
@@ -319,7 +351,7 @@ export function createCueSink(o: CueOptions): AppCueSink {
 
   function say(text: string, lang: Language): void {
     try {
-      if (!opts.speech || !text) return;
+      if (!opts.speech || !text || isSilenced()) return;
       const g = G();
       const synth = g.speechSynthesis;
       const Utterance = g.SpeechSynthesisUtterance as (new (text: string) => UtteranceLike) | undefined;

@@ -11,6 +11,7 @@ import {
   createCueSink,
   createRecordingCueSink,
   createWakeLockGuard,
+  isAutomatedBrowser,
   pickVoice,
   type CueOptions,
 } from '../src/core/cues';
@@ -457,6 +458,50 @@ describe('createCueSink: speech', () => {
     expect(() => sink.say?.('Ready', 'en')).not.toThrow();
     expect(flaky.spoken[0]).toMatchObject({ lang: 'en-US', voice: null });
     expect(() => sink.setOptions({ ...ALL_ON, speech: false })).not.toThrow();
+  });
+});
+
+describe('createCueSink: silenced (simulator / automated browser on a computer)', () => {
+  it('while silenced: no context, no tones, no speech, no vibration; sound returns when lifted', async () => {
+    const audio = withAudio({ initialState: 'running' }, { vibrate: vi.fn(() => true) });
+    const speech = fakeSpeech(VOICES);
+    vi.stubGlobal('speechSynthesis', speech.synth);
+    vi.stubGlobal('SpeechSynthesisUtterance', speech.Utterance);
+    let silent = true;
+    const sink = createCueSink(ALL_ON, { silenced: () => silent });
+    await sink.unlock();
+    for (const k of KINDS) sink.play(k);
+    sink.say?.('Touch your nose', 'en');
+    expect(audio.instances).toHaveLength(0);
+    expect(speech.spoken).toHaveLength(0);
+    expect((navigator as unknown as { vibrate: ReturnType<typeof vi.fn> }).vibrate).not.toHaveBeenCalled();
+
+    silent = false;
+    await sink.unlock();
+    sink.play('go');
+    sink.say?.('Touch your nose', 'en');
+    expect(audio.instances[0].oscillators).toHaveLength(1);
+    expect(speech.spoken).toHaveLength(1);
+  });
+
+  it('a throwing silenced() check never breaks the cues', () => {
+    const speech = withSpeech();
+    const sink = createCueSink(ALL_ON, {
+      silenced: () => {
+        throw new Error('state not ready');
+      },
+    });
+    expect(() => sink.say?.('Ready', 'en')).not.toThrow();
+    expect(speech.spoken).toHaveLength(1);
+  });
+
+  it('isAutomatedBrowser() follows navigator.webdriver', () => {
+    vi.stubGlobal('navigator', { webdriver: true });
+    expect(isAutomatedBrowser()).toBe(true);
+    vi.stubGlobal('navigator', { webdriver: false });
+    expect(isAutomatedBrowser()).toBe(false);
+    vi.stubGlobal('navigator', {});
+    expect(isAutomatedBrowser()).toBe(false);
   });
 });
 

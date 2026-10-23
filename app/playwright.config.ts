@@ -15,6 +15,9 @@ export default defineConfig({
     trace: 'retain-on-failure',
     screenshot: 'only-on-failure',
     acceptDownloads: true,
+    // Never make noise on the researcher's computer. The app also silences itself under automation
+    // (navigator.webdriver), which matters because Chrome on Windows speaks through the OS engine.
+    launchOptions: { args: ['--mute-audio'] },
   },
   projects: [
     {
