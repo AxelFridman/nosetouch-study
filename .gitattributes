@@ -1,0 +1,4 @@
+# Normalise text files to LF in the repository (checkouts follow the local core.autocrlf setting).
+* text=auto
+*.png binary
+*.gz binary

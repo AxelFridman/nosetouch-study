@@ -1,0 +1,285 @@
+/*
+ * Onboarding + admin screens (welcome, consent, profile, sensors, calibration, setup, data,
+ * settings, about). Shared primitives live in styles.css; only screen-specific layout is here.
+ * RTL-safe: logical properties only.
+ */
+
+/* ── text helpers ─────────────────────────────────────────── */
+.onb-lead {
+  font-size: 1.05rem;
+  color: var(--muted);
+  margin: 0;
+}
+.onb-subhead {
+  margin: 4px 0 6px;
+  font-size: 1.02rem;
+}
+.onb-note,
+.onb-privacy {
+  margin: 0;
+}
+/* URLs, e-mails and codes inside Hebrew text keep their left-to-right order */
+.onb-ltr {
+  direction: ltr;
+  unicode-bidi: isolate;
+}
+.onb-nowrap {
+  white-space: nowrap;
+}
+.onb-break {
+  overflow-wrap: anywhere;
+  word-break: break-all;
+}
+
+/* ── welcome / about hero ─────────────────────────────────── */
+.onb-hero {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 10px;
+  padding: 18px 8px 6px;
+}
+.onb-hero-icon {
+  border-radius: 18px;
+  box-shadow: var(--shadow);
+}
+.onb-tagline {
+  font-size: 1.2rem;
+  font-weight: 600;
+  margin: 0;
+  max-width: 30ch;
+}
+
+/* ✓ list (needs, tips, what is collected) */
+.onb-checklist {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.onb-checklist li {
+  position: relative;
+  padding-inline-start: 26px;
+}
+.onb-checklist li::before {
+  content: '';
+  position: absolute;
+  inset-inline-start: 4px;
+  top: 0.5em;
+  width: 10px;
+  height: 6px;
+  border-inline-start: 2.5px solid var(--ok);
+  border-bottom: 2.5px solid var(--ok);
+  transform: rotate(-45deg);
+}
+[dir='rtl'] .onb-checklist li::before {
+  transform: rotate(45deg) scaleX(-1);
+}
+
+/* numbered steps (sensor check explainer, about) */
+.onb-steps {
+  margin: 0;
+  padding-inline-start: 22px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.onb-steps li::marker {
+  font-weight: 700;
+  color: var(--primary);
+}
+
+/* secondary menu on the welcome screen */
+.onb-menu {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+.onb-menu .btn {
+  min-height: var(--tap);
+}
+
+/* ── consent ──────────────────────────────────────────────── */
+.onb-section {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.onb-consent {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-height: 55vh;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+}
+.onb-consent h3 {
+  margin: 6px 0 0;
+  font-size: 1rem;
+}
+.onb-consent p,
+.onb-consent ul {
+  margin: 0;
+}
+
+/* ── profile ──────────────────────────────────────────────── */
+.onb-code-label {
+  font-size: 0.85rem;
+  color: var(--muted);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.onb-code {
+  font-family: var(--mono);
+  font-size: 2rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  direction: ltr;
+  unicode-bidi: isolate;
+  color: var(--primary);
+  user-select: all;
+}
+.onb-ehi {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 0;
+  border-bottom: 1px dashed var(--border);
+}
+.onb-ehi:last-child {
+  border-bottom: 0;
+}
+
+/* ── sensor check ─────────────────────────────────────────── */
+.onb-yes,
+.onb-no {
+  display: inline-block;
+  padding: 1px 10px;
+  border-radius: 999px;
+  font-size: 0.85rem;
+  font-weight: 700;
+}
+.onb-yes {
+  background: var(--ok-soft);
+  color: var(--ok);
+}
+.onb-no {
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+
+/* ── calibration ──────────────────────────────────────────── */
+.onb-step-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 6px;
+}
+.onb-step-head h2,
+.onb-step-head h3 {
+  margin: 0;
+}
+.onb-step-num {
+  flex: none;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 800;
+  background: var(--primary-soft);
+  color: var(--primary);
+}
+.onb-step-num.is-done {
+  background: var(--ok);
+  color: #fff;
+}
+.onb-countdown {
+  font-size: 3.2rem;
+  font-weight: 800;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+  color: var(--phase-wait);
+  padding: 8px 0;
+}
+
+/* ── setup ────────────────────────────────────────────────── */
+.onb-preset {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.onb-preset-name {
+  font-weight: 700;
+}
+.onb-preset-meta {
+  font-size: 0.85rem;
+  color: var(--muted);
+  font-weight: 400;
+}
+/* the safety note in the sticky footer, above "Start recording": always on screen, kept small */
+.onb-footer-note .notice {
+  font-size: 0.88rem;
+  line-height: 1.35;
+  padding: 8px 12px;
+}
+
+/* ── data screen ──────────────────────────────────────────── */
+.onb-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.onb-actions .btn {
+  flex: 1 1 140px;
+}
+.onb-row {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 14px;
+}
+.onb-row-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.onb-row-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.onb-status-completed {
+  background: var(--ok-soft);
+  color: var(--ok);
+}
+.onb-status-in_progress {
+  background: var(--info-soft);
+  color: var(--info);
+}
+.onb-status-abandoned {
+  background: var(--warn-soft);
+  color: var(--warn);
+}
+.onb-participant {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 0;
+  border-bottom: 1px dashed var(--border);
+}
+.onb-participant:last-child {
+  border-bottom: 0;
+}

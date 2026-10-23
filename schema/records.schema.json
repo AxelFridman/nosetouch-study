@@ -1,0 +1,633 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://nose-touch-study.local/schema/records.schema.json",
+  "title": "Nose-touch study records (schema 1.x)",
+  "description": "Single source of truth for every record the collector app produces. Validate a record with {\"$ref\": \"#/$defs/SessionRecord\"} or {\"$ref\": \"#/$defs/TrialRecord\"} or {\"$ref\": \"#/$defs/ExportBundle\"}. Units: time in milliseconds, acceleration in m/s^2, rotation rate in deg/s, angles in degrees. All stream times are relative to timing.t0_perf_ms of the trial. Axis conventions: device frame x = right edge, y = top edge, z = out of the screen; rotationRate {alpha, beta, gamma} = rates about device {x, y, z} (W3C CRD 2025); deviceorientation {alpha, beta, gamma} = intrinsic Z-X'-Y'' angles (a DIFFERENT convention).",
+  "$defs": {
+    "Id": { "type": "string", "pattern": "^[A-Za-z0-9_-]{1,64}$" },
+    "ParticipantId": { "type": "string", "pattern": "^P-[A-HJ-NP-Z2-9]{6}$" },
+    "IsoTime": { "type": "string", "minLength": 10, "maxLength": 40 },
+    "NullableNumber": { "type": ["number", "null"] },
+    "Vec3": { "type": "array", "items": { "type": "number" }, "minItems": 3, "maxItems": 3 },
+    "NullableVec3": { "anyOf": [{ "$ref": "#/$defs/Vec3" }, { "type": "null" }] },
+    "NumArray": { "type": "array", "items": { "type": "number" } },
+    "NullableNumArray": { "type": "array", "items": { "type": ["number", "null"] } },
+    "Euler": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["alpha", "beta", "gamma"],
+      "properties": {
+        "alpha": { "type": "number" },
+        "beta": { "type": "number" },
+        "gamma": { "type": "number" }
+      }
+    },
+
+    "Hand": { "enum": ["left", "right"] },
+    "OrientationId": {
+      "enum": [
+        "upright_toward", "upright_away",
+        "top_left_toward", "top_right_toward",
+        "upside_down_toward", "upside_down_away",
+        "top_left_away", "top_right_away",
+        "flat_up", "free"
+      ]
+    },
+    "PhoneRotation": { "enum": ["upright", "upside_down", "top_left", "top_right", "flat"] },
+    "Speed": { "enum": ["natural", "fast", "slow"] },
+    "StartPosition": { "enum": ["natural", "shoulder", "center"] },
+    "Variant": {
+      "enum": ["standard", "curved", "pause", "twist", "elbow_high", "bent_start", "lean_in", "chin", "forehead", "jerky"]
+    },
+    "Posture": { "enum": ["standing", "sitting"] },
+    "ProtocolPreset": { "enum": ["quick", "standard", "full", "custom"] },
+    "Language": { "enum": ["en", "he"] },
+    "CueKind": { "enum": ["ready", "go", "end", "error", "block_start"] },
+    "EhiAnswer": { "enum": ["always_right", "usually_right", "both", "usually_left", "always_left"] },
+
+    "TrialCondition": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["hand", "orientation", "speed", "start_position", "variant", "posture", "rep"],
+      "properties": {
+        "hand": { "$ref": "#/$defs/Hand" },
+        "orientation": { "$ref": "#/$defs/OrientationId" },
+        "speed": { "$ref": "#/$defs/Speed" },
+        "start_position": { "$ref": "#/$defs/StartPosition" },
+        "variant": { "$ref": "#/$defs/Variant" },
+        "posture": { "$ref": "#/$defs/Posture" },
+        "rep": { "type": "integer", "minimum": 0 }
+      }
+    },
+
+    "SegmentationParams": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "smoothing_ms", "gravity_tau_ms", "still_gyro_dps", "still_acc_ms2", "still_hold_ms",
+        "foreperiod_min_ms", "foreperiod_max_ms", "onset_k_sd", "onset_gyro_min_dps", "onset_acc_min_ms2",
+        "onset_sustain_ms", "end_gyro_dps", "end_acc_ms2", "end_sustain_ms", "min_movement_ms",
+        "max_wait_ms", "max_movement_ms", "post_roll_ms"
+      ],
+      "properties": {
+        "smoothing_ms": { "type": "number", "minimum": 0 },
+        "gravity_tau_ms": { "type": "number", "minimum": 0 },
+        "still_gyro_dps": { "type": "number", "minimum": 0 },
+        "still_acc_ms2": { "type": "number", "minimum": 0 },
+        "still_hold_ms": { "type": "number", "minimum": 0 },
+        "foreperiod_min_ms": { "type": "number", "minimum": 0 },
+        "foreperiod_max_ms": { "type": "number", "minimum": 0 },
+        "onset_k_sd": { "type": "number", "minimum": 0 },
+        "onset_gyro_min_dps": { "type": "number", "minimum": 0 },
+        "onset_acc_min_ms2": { "type": "number", "minimum": 0 },
+        "onset_sustain_ms": { "type": "number", "minimum": 0 },
+        "end_gyro_dps": { "type": "number", "minimum": 0 },
+        "end_acc_ms2": { "type": "number", "minimum": 0 },
+        "end_sustain_ms": { "type": "number", "minimum": 0 },
+        "min_movement_ms": { "type": "number", "minimum": 0 },
+        "max_wait_ms": { "type": "number", "minimum": 0 },
+        "max_movement_ms": { "type": "number", "minimum": 0 },
+        "post_roll_ms": { "type": "number", "minimum": 0 }
+      }
+    },
+
+    "EhiShortForm": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["writing", "throwing", "toothbrush", "spoon"],
+      "properties": {
+        "writing": { "$ref": "#/$defs/EhiAnswer" },
+        "throwing": { "$ref": "#/$defs/EhiAnswer" },
+        "toothbrush": { "$ref": "#/$defs/EhiAnswer" },
+        "spoon": { "$ref": "#/$defs/EhiAnswer" }
+      }
+    },
+
+    "ParticipantProfile": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "participant_id", "nickname", "age_years", "sex", "handedness_self", "ehi_sf", "ehi_lq", "ehi_class",
+        "phone_hand", "height_cm", "arm_issue", "phone_model", "phone_case", "created_at", "updated_at"
+      ],
+      "properties": {
+        "participant_id": { "$ref": "#/$defs/ParticipantId" },
+        "nickname": { "type": ["string", "null"], "maxLength": 60 },
+        "age_years": { "type": ["integer", "null"], "minimum": 0, "maximum": 120 },
+        "sex": { "enum": ["female", "male", "other", "prefer_not_to_say"] },
+        "handedness_self": { "enum": ["right", "left", "ambidextrous"] },
+        "ehi_sf": { "anyOf": [{ "$ref": "#/$defs/EhiShortForm" }, { "type": "null" }] },
+        "ehi_lq": { "type": ["number", "null"], "minimum": -100, "maximum": 100 },
+        "ehi_class": { "enum": ["right", "mixed", "left", null] },
+        "phone_hand": { "enum": ["right", "left", "both"] },
+        "height_cm": { "type": ["number", "null"], "minimum": 50, "maximum": 250 },
+        "arm_issue": { "type": ["boolean", "null"] },
+        "phone_model": { "type": ["string", "null"], "maxLength": 80 },
+        "phone_case": { "type": ["boolean", "null"] },
+        "created_at": { "$ref": "#/$defs/IsoTime" },
+        "updated_at": { "$ref": "#/$defs/IsoTime" }
+      }
+    },
+
+    "DeviceInfo": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "user_agent", "platform", "browser", "os_version", "model_hint", "standalone", "screen_w", "screen_h",
+        "dpr", "language", "hardware_concurrency", "device_memory_gb", "time_origin_ms"
+      ],
+      "properties": {
+        "user_agent": { "type": "string" },
+        "platform": { "enum": ["ios", "android", "other"] },
+        "browser": { "type": "string" },
+        "os_version": { "type": ["string", "null"] },
+        "model_hint": { "type": ["string", "null"] },
+        "standalone": { "type": "boolean" },
+        "screen_w": { "type": "number" },
+        "screen_h": { "type": "number" },
+        "dpr": { "type": "number" },
+        "language": { "type": "string" },
+        "hardware_concurrency": { "type": ["number", "null"] },
+        "device_memory_gb": { "type": ["number", "null"] },
+        "time_origin_ms": { "type": "number" },
+        "engine": {
+          "enum": ["webkit", "blink", "gecko", "unknown"],
+          "description": "optional (schema 1.1): browser engine. webkit = every iOS browser (detected via 'webkitCompassHeading' in DeviceOrientationEvent.prototype); its acceleration values are sign-inverted vs W3C"
+        },
+        "in_app_browser": { "type": ["string", "null"], "description": "optional (schema 1.1): e.g. 'instagram', 'facebook', 'android_webview'" }
+      }
+    },
+
+    "MeasuredRates": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "duration_ms", "motion_hz", "orientation_hz", "quaternion_hz", "motion_dt_ms_median", "motion_dt_ms_p95",
+        "acc_available", "accg_available", "rotation_available", "interval_raw"
+      ],
+      "properties": {
+        "duration_ms": { "type": "number" },
+        "motion_hz": { "$ref": "#/$defs/NullableNumber" },
+        "orientation_hz": { "$ref": "#/$defs/NullableNumber" },
+        "quaternion_hz": { "$ref": "#/$defs/NullableNumber" },
+        "motion_dt_ms_median": { "$ref": "#/$defs/NullableNumber" },
+        "motion_dt_ms_p95": { "$ref": "#/$defs/NullableNumber" },
+        "acc_available": { "type": "boolean" },
+        "accg_available": { "type": "boolean" },
+        "rotation_available": { "type": "boolean" },
+        "interval_raw": { "$ref": "#/$defs/NullableNumber" }
+      }
+    },
+
+    "SensorCapabilities": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "secure_context", "device_motion", "device_orientation", "permission_api", "permission_state",
+        "generic_relative_orientation", "wake_lock", "vibrate", "share_files", "measured"
+      ],
+      "properties": {
+        "secure_context": { "type": "boolean" },
+        "device_motion": { "type": "boolean" },
+        "device_orientation": { "type": "boolean" },
+        "permission_api": { "type": "boolean" },
+        "permission_state": { "enum": ["granted", "denied", "not_required", "unknown"] },
+        "generic_relative_orientation": { "type": "boolean" },
+        "wake_lock": { "type": "boolean" },
+        "vibrate": { "type": "boolean" },
+        "share_files": { "type": "boolean" },
+        "measured": { "anyOf": [{ "$ref": "#/$defs/MeasuredRates" }, { "type": "null" }] }
+      }
+    },
+
+    "PoseStats": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["n", "duration_ms", "accg_mean", "accg_sd", "acc_mean", "rr_mean", "rr_sd", "still"],
+      "properties": {
+        "n": { "type": "integer", "minimum": 0 },
+        "duration_ms": { "type": "number" },
+        "accg_mean": { "$ref": "#/$defs/Vec3" },
+        "accg_sd": { "$ref": "#/$defs/Vec3" },
+        "acc_mean": { "$ref": "#/$defs/NullableVec3" },
+        "rr_mean": { "anyOf": [{ "$ref": "#/$defs/Euler" }, { "type": "null" }] },
+        "rr_sd": { "anyOf": [{ "$ref": "#/$defs/Euler" }, { "type": "null" }] },
+        "still": { "type": "boolean" }
+      }
+    },
+
+    "CalibrationResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "performed_at", "flat", "upright", "gravity_sign", "gravity_magnitude", "upright_check", "gyro_bias_dps", "notes"
+      ],
+      "properties": {
+        "performed_at": { "$ref": "#/$defs/IsoTime" },
+        "flat": { "anyOf": [{ "$ref": "#/$defs/PoseStats" }, { "type": "null" }] },
+        "upright": { "anyOf": [{ "$ref": "#/$defs/PoseStats" }, { "type": "null" }] },
+        "gravity_sign": { "enum": [1, -1, null] },
+        "gravity_magnitude": { "$ref": "#/$defs/NullableNumber" },
+        "upright_check": { "enum": ["ok", "inverted", "unclear", null] },
+        "gyro_bias_dps": { "anyOf": [{ "$ref": "#/$defs/Euler" }, { "type": "null" }] },
+        "notes": { "type": "array", "items": { "type": "string" } },
+        "axis_check": {
+          "anyOf": [{ "$ref": "#/$defs/AxisCheck" }, { "type": "null" }],
+          "description": "optional (schema 1.1): empirical check of the rotationRate axis mapping/sign/units from a tilt gesture"
+        }
+      }
+    },
+
+    "AxisCheck": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Tilt gesture: the rotation axis observed from the gravity vector (accelerometer) is compared with the integrated rotationRate under each candidate field mapping. Independent of the accelerometer sign convention.",
+      "required": ["n", "duration_ms", "tilt_deg", "device_axis", "rr_integral_deg", "verdict", "units", "similarity", "magnitude_ratio"],
+      "properties": {
+        "n": { "type": "integer", "minimum": 0 },
+        "duration_ms": { "type": "number" },
+        "tilt_deg": { "$ref": "#/$defs/NullableNumber", "description": "largest angle between the initial gravity direction and a later one" },
+        "device_axis": { "$ref": "#/$defs/NullableVec3", "description": "unit rotation axis of the device, in device coordinates, from gravity" },
+        "rr_integral_deg": {
+          "anyOf": [{ "$ref": "#/$defs/Euler" }, { "type": "null" }],
+          "description": "integral of each raw rotationRate field from the start to the moment of largest tilt (deg if units are deg/s)"
+        },
+        "verdict": {
+          "enum": ["w3c", "w3c_inverted", "legacy", "legacy_inverted", "unclear"],
+          "description": "w3c: (alpha,beta,gamma)=(x,y,z); legacy: (beta,gamma,alpha)=(x,y,z) i.e. alpha about Z; *_inverted: same with the opposite sign"
+        },
+        "units": { "enum": ["deg_per_s", "rad_per_s", null] },
+        "similarity": { "$ref": "#/$defs/NullableNumber", "description": "cosine similarity of the best candidate mapping" },
+        "magnitude_ratio": { "$ref": "#/$defs/NullableNumber", "description": "|integral| / tilt for the best mapping (≈1 for deg/s, ≈0.0175 for rad/s)" }
+      }
+    },
+
+    "PlannedTrial": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["trial_index", "block_index", "trial_in_block", "condition"],
+      "properties": {
+        "trial_index": { "type": "integer", "minimum": 0 },
+        "block_index": { "type": "integer", "minimum": 0 },
+        "trial_in_block": { "type": "integer", "minimum": 0 },
+        "condition": { "$ref": "#/$defs/TrialCondition" }
+      }
+    },
+
+    "PlannedBlock": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["block_index", "kind", "hand", "orientation", "trials"],
+      "properties": {
+        "block_index": { "type": "integer", "minimum": 0 },
+        "kind": { "enum": ["main", "odd", "free"] },
+        "hand": { "$ref": "#/$defs/Hand" },
+        "orientation": { "$ref": "#/$defs/OrientationId" },
+        "trials": { "type": "array", "items": { "$ref": "#/$defs/PlannedTrial" } }
+      }
+    },
+
+    "CustomProtocolSpec": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["orientations", "speeds", "start_positions", "reps", "odd_variants", "include_free"],
+      "properties": {
+        "orientations": { "type": "array", "items": { "$ref": "#/$defs/OrientationId" }, "minItems": 1 },
+        "speeds": { "type": "array", "items": { "$ref": "#/$defs/Speed" }, "minItems": 1 },
+        "start_positions": { "type": "array", "items": { "$ref": "#/$defs/StartPosition" }, "minItems": 1 },
+        "reps": { "type": "integer", "minimum": 1, "maximum": 10 },
+        "odd_variants": { "type": "array", "items": { "$ref": "#/$defs/Variant" } },
+        "include_free": { "type": "boolean" }
+      }
+    },
+
+    "SessionRecord": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "record_type", "schema_version", "app_version", "session_id", "participant_id", "study_code",
+        "started_at", "updated_at", "ended_at", "status", "participant", "device", "capabilities", "calibration",
+        "protocol", "settings", "progress", "consent", "timezone_offset_min", "simulated", "notes"
+      ],
+      "properties": {
+        "record_type": { "const": "session" },
+        "schema_version": { "type": "string", "pattern": "^1\\.\\d+\\.\\d+$" },
+        "app_version": { "type": "string" },
+        "session_id": { "$ref": "#/$defs/Id" },
+        "participant_id": { "$ref": "#/$defs/ParticipantId" },
+        "study_code": { "$ref": "#/$defs/Id" },
+        "started_at": { "$ref": "#/$defs/IsoTime" },
+        "updated_at": { "$ref": "#/$defs/IsoTime" },
+        "ended_at": { "anyOf": [{ "$ref": "#/$defs/IsoTime" }, { "type": "null" }] },
+        "status": { "enum": ["in_progress", "completed", "abandoned"] },
+        "participant": { "$ref": "#/$defs/ParticipantProfile" },
+        "device": { "$ref": "#/$defs/DeviceInfo" },
+        "capabilities": { "$ref": "#/$defs/SensorCapabilities" },
+        "calibration": { "anyOf": [{ "$ref": "#/$defs/CalibrationResult" }, { "type": "null" }] },
+        "protocol": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "preset", "protocol_version", "seed", "posture", "first_hand", "n_planned_trials",
+            "estimated_minutes", "custom", "plan"
+          ],
+          "properties": {
+            "preset": { "$ref": "#/$defs/ProtocolPreset" },
+            "protocol_version": { "type": "string" },
+            "seed": { "type": "integer", "minimum": 0 },
+            "posture": { "$ref": "#/$defs/Posture" },
+            "first_hand": { "$ref": "#/$defs/Hand" },
+            "n_planned_trials": { "type": "integer", "minimum": 0 },
+            "estimated_minutes": { "type": "number", "minimum": 0 },
+            "custom": { "anyOf": [{ "$ref": "#/$defs/CustomProtocolSpec" }, { "type": "null" }] },
+            "plan": { "type": "array", "items": { "$ref": "#/$defs/PlannedBlock" } }
+          }
+        },
+        "settings": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["language", "audio", "speech", "segmentation_params"],
+          "properties": {
+            "language": { "$ref": "#/$defs/Language" },
+            "audio": { "type": "boolean" },
+            "speech": { "type": "boolean" },
+            "segmentation_params": { "$ref": "#/$defs/SegmentationParams" }
+          }
+        },
+        "progress": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["next_trial_index", "n_attempts", "n_accepted"],
+          "properties": {
+            "next_trial_index": { "type": "integer", "minimum": 0 },
+            "n_attempts": { "type": "integer", "minimum": 0 },
+            "n_accepted": { "type": "integer", "minimum": 0 }
+          }
+        },
+        "consent": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["version", "accepted_at"],
+          "properties": {
+            "version": { "type": "string" },
+            "accepted_at": { "$ref": "#/$defs/IsoTime" }
+          }
+        },
+        "timezone_offset_min": { "type": "integer" },
+        "simulated": { "type": "boolean", "description": "true when the data came from the built-in sensor simulator, never from a real phone" },
+        "notes": { "type": ["string", "null"], "maxLength": 2000 }
+      }
+    },
+
+    "MotionStream": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "t", "ts", "acc_x", "acc_y", "acc_z", "accg_x", "accg_y", "accg_z",
+        "rr_alpha", "rr_beta", "rr_gamma", "interval_raw", "ts_first_raw"
+      ],
+      "properties": {
+        "t": { "$ref": "#/$defs/NumArray", "description": "handler time, ms since t0 (performance.now() - t0_perf_ms)" },
+        "ts": { "$ref": "#/$defs/NullableNumArray", "description": "event.timeStamp - ts_first_raw (ms); null if unavailable" },
+        "acc_x": { "$ref": "#/$defs/NullableNumArray", "description": "DeviceMotionEvent.acceleration.x (m/s^2, gravity excluded)" },
+        "acc_y": { "$ref": "#/$defs/NullableNumArray" },
+        "acc_z": { "$ref": "#/$defs/NullableNumArray" },
+        "accg_x": { "$ref": "#/$defs/NullableNumArray", "description": "DeviceMotionEvent.accelerationIncludingGravity.x (m/s^2)" },
+        "accg_y": { "$ref": "#/$defs/NullableNumArray" },
+        "accg_z": { "$ref": "#/$defs/NullableNumArray" },
+        "rr_alpha": { "$ref": "#/$defs/NullableNumArray", "description": "rotationRate.alpha: deg/s about the device X axis (towards the right edge). W3C CRD 2025: alpha = x-axis rate; MDN's 'alpha = Z' text is outdated" },
+        "rr_beta": { "$ref": "#/$defs/NullableNumArray", "description": "rotationRate.beta: deg/s about the device Y axis (towards the top edge)" },
+        "rr_gamma": { "$ref": "#/$defs/NullableNumArray", "description": "rotationRate.gamma: deg/s about the device Z axis (out of the screen)" },
+        "interval_raw": { "$ref": "#/$defs/NullableNumber", "description": "event.interval of the first event, exactly as reported (units differ between platforms)" },
+        "ts_first_raw": { "$ref": "#/$defs/NullableNumber", "description": "raw event.timeStamp of the first event" }
+      }
+    },
+
+    "OrientationStream": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["t", "ts", "alpha", "beta", "gamma", "compass", "absolute", "ts_first_raw"],
+      "properties": {
+        "t": { "$ref": "#/$defs/NumArray" },
+        "ts": { "$ref": "#/$defs/NullableNumArray" },
+        "alpha": { "$ref": "#/$defs/NullableNumArray", "description": "deg, intrinsic Z-X'-Y'' Tait-Bryan angles (W3C DeviceOrientation)" },
+        "beta": { "$ref": "#/$defs/NullableNumArray" },
+        "gamma": { "$ref": "#/$defs/NullableNumArray" },
+        "compass": { "$ref": "#/$defs/NullableNumArray", "description": "iOS webkitCompassHeading (deg) when present" },
+        "absolute": { "type": ["boolean", "null"] },
+        "ts_first_raw": { "$ref": "#/$defs/NullableNumber" }
+      }
+    },
+
+    "QuaternionStream": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["t", "x", "y", "z", "w", "sensor", "frequency_hz"],
+      "properties": {
+        "t": { "$ref": "#/$defs/NumArray" },
+        "x": { "$ref": "#/$defs/NumArray" },
+        "y": { "$ref": "#/$defs/NumArray" },
+        "z": { "$ref": "#/$defs/NumArray" },
+        "w": { "$ref": "#/$defs/NumArray" },
+        "sensor": { "enum": ["RelativeOrientationSensor", "AbsoluteOrientationSensor"] },
+        "frequency_hz": { "type": "number" }
+      }
+    },
+
+    "TouchRecord": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["t", "type", "n", "x", "y"],
+      "properties": {
+        "t": { "type": "number" },
+        "type": { "enum": ["start", "end", "cancel"] },
+        "n": { "type": "integer", "minimum": 0 },
+        "x": { "$ref": "#/$defs/NullableNumber" },
+        "y": { "$ref": "#/$defs/NullableNumber" }
+      }
+    },
+
+    "CueRecord": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["t", "kind"],
+      "properties": {
+        "t": { "type": "number" },
+        "kind": { "$ref": "#/$defs/CueKind" }
+      }
+    },
+
+    "Baseline": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["n", "gyro_mean", "gyro_sd", "acc_mean", "acc_sd", "gravity"],
+      "properties": {
+        "n": { "type": "integer", "minimum": 0 },
+        "gyro_mean": { "type": "number" },
+        "gyro_sd": { "type": "number" },
+        "acc_mean": { "type": "number" },
+        "acc_sd": { "type": "number" },
+        "gravity": { "$ref": "#/$defs/NullableVec3" }
+      }
+    },
+
+    "TrialRecord": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "record_type", "schema_version", "app_version", "trial_id", "session_id", "participant_id", "study_code",
+        "created_at", "block_index", "trial_index", "trial_in_block", "attempt", "simulated", "condition", "outcome",
+        "timing", "segmentation", "detected", "quality", "screen", "streams"
+      ],
+      "properties": {
+        "record_type": { "const": "trial" },
+        "schema_version": { "type": "string", "pattern": "^1\\.\\d+\\.\\d+$" },
+        "app_version": { "type": "string" },
+        "trial_id": { "$ref": "#/$defs/Id" },
+        "session_id": { "$ref": "#/$defs/Id" },
+        "participant_id": { "$ref": "#/$defs/ParticipantId" },
+        "study_code": { "$ref": "#/$defs/Id" },
+        "created_at": { "$ref": "#/$defs/IsoTime" },
+        "block_index": { "type": "integer", "minimum": 0 },
+        "trial_index": { "type": "integer", "minimum": 0 },
+        "trial_in_block": { "type": "integer", "minimum": 0 },
+        "attempt": { "type": "integer", "minimum": 1 },
+        "simulated": { "type": "boolean" },
+        "condition": { "$ref": "#/$defs/TrialCondition" },
+        "outcome": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["status", "accepted", "participant_flag", "note"],
+          "properties": {
+            "status": { "enum": ["complete", "no_movement", "too_long", "aborted", "interrupted"] },
+            "accepted": { "type": "boolean", "description": "false when the participant pressed Redo or the trial failed; the attempt is still kept" },
+            "participant_flag": { "enum": ["wrong_hand", "wrong_orientation", "other_problem", null] },
+            "note": { "type": ["string", "null"], "maxLength": 500 }
+          }
+        },
+        "timing": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "t0_perf_ms", "t0_epoch_ms", "still_ms", "go_ms", "onset_ms", "end_ms", "end_detected_ms", "stop_ms",
+            "first_touch_ms", "foreperiod_ms", "false_starts"
+          ],
+          "properties": {
+            "t0_perf_ms": { "type": "number", "description": "performance.now() when recording started; all stream t are relative to this" },
+            "t0_epoch_ms": { "type": "number", "description": "Unix epoch ms corresponding to t0 (device clock)" },
+            "still_ms": { "$ref": "#/$defs/NullableNumber", "description": "when the hold-still requirement was met (last time before GO)" },
+            "go_ms": { "$ref": "#/$defs/NullableNumber", "description": "when the GO cue was emitted" },
+            "onset_ms": { "$ref": "#/$defs/NullableNumber", "description": "online-detected movement onset (back-dated)" },
+            "end_ms": { "$ref": "#/$defs/NullableNumber", "description": "online-detected movement end (back-dated)" },
+            "end_detected_ms": { "$ref": "#/$defs/NullableNumber", "description": "when the end was confirmed (end cue time)" },
+            "stop_ms": { "type": "number" },
+            "first_touch_ms": { "$ref": "#/$defs/NullableNumber", "description": "first touchstart after GO (nose contact candidate when the screen faces the user)" },
+            "foreperiod_ms": { "$ref": "#/$defs/NullableNumber" },
+            "false_starts": { "type": "integer", "minimum": 0 }
+          }
+        },
+        "segmentation": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "method", "params", "acc_source", "onset_index", "end_index", "duration_ms", "peak_gyro_dps",
+            "peak_acc_ms2", "baseline"
+          ],
+          "properties": {
+            "method": { "const": "online_v1" },
+            "params": { "$ref": "#/$defs/SegmentationParams" },
+            "acc_source": { "enum": ["linear", "highpass", "none"] },
+            "onset_index": { "type": ["integer", "null"], "minimum": 0 },
+            "end_index": { "type": ["integer", "null"], "minimum": 0 },
+            "duration_ms": { "$ref": "#/$defs/NullableNumber" },
+            "peak_gyro_dps": { "$ref": "#/$defs/NullableNumber" },
+            "peak_acc_ms2": { "$ref": "#/$defs/NullableNumber" },
+            "baseline": { "anyOf": [{ "$ref": "#/$defs/Baseline" }, { "type": "null" }] }
+          }
+        },
+        "detected": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["rotation_start", "rotation_end", "tilt_change_deg", "orientation_match"],
+          "properties": {
+            "rotation_start": { "anyOf": [{ "$ref": "#/$defs/PhoneRotation" }, { "const": "unknown" }] },
+            "rotation_end": { "anyOf": [{ "$ref": "#/$defs/PhoneRotation" }, { "const": "unknown" }] },
+            "tilt_change_deg": { "$ref": "#/$defs/NullableNumber" },
+            "orientation_match": { "type": ["boolean", "null"], "description": "rotation_start vs. the instructed rotation (screen facing cannot be told from gravity alone)" }
+          }
+        },
+        "quality": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "n_motion", "n_orientation", "n_quaternion", "motion_hz", "motion_dt_ms_median", "motion_dt_ms_max",
+            "gaps_over_50ms", "acc_available", "rotation_available", "hidden_during", "warnings"
+          ],
+          "properties": {
+            "n_motion": { "type": "integer", "minimum": 0 },
+            "n_orientation": { "type": "integer", "minimum": 0 },
+            "n_quaternion": { "type": "integer", "minimum": 0 },
+            "motion_hz": { "$ref": "#/$defs/NullableNumber" },
+            "motion_dt_ms_median": { "$ref": "#/$defs/NullableNumber" },
+            "motion_dt_ms_max": { "$ref": "#/$defs/NullableNumber" },
+            "gaps_over_50ms": { "type": "integer", "minimum": 0 },
+            "acc_available": { "type": "boolean" },
+            "rotation_available": { "type": "boolean" },
+            "hidden_during": { "type": "boolean" },
+            "warnings": { "type": "array", "items": { "type": "string" } }
+          }
+        },
+        "screen": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type_start", "angle_start", "type_end", "angle_end"],
+          "properties": {
+            "type_start": { "type": ["string", "null"] },
+            "angle_start": { "$ref": "#/$defs/NullableNumber" },
+            "type_end": { "type": ["string", "null"] },
+            "angle_end": { "$ref": "#/$defs/NullableNumber" }
+          }
+        },
+        "streams": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["motion", "orientation", "quaternion", "touches", "cues"],
+          "properties": {
+            "motion": { "$ref": "#/$defs/MotionStream" },
+            "orientation": { "anyOf": [{ "$ref": "#/$defs/OrientationStream" }, { "type": "null" }] },
+            "quaternion": { "anyOf": [{ "$ref": "#/$defs/QuaternionStream" }, { "type": "null" }] },
+            "touches": { "type": "array", "items": { "$ref": "#/$defs/TouchRecord" } },
+            "cues": { "type": "array", "items": { "$ref": "#/$defs/CueRecord" } }
+          }
+        }
+      }
+    },
+
+    "UploadEnvelope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "study_key", "sent_at", "record"],
+      "properties": {
+        "kind": { "enum": ["session", "trial"] },
+        "study_key": { "type": ["string", "null"] },
+        "sent_at": { "$ref": "#/$defs/IsoTime" },
+        "record": { "anyOf": [{ "$ref": "#/$defs/SessionRecord" }, { "$ref": "#/$defs/TrialRecord" }] }
+      }
+    },
+
+    "ExportBundle": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["format", "schema_version", "app_version", "exported_at", "participants", "sessions", "trials"],
+      "properties": {
+        "format": { "const": "nose-touch-export" },
+        "schema_version": { "type": "string" },
+        "app_version": { "type": "string" },
+        "exported_at": { "$ref": "#/$defs/IsoTime" },
+        "participants": { "type": "array", "items": { "$ref": "#/$defs/ParticipantProfile" } },
+        "sessions": { "type": "array", "items": { "$ref": "#/$defs/SessionRecord" } },
+        "trials": { "type": "array", "items": { "$ref": "#/$defs/TrialRecord" } }
+      }
+    }
+  }
+}

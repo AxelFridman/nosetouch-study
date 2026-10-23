@@ -1,0 +1,500 @@
+/*
+ * Session runner, done screen, sandbox, PhoneFigure and SignalPlot. Imported by those screens.
+ * Uses the tokens of styles.css; adds hand colours, phone-figure colours and the live trial panel.
+ * Logical properties only (RTL-safe) except where a PHYSICAL side is meant (hand badge = body side).
+ */
+:root {
+  --hand-left: #6d28d9;
+  --hand-right: #c2410c;
+  --hand-ink: #ffffff;
+  --pf-frame: #1e293b;
+  --pf-screen: #e6eeff;
+  --pf-screen-ink: #2f5bea;
+  --pf-back: #475569;
+  --pf-back-2: #334155;
+  --pf-camera: #0f172a;
+  --pf-lens: #94a3b8;
+  --tp-ink: #ffffff;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --hand-left: #b99cff;
+    --hand-right: #ffa66b;
+    --hand-ink: #0b1020;
+    --pf-frame: #94a3b8;
+    --pf-screen: #dbe6ff;
+    --pf-screen-ink: #3355d6;
+    --pf-back: #3b4a63;
+    --pf-back-2: #56657f;
+    --pf-camera: #0b1020;
+    --pf-lens: #8090ab;
+    --tp-ink: #0b1020;
+  }
+}
+
+/* ── hand badge ─────────────────────────────────────────────── */
+.hand-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 16px;
+  border-radius: 999px;
+  font-weight: 800;
+  font-size: 1.05rem;
+  letter-spacing: 0.02em;
+  color: var(--hand-ink);
+  background: var(--hand-right);
+}
+.hand-badge.hand-left {
+  background: var(--hand-left);
+}
+.hand-badge-lg {
+  font-size: 1.35rem;
+  padding: 8px 22px;
+}
+
+/* ── phone figure ───────────────────────────────────────────── */
+.phone-figure {
+  position: relative;
+  display: inline-block;
+  flex: none;
+  max-width: 100%;
+}
+.phone-figure svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+.pf-body {
+  fill: var(--pf-frame);
+}
+.pf-screen {
+  fill: var(--pf-screen);
+}
+.pf-content {
+  fill: var(--pf-screen-ink);
+  opacity: 0.3;
+}
+.pf-notch,
+.pf-home {
+  fill: var(--pf-frame);
+}
+.pf-notch-line {
+  stroke: var(--pf-frame);
+}
+.pf-back {
+  fill: var(--pf-back);
+  stroke: var(--pf-frame);
+  stroke-width: 2.5;
+}
+.pf-camera {
+  fill: var(--pf-camera);
+}
+.pf-lens {
+  fill: var(--pf-lens);
+  stroke: var(--pf-camera);
+  stroke-width: 1.5;
+}
+.pf-flash {
+  fill: #fde68a;
+}
+.pf-logo {
+  fill: var(--pf-back-2);
+}
+.pf-arrow {
+  fill: var(--primary);
+  stroke: var(--primary);
+}
+.pf-label {
+  fill: var(--primary);
+  font: 700 13px var(--font);
+}
+.pf-question {
+  fill: var(--primary);
+  font: 800 68px var(--font);
+}
+/* physical side on purpose: the badge shows WHICH HAND, i.e. the participant's left or right */
+.pf-hand {
+  position: absolute;
+  bottom: 0;
+  padding: 2px 10px;
+  border-radius: 999px;
+  font-size: 0.78rem;
+  font-weight: 800;
+  color: var(--hand-ink);
+  background: var(--hand-right);
+}
+.pf-hand-left {
+  left: 0;
+  background: var(--hand-left);
+}
+.pf-hand-right {
+  right: 0;
+}
+
+/* ── signal plot ────────────────────────────────────────────── */
+.signal-plot {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.signal-plot-box {
+  width: 100%;
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  overflow: hidden;
+}
+.signal-plot-box canvas {
+  display: block;
+}
+.signal-plot-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  font-size: 0.82rem;
+  color: var(--muted);
+}
+.legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.legend-swatch {
+  display: inline-block;
+  width: 14px;
+  height: 4px;
+  border-radius: 2px;
+}
+
+/* ── session layout ─────────────────────────────────────────── */
+.session-center {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 12px;
+}
+.session-kicker {
+  font-size: 0.85rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.session-hold {
+  font-size: 1.45rem;
+  font-weight: 800;
+  line-height: 1.2;
+  margin: 0;
+}
+.session-sub {
+  color: var(--muted);
+  margin: 0;
+}
+.new-hand {
+  font-weight: 800;
+  color: var(--warn);
+}
+
+/* instruction of one trial: big, scannable rows */
+.instruction {
+  display: grid;
+  gap: 10px;
+}
+.instruction-row {
+  display: grid;
+  gap: 2px;
+  padding: 12px 14px;
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  border: 1px solid var(--border);
+}
+.instruction-row.is-special {
+  border-color: var(--warn);
+  background: var(--warn-soft);
+}
+.instruction-label {
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.instruction-value {
+  font-size: 1.3rem;
+  font-weight: 800;
+  line-height: 1.2;
+}
+.instruction-how {
+  color: var(--muted);
+  font-size: 0.95rem;
+}
+.instruction-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+/* The Ready screen: compact rows first, so that all four (Phone, Speed, Start, Movement) stay above
+   the sticky Ready button on common phone viewports (360×640 Android, 390×664 iPhone Safari). */
+.trial-ready {
+  gap: 10px;
+}
+.trial-ready .instruction {
+  gap: 6px;
+}
+.trial-ready .instruction-row {
+  gap: 1px;
+  padding: 7px 12px;
+}
+.trial-ready .instruction-label {
+  font-size: 0.72rem;
+  line-height: 1.25;
+}
+.trial-ready .instruction-value {
+  font-size: 1.15rem;
+}
+.trial-ready .instruction-how {
+  font-size: 0.9rem;
+  line-height: 1.3;
+}
+.ready-figure {
+  display: flex;
+  justify-content: center;
+}
+
+/* Short viewports (most phones in a browser tab): no figure on the Ready screen (the Phone row says
+   it in words and the block intro showed it large), a smaller one on the block intro, and a slimmer
+   Ready button, so that no instruction hides under the sticky footer. */
+@media (max-height: 699px) {
+  .ready-figure {
+    display: none;
+  }
+  /* PhoneFigure sizes itself inline */
+  .intro-figure .phone-figure {
+    width: 160px !important;
+    height: 160px !important;
+  }
+  .session-ready .screen-footer {
+    padding-top: 8px;
+    padding-bottom: calc(8px + env(safe-area-inset-bottom));
+  }
+  .session-ready .screen-footer .btn-xl {
+    min-height: 64px;
+  }
+}
+
+/* ── live trial panel (fills the whole screen while recording) ── */
+.trial-panel {
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 18px;
+  padding: calc(18px + env(safe-area-inset-top)) 18px calc(18px + env(safe-area-inset-bottom));
+  background: var(--tp-bg, var(--phase-wait));
+  color: var(--tp-ink);
+  text-align: center;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+  overscroll-behavior: none;
+}
+.trial-panel[data-tone='wait'] {
+  --tp-bg: var(--phase-wait);
+}
+.trial-panel[data-tone='go'] {
+  --tp-bg: var(--phase-go);
+}
+.trial-panel[data-tone='move'] {
+  --tp-bg: var(--phase-move);
+}
+.trial-panel[data-tone='done'] {
+  --tp-bg: var(--phase-done);
+}
+.trial-panel[data-tone='error'] {
+  --tp-bg: var(--phase-error);
+}
+.tp-top {
+  position: absolute;
+  inset-inline: 14px;
+  top: calc(12px + env(safe-area-inset-top));
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  font-weight: 700;
+  font-size: 0.95rem;
+  opacity: 0.92;
+}
+.tp-chip {
+  padding: 3px 12px;
+  border-radius: 999px;
+  border: 2px solid currentColor;
+  font-weight: 800;
+}
+/* speed · start position · variant between the chips; wraps instead of pushing them off screen */
+.tp-condition {
+  flex: 1;
+  min-width: 0;
+  text-align: center;
+}
+.tp-message {
+  font-size: clamp(2.6rem, 14vw, 5rem);
+  font-weight: 900;
+  line-height: 1.05;
+  margin: 0;
+  max-width: 14ch;
+  overflow-wrap: anywhere;
+}
+.tp-sub {
+  font-size: 1.15rem;
+  font-weight: 600;
+  opacity: 0.92;
+  max-width: 26ch;
+  margin: 0;
+}
+.tp-ring {
+  width: 132px;
+  height: 132px;
+}
+.tp-ring circle {
+  fill: none;
+  stroke-width: 12;
+}
+.tp-ring .tp-ring-track {
+  stroke: currentColor;
+  opacity: 0.25;
+}
+.tp-ring .tp-ring-value {
+  stroke: currentColor;
+  stroke-linecap: round;
+  transition: stroke-dashoffset 0.08s linear;
+}
+.tp-stop {
+  position: absolute;
+  inset-inline-end: 14px;
+  bottom: calc(14px + env(safe-area-inset-bottom));
+  overflow: hidden;
+  appearance: none;
+  min-width: 112px;
+  min-height: 48px;
+  padding: 8px 14px;
+  border-radius: 999px;
+  border: 2px solid currentColor;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-weight: 700;
+  font-size: 0.9rem;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+}
+.tp-stop:disabled {
+  opacity: 0.35;
+}
+.tp-stop-fill {
+  position: absolute;
+  inset: 0;
+  background: currentColor;
+  opacity: 0.3;
+  transform: scaleX(0);
+  transform-origin: left center;
+}
+[dir='rtl'] .tp-stop-fill {
+  transform-origin: right center;
+}
+.tp-stop.is-pressing .tp-stop-fill {
+  transform: scaleX(1);
+  transition: transform 0.8s linear;
+}
+.tp-stop-text {
+  position: relative;
+}
+
+/* ── review ─────────────────────────────────────────────────── */
+.review-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.review-duration {
+  font-size: 1.15rem;
+  font-weight: 700;
+}
+.review-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+.review-actions .btn-next {
+  grid-column: 1 / -1;
+}
+.flag-menu {
+  display: grid;
+  gap: 8px;
+}
+
+/* ── block break ────────────────────────────────────────────── */
+.break-cheer {
+  font-size: 2rem;
+  font-weight: 900;
+  margin: 0;
+}
+
+/* ── exit card ──────────────────────────────────────────────── */
+.exit-actions {
+  display: grid;
+  gap: 8px;
+}
+
+/* ── done ───────────────────────────────────────────────────── */
+.done-hero {
+  font-size: 3rem;
+  line-height: 1;
+}
+
+/* ── sandbox ────────────────────────────────────────────────── */
+.sandbox-stats {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0 16px;
+}
+.sandbox-state {
+  font-weight: 800;
+}
+.sandbox-state[data-state='armed'] {
+  color: var(--phase-go);
+}
+.sandbox-state[data-state='moving'] {
+  color: var(--phase-move);
+}
+.sandbox-state[data-state='ended'] {
+  color: var(--phase-done);
+}
+.sandbox-state[data-state='failed'] {
+  color: var(--phase-error);
+}
+.sandbox-movements {
+  font-variant-numeric: tabular-nums;
+}
+.sandbox-movements li {
+  padding: 4px 0;
+  border-bottom: 1px dashed var(--border);
+}
+.sandbox-movements li:last-child {
+  border-bottom: 0;
+}

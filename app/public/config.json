@@ -1,0 +1,25 @@
+{
+  "study_code": "nose-touch-v1",
+  "upload": {
+    "mode": "none",
+    "endpoint": "",
+    "study_key": ""
+  },
+  "upload_nickname": false,
+  "consent_version": "2026-10-v1",
+  "contact": {
+    "name": "",
+    "email": ""
+  },
+  "institution": {
+    "en": "",
+    "he": ""
+  },
+  "region": {
+    "en": "",
+    "he": ""
+  },
+  "default_language": "en",
+  "default_preset": "standard",
+  "min_age": 18
+}

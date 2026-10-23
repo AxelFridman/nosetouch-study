@@ -1,0 +1,31 @@
+# dependencies / builds
+node_modules/
+dist/
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+*.egg-info/
+
+# test output
+app/test-results/
+app/playwright-report/
+app/coverage/
+
+# NEVER commit participant data. Synthetic data is regenerated on demand.
+/data/
+analysis/data/*
+!analysis/data/README.md
+analysis/reports/*
+!analysis/reports/README.md
+server/received/
+
+# local overrides
+.env
+.env.*
+*.local.json
+
+# OS / editors
+.DS_Store
+Thumbs.db
+*.log
