@@ -1,6 +1,8 @@
 /*
  * Session runner, done screen, sandbox, PhoneFigure and SignalPlot. Imported by those screens.
- * Uses the tokens of styles.css; adds hand colours, phone-figure colours and the live trial panel.
+ * Uses the tokens of styles.css; adds hand colours, phone-figure colours, the live trial panel (read at
+ * arm's length: huge hand and speed words), the How-to card, block intros, the hand question, the
+ * pause sheet and the checkpoint.
  * Logical properties only (RTL-safe) except where a PHYSICAL side is meant (hand badge = body side).
  */
 :root {
@@ -327,14 +329,31 @@
 .tp-top {
   position: absolute;
   inset-inline: 14px;
-  top: calc(12px + env(safe-area-inset-top));
+  top: calc(10px + env(safe-area-inset-top));
+  display: grid;
+  gap: 6px;
+  font-weight: 700;
+  font-size: 0.95rem;
+  opacity: 0.95;
+}
+.tp-top-row {
   display: flex;
   justify-content: space-between;
   align-items: center;
   gap: 8px;
-  font-weight: 700;
-  font-size: 0.95rem;
-  opacity: 0.92;
+}
+/* progress of the session: a thin bar in the ink colour of the panel */
+.tp-progress {
+  height: 6px;
+  border-radius: 999px;
+  background: rgba(127, 127, 127, 0.35); /* browsers without color-mix (iOS < 16.2) */
+  background: color-mix(in srgb, currentColor 25%, transparent);
+  overflow: hidden;
+}
+.tp-progress > div {
+  height: 100%;
+  border-radius: inherit;
+  background: currentColor;
 }
 .tp-chip {
   padding: 3px 12px;
@@ -348,13 +367,62 @@
   min-width: 0;
   text-align: center;
 }
+/* the status line: GO!, Touch your nose, Hold…, Arm out again */
 .tp-message {
-  font-size: clamp(2.6rem, 14vw, 5rem);
+  font-size: clamp(1.9rem, min(10vw, 8vh), 3.4rem);
   font-weight: 900;
   line-height: 1.05;
   margin: 0;
-  max-width: 14ch;
+  max-width: 16ch;
   overflow-wrap: anywhere;
+}
+/* the hand and the speed: the largest words on the screen, readable at arm's length */
+.tp-words {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+}
+.tp-hand {
+  padding: 2px 22px;
+  border-radius: 18px;
+  background: var(--surface, #ffffff);
+  color: var(--hand-right);
+  font-size: clamp(2.4rem, min(15vw, 11vh), 4.8rem);
+  font-weight: 900;
+  line-height: 1.1;
+  letter-spacing: 0.02em;
+}
+.tp-hand-left {
+  color: var(--hand-left);
+}
+.tp-hand-any {
+  color: var(--text, #0f172a);
+  font-size: clamp(1.8rem, min(10vw, 8vh), 3.2rem);
+}
+.tp-speed {
+  font-size: clamp(2rem, min(12vw, 9vh), 3.8rem);
+  font-weight: 900;
+  line-height: 1;
+  letter-spacing: 0.04em;
+}
+/* a non-default start position or movement variant: what to do differently this time */
+.tp-variant {
+  display: grid;
+  gap: 2px;
+  margin: 0;
+  max-width: 32ch;
+  font-size: 1.05rem;
+  line-height: 1.3;
+}
+.tp-variant strong {
+  font-size: 1.35rem;
+}
+/* wrong grip: the instructed grip, on a light card so the figure keeps its colours */
+.tp-grip {
+  padding: 6px;
+  border-radius: var(--radius-sm);
+  background: var(--surface, #ffffff);
 }
 .tp-sub {
   font-size: 1.15rem;
@@ -364,8 +432,8 @@
   margin: 0;
 }
 .tp-ring {
-  width: 132px;
-  height: 132px;
+  width: 96px;
+  height: 96px;
 }
 .tp-ring circle {
   fill: none;
@@ -423,6 +491,133 @@
   position: relative;
 }
 
+/* sideways grips can rotate the page: on short landscape viewports the words sit side by side */
+@media (max-height: 480px) {
+  .trial-panel {
+    gap: 8px;
+    padding-top: calc(48px + env(safe-area-inset-top));
+  }
+  .tp-words {
+    flex-direction: row;
+    gap: 18px;
+  }
+  .tp-ring {
+    width: 64px;
+    height: 64px;
+  }
+  .tp-grip .phone-figure {
+    width: 72px !important;
+    height: 72px !important;
+  }
+  .tp-variant {
+    font-size: 0.95rem;
+  }
+}
+
+/* ── How-to card (the choice block) ─────────────────────────── */
+.howto {
+  gap: 14px;
+}
+.howto-demo {
+  width: 100%;
+}
+.howto-angled {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 12px;
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+}
+.howto-angled-figure {
+  flex: 0 0 132px;
+  max-width: 45%;
+}
+.howto-caption {
+  margin: 0;
+  font-weight: 700;
+}
+.howto-steps {
+  margin: 0;
+  padding-inline-start: 1.4em;
+  display: grid;
+  gap: 8px;
+  font-size: 1.08rem;
+  line-height: 1.35;
+}
+.howto-steps li::marker {
+  font-weight: 800;
+}
+
+/* ── block intro ────────────────────────────────────────────── */
+.block-intro {
+  gap: 10px;
+}
+.intro-hand {
+  margin: 0;
+  padding: 6px 18px;
+  border-radius: 999px;
+  color: var(--hand-ink);
+  background: var(--hand-right);
+  font-size: 1.45rem;
+  font-weight: 900;
+  line-height: 1.2;
+}
+.intro-hand.hand-left {
+  background: var(--hand-left);
+}
+.intro-gesture {
+  width: 100%;
+  max-width: 260px;
+}
+.intro-grip {
+  margin: 0;
+}
+.intro-varies {
+  margin: 0;
+  font-weight: 700;
+}
+
+/* ── hand question after the choice trial ───────────────────── */
+.hand-report {
+  gap: 16px;
+}
+.hand-question {
+  margin: 8px 0 0;
+  text-align: center;
+  font-size: 1.6rem;
+}
+/* physical order on purpose (dir="ltr" in the markup): the left hand's button is on the left */
+.hand-buttons {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+.hand-buttons .btn {
+  min-height: 112px;
+}
+.hand-choice {
+  font-size: 1.35rem;
+  font-weight: 900;
+}
+
+/* ── pause sheet ────────────────────────────────────────────── */
+.pause-reason {
+  font-size: 1.1rem;
+  font-weight: 600;
+}
+.pause-actions {
+  display: grid;
+  gap: 10px;
+}
+
+/* ── checkpoint (after the main part) ───────────────────────── */
+.checkpoint-body {
+  margin: 0;
+  font-size: 1.4rem;
+  font-weight: 800;
+}
+
 /* ── review ─────────────────────────────────────────────────── */
 .review-head {
   display: flex;
@@ -459,12 +654,6 @@
 .exit-actions {
   display: grid;
   gap: 8px;
-}
-
-/* ── done ───────────────────────────────────────────────────── */
-.done-hero {
-  font-size: 3rem;
-  line-height: 1;
 }
 
 /* ── sandbox ────────────────────────────────────────────────── */

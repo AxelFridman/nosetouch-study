@@ -17,7 +17,8 @@
  *    an answer we cannot understand).
  *  - mode 'none' or empty endpoint: never sends; flush() is a no-op returning remaining counts.
  *  - every request has a 45 s timeout (AbortController, plus a timer race in case an implementation
- *    ignores the signal). Never use sendBeacon/keepalive (64 KiB cap).
+ *    ignores the signal). The normal queue never uses sendBeacon/keepalive (64 KiB cap); only the
+ *    page-leave flush below does, for small records.
  *  - `confirmed` is true whenever ok is true (kept in OutboxItem for backends that cannot confirm).
  *  - `transient` (extra field) marks failures that are not about this record: network error,
  *    timeout, HTTP 5xx/429/408, a reply with retry: true (e.g. 'busy'), an unreadable reply.
@@ -31,18 +32,33 @@
  *    call upgrades the running one to ignore backoff). Items whose record no longer exists are
  *    dropped. A run re-lists the outbox after each pass (bounded), so items enqueued while it was
  *    uploading are not left waiting for the next trigger — e.g. the final session record saved right
- *    after the last trial.
+ *    after the last trial. A flush() call that arrives while a run is in flight also schedules ONE
+ *    follow-up run once that run ends (calls coalesce): the app calls flush() right after every
+ *    enqueue, and a record enqueued after the run's last listing must still go out at once, not at
+ *    the next 60 s tick.
  *    After a transient failure the run stops: the remaining items would fail the same way (and a
  *    dead endpoint would otherwise cost 45 s per item); they are retried at the next trigger.
  *    A refusal does not stop the run (it is about this record only).
  *    While navigator.onLine === false nothing is attempted (unless forced).
+ *  - flushOnLeave() (pagehide, visibilitychange → hidden; registered by start()): the page may be
+ *    about to be frozen or closed, and a normal request in flight would be cancelled. Every pending or
+ *    failed item (not refused, backoff ignored: it is the last chance) whose envelope is smaller than
+ *    KEEPALIVE_MAX_BYTES is sent with fetch(..., {keepalive: true}) while the bodies in flight stay
+ *    within that budget in total (browsers cap keepalive bodies at 64 KiB per page). The request is a
+ *    CORS simple request (no custom headers: text/plain), because keepalive requests may not be
+ *    preflighted; both backends parse the body whatever its content type. A readable success marks
+ *    the item sent (unless it was re-enqueued meanwhile: the store keeps the newer pending entry);
+ *    anything else leaves it queued (bigger records stay queued for the next visit). Items already
+ *    in flight with keepalive are not sent twice (pagehide right after visibilitychange). It never
+ *    counts a failed attempt and never stops the normal queue.
  *  - Refused (permanent) items are never retried automatically: a phone that still carries an old
  *    study key would otherwise re-send its whole queue every few minutes, forever. Only
  *    flush({force: true}) ("Upload now", e.g. after a reload picked up a new config.json) tries
  *    them again; success clears the flag, a transient failure hands the item back to the automatic
  *    retries, another refusal keeps it. A re-enqueue (new record content) starts a fresh item.
  *  - start(): flush now, on window 'online', on visibilitychange→visible, and every 60 s while
- *    failed/pending items exist; backoff per item: skip if attempts ≥ 1 and the last attempt was less
+ *    failed/pending items exist (plus flushOnLeave on pagehide and visibilitychange→hidden);
+ *    backoff per item: skip if attempts ≥ 1 and the last attempt was less
  *    than min(2^attempts · 5 s, 10 min) · (0.8 + 0.4·random) ago (jittered; flush({force:true})
  *    ignores backoff). One request in flight at a time per device (Apps Script allows ~30
  *    simultaneous executions per script owner in total).
@@ -58,6 +74,9 @@ export const UPLOAD_TIMEOUT_MS = 45_000;
 export const FLUSH_INTERVAL_MS = 60_000;
 export const BACKOFF_BASE_MS = 5_000;
 export const BACKOFF_MAX_MS = 10 * 60_000;
+/** Page-leave flush: largest envelope sent with keepalive, and the budget of all keepalive bodies in
+ *  flight together (browsers cap them at 64 KiB per page; a margin for headers). */
+export const KEEPALIVE_MAX_BYTES = 60 * 1024;
 /** Upper bound of outbox re-listings within one flush run (guards against an enqueue loop). */
 const MAX_PASSES = 5;
 
@@ -231,6 +250,36 @@ export async function sendEnvelope(
   }
 }
 
+/** UTF-8 size of a request body (what the keepalive budget counts). */
+export function utf8Bytes(text: string): number {
+  if (typeof TextEncoder === 'function') return new TextEncoder().encode(text).length;
+  return text.length * 3; // upper bound without TextEncoder
+}
+
+/**
+ * One envelope body sent with fetch keepalive (page leave, see the top): a CORS simple request with
+ * no custom headers, no timeout of its own (the page may be gone before any answer). The reply is
+ * judged like a normal upload's.
+ */
+export async function sendKeepalive(cfg: UploadConfig, body: string, fetchImpl?: typeof fetch): Promise<SendResult> {
+  if (!uploadEnabled(cfg)) return failure('upload disabled (mode none or no endpoint)', false);
+  const doFetch = fetchImpl ?? (typeof fetch === 'function' ? fetch : undefined);
+  if (!doFetch) return failure('fetch is not available', true);
+  try {
+    const res = await doFetch(cfg.endpoint.trim(), {
+      method: 'POST',
+      body,
+      keepalive: true,
+      mode: 'cors',
+      credentials: 'omit',
+      redirect: 'follow',
+    });
+    return interpretResponse(cfg.mode, res.status, res.ok, await res.text());
+  } catch (e) {
+    return failure(`keepalive upload error: ${errorMessage(e)}`, true);
+  }
+}
+
 export interface FlushReport {
   attempted: number;
   sent: number;
@@ -242,6 +291,8 @@ export interface FlushReport {
 
 export interface UploadQueue {
   flush(opts?: { force?: boolean }): Promise<FlushReport>;
+  /** The page-leave flush (see the top). Resolves with the number of keepalive requests started. */
+  flushOnLeave(): Promise<number>;
   start(): void;
   stop(): void;
   onChange(cb: (c: OutboxCounts) => void): () => void;
@@ -427,14 +478,23 @@ export function createUploadQueue(
     return { attempted, sent, failed, refused, counts };
   };
 
+  /** a flush() call arrived during the current run: run once more when it ends (see the top) */
+  let again = false;
+
   const flush = (o: { force?: boolean } = {}): Promise<FlushReport> => {
     if (running) {
       if (o.force) running.state.force = true;
+      again = true;
       return running.promise;
     }
+    again = false;
     const state = { force: !!o.force };
     const promise = run(state).finally(() => {
       running = null;
+      if (again) {
+        again = false;
+        void flush();
+      }
     });
     running = { promise, state };
     return promise;
@@ -444,21 +504,92 @@ export function createUploadQueue(
     void flush();
   };
 
+  // ── page-leave flush (keepalive) ──
+  const leaving = new Set<string>(); // item ids with a keepalive request in flight
+  let leavingBytes = 0;
+
+  const flushOnLeave = async (): Promise<number> => {
+    const cfg = config();
+    if (!cfg || !uploadEnabled(cfg)) return 0;
+    let items: OutboxItem[];
+    try {
+      items = orderForUpload((await store.listOutbox()).filter((i) => i.status !== 'sent'));
+    } catch {
+      return 0;
+    }
+    let started = 0;
+    for (const item of items) {
+      // claimed before the first await: pagehide right after visibilitychange must not send it twice
+      if (item.permanent || leaving.has(item.id)) continue;
+      leaving.add(item.id);
+      let inFlight = false;
+      try {
+        const record = await loadRecord(item);
+        if (record) {
+          const payload =
+            item.kind === 'session' && opts.redactSession ? opts.redactSession(record as SessionRecord) : record;
+          const body = JSON.stringify(buildEnvelope(item.kind, payload, cfg));
+          const bytes = utf8Bytes(body);
+          // too big for keepalive (or for what is left of the budget): it stays queued for the next visit
+          if (bytes < KEEPALIVE_MAX_BYTES && leavingBytes + bytes <= KEEPALIVE_MAX_BYTES) {
+            leavingBytes += bytes;
+            inFlight = true;
+            started++;
+            void sendKeepalive(cfg, body, opts.fetchImpl)
+              .then(async (res) => {
+                if (!res.ok) return; // stays queued: the normal queue (or the next visit) sends it
+                const at = new Date(now()).toISOString();
+                const { permanent: _previous, ...rest } = item;
+                await store.updateOutbox({
+                  ...rest,
+                  status: 'sent',
+                  attempts: item.attempts + 1,
+                  confirmed: res.confirmed,
+                  last_error: null,
+                  last_attempt_at: at,
+                  sent_at: at,
+                });
+                await refreshCounts();
+              })
+              .catch(() => undefined)
+              .finally(() => {
+                leaving.delete(item.id);
+                leavingBytes -= bytes;
+              });
+          }
+        }
+      } catch {
+        // one unreadable record must not keep the others from leaving
+      }
+      if (!inFlight) leaving.delete(item.id);
+    }
+    return started;
+  };
+
   return {
     flush,
+    flushOnLeave,
 
     start() {
       if (detach) return;
       const undo: (() => void)[] = [];
+      const leave = (): void => {
+        void flushOnLeave();
+      };
       const win = (globalThis as { window?: Window }).window;
       if (win && typeof win.addEventListener === 'function') {
         win.addEventListener('online', kick);
-        undo.push(() => win.removeEventListener('online', kick));
+        win.addEventListener('pagehide', leave);
+        undo.push(() => {
+          win.removeEventListener('online', kick);
+          win.removeEventListener('pagehide', leave);
+        });
       }
       const doc = (globalThis as { document?: Document }).document;
       if (doc && typeof doc.addEventListener === 'function') {
         const onVisibility = (): void => {
           if (doc.visibilityState === 'visible') kick();
+          else if (doc.visibilityState === 'hidden') leave();
         };
         doc.addEventListener('visibilitychange', onVisibility);
         undo.push(() => doc.removeEventListener('visibilitychange', onVisibility));

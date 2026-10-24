@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 // Collaborators implemented by other agents are replaced by simple fakes (tests/helpers/sessionFakes.ts).
 vi.mock('../src/core/protocol', async () => (await import('./helpers/sessionFakes')).protocolModule);
@@ -8,37 +8,76 @@ vi.mock('../src/core/sensors', async () => (await import('./helpers/sessionFakes
 vi.mock('../src/app/services', async () => (await import('./helpers/sessionFakes')).servicesModule);
 
 import { DEFAULT_SEGMENTATION_PARAMS, DEFAULT_STUDY_CONFIG } from '../src/core/constants';
-import { FLAT_SIGN_CONTRADICTS_ENGINE } from '../src/core/calibration';
-import type { CustomProtocolSpec, SensorSource, SessionRecord } from '../src/core/types';
+import { buildCalibration, FLAT_SIGN_CONTRADICTS_ENGINE, UPRIGHT_SIGN_CONTRADICTS_ENGINE } from '../src/core/calibration';
+import type {
+  CalibrationResult,
+  CustomProtocolSpec,
+  PlannedTrial,
+  SensorSource,
+  SessionRecord,
+  TrialRecord,
+} from '../src/core/types';
 import { createTapGuard, initialState, TAP_GUARD_MS, type ScreenId } from '../src/app/state';
 import { backTargetOf, getState, installHistory, navigate, setBackHandler, setState } from '../src/app/store';
-import { persistAttempt, saveForReview } from '../src/app/screens/SessionScreen';
+import {
+  createSessionRunner,
+  IDLE_MS,
+  persistAttempt,
+  RETRY_FLASH_MS,
+  saveForReview,
+  type RecorderStart,
+  type SessionRunner,
+  type UiAbort,
+} from '../src/app/sessionRunner';
 import {
   applyDecision,
   asFailedAttempt,
   asUnreviewed,
+  attemptSummary,
+  AUTO_ACCEPT_NOTE,
+  AUTO_REJECT_ORIENTATION_NOTE,
+  autoDecision,
+  awaitingHandReport,
+  blockChange,
   blockOf,
   blockPosition,
+  blockSpeeds,
   buildTrialIds,
   buildTrialOptions,
   calibrationForDetection,
   createSession,
+  endStatusOf,
   finishSession,
+  HAND_NOT_REPORTED_NOTE,
+  HAND_UNSURE_NOTE,
+  isChoiceTrial,
   nextAttemptNumber,
   nextPlannedTrial,
+  nextStep,
   plannedTrials,
+  progressOf,
   reconcileProgress,
+  REDO_REQUESTED_NOTE,
+  requiredTrialsLeft,
   resumeSession,
   REVIEW_INTERRUPTED_NOTE,
+  reviewModeOf,
+  revokeAccepted,
+  roundMinutes,
   saveAttempt,
+  secondsLeft,
   sessionMinutes,
+  setPosture,
   stepAfterAccept,
   trialSeed,
+  withReportedHand,
   type NewSessionOptions,
 } from '../src/app/sessionFlow';
+import { en } from '../src/i18n/en';
 import {
   FAKE_DEFAULT_CUSTOM_SPEC,
   FAKE_RANDOM_SEED,
+  FAKE_STREET,
   installFakeServices,
   makeCapabilities,
   makeDevice,
@@ -58,7 +97,13 @@ const TWO_TRIALS: CustomProtocolSpec = {
   include_free: false,
 };
 const CUSTOM: NewSessionOptions = { preset: 'custom', posture: 'standing', custom: TWO_TRIALS, seed: 7 };
+/** the fake street plan (helpers/sessionFakes.ts): odd seed → first hand A = left, B = right */
+const STREET: NewSessionOptions = { preset: 'street', posture: 'standing', custom: null, seed: 1 };
 const CONSENT_AT = '2026-10-23T10:05:00.000Z';
+/** trial timing of a trial whose return of the arm was observed */
+const RETURNED = { timing: { return_onset_ms: 2100, return_end_ms: 2600 } };
+/** the attempt never reached GO */
+const NO_GO = { status: 'aborted' as const, timing: { still_ms: null, go_ms: null } };
 
 let services: FakeServices;
 
@@ -78,6 +123,10 @@ beforeEach(() => {
   });
 });
 
+afterEach(() => {
+  vi.useRealTimers();
+});
+
 function fakeSource(kind: SensorSource['kind']): SensorSource {
   return {
     kind,
@@ -85,6 +134,24 @@ function fakeSource(kind: SensorSource['kind']): SensorSource {
     start: async () => undefined,
     stop: () => undefined,
   };
+}
+
+/** A real (not simulated) session on a phone with this browser engine. */
+function onEngine(s: SessionRecord, engine: 'webkit' | 'blink' | 'gecko' | 'unknown'): SessionRecord {
+  return { ...s, simulated: false, device: { ...s.device, engine } };
+}
+
+/**
+ * Lets every save already started finish (sessionFlow runs them one at a time), then the callbacks
+ * after them, a few rounds deep (a finish queued by a callback, and so on). Timer-free, so it also
+ * works under fake timers.
+ */
+async function settle(): Promise<void> {
+  for (let round = 0; round < 3; round++) {
+    const cur = getState().session;
+    if (cur) await attemptSummary(cur);
+    for (let i = 0; i < 20; i++) await Promise.resolve();
+  }
 }
 
 describe('createSession', () => {
@@ -110,18 +177,22 @@ describe('createSession', () => {
     expect(getState().session).toBe(s);
     expect(services.store.sessions.get(s.session_id)).toEqual(s);
     expect(services.store.outbox.get(`session:${s.session_id}`)?.status).toBe('pending');
+    expect(services.uploader.flush).toHaveBeenCalled(); // sent at once, not at the next timer tick
   });
 
-  it('redacts the nickname in the snapshot but not in the app state', async () => {
+  it('redacts the nickname in the snapshot unless the study uploads names', async () => {
+    setState({ config: { ...DEFAULT_STUDY_CONFIG, upload_nickname: false } });
     const s = await createSession(CUSTOM);
     expect(s.participant.nickname).toBeNull();
     expect(getState().participant?.nickname).toBe('Dana');
+    setState({ config: { ...DEFAULT_STUDY_CONFIG, upload_nickname: true } }); // v2: names are uploaded
+    expect((await createSession(CUSTOM)).participant.nickname).toBe('Dana');
   });
 
   it('keeps its own deep copy of the custom spec', async () => {
     const spec: CustomProtocolSpec = JSON.parse(JSON.stringify(TWO_TRIALS));
     const s = await createSession({ ...CUSTOM, custom: spec });
-    spec.orientations.push('upright_away');
+    spec.orientations.push('top_left_toward');
     spec.reps = 3;
     expect(s.protocol.custom).toEqual(TWO_TRIALS);
   });
@@ -148,6 +219,41 @@ describe('createSession', () => {
     setState({ participant: null });
     await expect(createSession(CUSTOM)).rejects.toThrow(/participant/);
     expect(services.store.sessions.size).toBe(0);
+  });
+
+  it('stores an empty implicit calibration (implicit_v1); a guided one from the state is kept', async () => {
+    const s = await createSession(STREET);
+    expect(s.calibration).toEqual({
+      method: 'implicit_v1',
+      performed_at: s.started_at,
+      flat: null,
+      upright: null,
+      gravity_sign: null,
+      gravity_magnitude: null,
+      upright_check: null,
+      gyro_bias_dps: null,
+      notes: [],
+      axis_check: null,
+    });
+    expectValid('SessionRecord', s);
+    const guided = buildCalibration({ performedAt: CONSENT_AT, flat: null, upright: null, axis: null });
+    setState({ calibration: guided });
+    expect((await createSession(STREET)).calibration).toEqual(guided);
+    expect(guided.method).toBe('guided_v1');
+  });
+
+  it('records the review mode: hands-free (auto) unless the researcher setting asks for a tap review', async () => {
+    const auto = await createSession(STREET);
+    expect(auto.settings.review_mode).toBe('auto');
+    expect(reviewModeOf(auto)).toBe('auto');
+    setState({ settings: { ...getState().settings, review_each_trial: true } });
+    const tap = await createSession(STREET);
+    expect(tap.settings.review_mode).toBe('tap');
+    expect(reviewModeOf(tap)).toBe('tap');
+    expectValid('SessionRecord', tap);
+    // sessions from before schema 1.2 have no review_mode: they were all reviewed with a tap
+    const { review_mode: _gone, ...v1Settings } = tap.settings;
+    expect(reviewModeOf({ ...tap, settings: v1Settings })).toBe('tap');
   });
 });
 
@@ -181,12 +287,71 @@ describe('plan queries', () => {
   });
 });
 
+describe('street plan helpers (tiers, the choice trial, the optional bonus)', () => {
+  it('the choice trial is the one whose hand is reported', async () => {
+    const s = await createSession(STREET);
+    const trials = plannedTrials(s);
+    expect(trials).toHaveLength(FAKE_STREET.trials);
+    expect(isChoiceTrial(trials[0].condition)).toBe(true);
+    expect(trials.slice(1).every((t) => !isChoiceTrial(t.condition))).toBe(true);
+  });
+
+  it('blockChange: what the intro must say (hand and grip changes, the first block after the basics)', async () => {
+    const s = await createSession(STREET);
+    expect(blockChange(s, 0)).toEqual({ first: true, handChanged: true, gripChanged: true, afterBasics: false });
+    // after the choice block the hand and grip are always announced (the participant chose them)
+    expect(blockChange(s, 1)).toEqual({ first: false, handChanged: true, gripChanged: true, afterBasics: false });
+    expect(blockChange(s, 2)).toEqual({ first: false, handChanged: true, gripChanged: false, afterBasics: false });
+    // same hand, new grip; the first block after tier 1
+    expect(blockChange(s, 3)).toEqual({ first: false, handChanged: false, gripChanged: true, afterBasics: true });
+    expect(blockChange(s, 4)).toMatchObject({ handChanged: true, gripChanged: true, afterBasics: false });
+    expect(blockSpeeds(blockOf(s, 2)!)).toEqual(['natural', 'slow']);
+  });
+
+  it('nextStep: the chain goes on inside a block; another block needs its intro; the bonus needs the checkpoint', async () => {
+    const s = await createSession(STREET);
+    expect(nextStep(s, 2, 1, false)).toBe('trial'); // trial 2 is in block 1
+    expect(nextStep(s, 3, 1, false)).toBe('intro'); // trial 3 opens block 2
+    expect(nextStep(s, 2, null, false)).toBe('intro'); // after a pause or a reload: the intro first
+    expect(nextStep(s, FAKE_STREET.firstOptionalTrial, 4, false)).toBe('checkpoint');
+    expect(nextStep(s, FAKE_STREET.firstOptionalTrial, 4, true)).toBe('intro');
+    expect(nextStep(s, FAKE_STREET.trials, 6, true)).toBe('finished');
+  });
+
+  it('progress and the end status count the non-optional blocks (the bonus only after opting in)', async () => {
+    const s = await createSession(STREET);
+    expect(progressOf(s, 0, false)).toEqual({ done: 0, total: FAKE_STREET.required });
+    expect(progressOf(s, 3, false)).toEqual({ done: 3, total: FAKE_STREET.required });
+    expect(progressOf(s, 8, true)).toEqual({ done: 8, total: FAKE_STREET.trials });
+    expect(requiredTrialsLeft(s)).toBe(FAKE_STREET.required);
+    const at = (i: number): SessionRecord => ({ ...s, progress: { ...s.progress, next_trial_index: i } });
+    expect(requiredTrialsLeft(at(5))).toBe(2);
+    expect(endStatusOf(at(FAKE_STREET.required - 1))).toBe('ended_early');
+    expect(endStatusOf(at(FAKE_STREET.firstOptionalTrial))).toBe('completed');
+    expect(endStatusOf(at(FAKE_STREET.trials))).toBe('completed');
+  });
+
+  it('secondsLeft follows the estimateMinutes model (6.5 / 5.5 / 10 s per trial, +2 s to read, 6 s per intro)', async () => {
+    const s = await createSession(STREET);
+    // required trials 1…6: natural, fast | natural, slow | natural | natural+tilted_touch (read); 3 more intros
+    const required = 6.5 + 5.5 + 6.5 + 10 + 6.5 + (6.5 + 2) + 3 * 6;
+    expect(secondsLeft(s, 1, 'exclude')).toBeCloseTo(required, 9);
+    expect(secondsLeft(s, 1, 'only')).toBeCloseTo(6.5 + 5.5 + 2 * 6, 9);
+    expect(secondsLeft(s, 1, 'include')).toBeCloseTo(required + 6.5 + 5.5 + 2 * 6, 9);
+    expect(secondsLeft(s, FAKE_STREET.trials, 'include')).toBe(0);
+    expect(roundMinutes(89)).toBe(1);
+    expect(roundMinutes(29)).toBe(0);
+    expect(roundMinutes(-5)).toBe(0);
+  });
+});
+
 describe('saveAttempt', () => {
   it('accepted attempt: counts it, advances, saves, enqueues both records and kicks an upload', async () => {
     const s0 = await createSession(CUSTOM);
     const [p0] = plannedTrials(s0);
     const t0 = makeTrialRecord(s0, p0, 1);
     expectValid('TrialRecord', t0);
+    services.uploader.flush.mockClear();
     const s1 = await saveAttempt(s0, t0);
     expectValid('SessionRecord', s1);
     expect(s1.progress).toEqual({ next_trial_index: 1, n_attempts: 1, n_accepted: 1 });
@@ -196,7 +361,7 @@ describe('saveAttempt', () => {
     expect(services.store.sessions.get(s0.session_id)?.progress).toEqual(s1.progress);
     expect(services.store.outbox.get(`trial:${t0.trial_id}`)?.status).toBe('pending');
     expect(services.store.outbox.get(`session:${s0.session_id}`)?.status).toBe('pending');
-    expect(services.uploader.flush).toHaveBeenCalled();
+    expect(services.uploader.flush).toHaveBeenCalledTimes(1); // every save is sent at once
   });
 
   it('not accepted (redo / failed): counts the attempt but stays on the same trial', async () => {
@@ -207,6 +372,13 @@ describe('saveAttempt', () => {
     const s2 = await saveAttempt(s1, makeTrialRecord(s0, p0, 2, { status: 'no_movement' }));
     expect(s2.progress).toEqual({ next_trial_index: 0, n_attempts: 2, n_accepted: 0 });
     expect(nextPlannedTrial(s2)?.trial_index).toBe(0);
+  });
+
+  it('skip: a trial that is not accepted moves on all the same (the choice trial answered "not sure")', async () => {
+    const s0 = await createSession(STREET);
+    const [p0] = plannedTrials(s0);
+    const s1 = await saveAttempt(s0, makeTrialRecord(s0, p0, 1, { accepted: false }), { skip: true });
+    expect(s1.progress).toEqual({ next_trial_index: 1, n_attempts: 1, n_accepted: 0 });
   });
 
   it('re-saving the same attempt never double-counts; acceptance can still change', async () => {
@@ -257,6 +429,75 @@ describe('saveAttempt', () => {
   });
 });
 
+describe('implicit calibration through saveAttempt (implicit_v1)', () => {
+  /** a real Android / iPhone session (the engine prior applies) whose first block is upright */
+  async function realSession(engine: 'blink' | 'webkit'): Promise<SessionRecord> {
+    const s = onEngine(await createSession(CUSTOM), engine);
+    setState({ session: s });
+    return s;
+  }
+
+  it('the first complete, still, upright trial fills the sign, the magnitude and the check (Android)', async () => {
+    const s0 = await realSession('blink');
+    const [p0] = plannedTrials(s0);
+    const s1 = await saveAttempt(s0, makeTrialRecord(s0, p0, 1, { simulated: false }));
+    expect(s1.calibration).toMatchObject({ method: 'implicit_v1', gravity_sign: 1, upright_check: 'ok', notes: [] });
+    expect(s1.calibration?.gravity_magnitude).toBeCloseTo(9.81, 6);
+    expect(s1.calibration?.upright?.still).toBe(true);
+    expect(s1.calibration?.gyro_bias_dps).toBeNull(); // in-hand means are tremor, never the gyroscope's bias
+    expect(s1.calibration?.axis_check).toBeNull();
+    expect(services.store.sessions.get(s0.session_id)?.calibration).toEqual(s1.calibration);
+    expectValid('SessionRecord', s1);
+    // the next upright trial changes nothing, and detection then uses the stored object itself
+    const s2 = await saveAttempt(s1, makeTrialRecord(s0, plannedTrials(s0)[1], 1, { simulated: false, accgY: -9.81 }));
+    expect(s2.calibration).toEqual(s1.calibration);
+    expect(calibrationForDetection(s2)).toBe(s2.calibration);
+  });
+
+  it('an iPhone reports upright as −9.81: sign −1 is ok there; +1 is noted and not trusted', async () => {
+    const ios = await realSession('webkit');
+    const [p0] = plannedTrials(ios);
+    const ok = await saveAttempt(ios, makeTrialRecord(ios, p0, 1, { simulated: false, accgY: -9.81 }));
+    expect(ok.calibration).toMatchObject({ gravity_sign: -1, upright_check: 'ok', notes: [] });
+
+    const other = await realSession('webkit');
+    const odd = await saveAttempt(other, makeTrialRecord(other, plannedTrials(other)[0], 1, { simulated: false }));
+    expect(odd.calibration).toMatchObject({ gravity_sign: 1, upright_check: 'inverted', notes: [UPRIGHT_SIGN_CONTRADICTS_ENGINE] });
+    expect(calibrationForDetection(odd)?.gravity_sign).toBe(-1); // the engine's sign stays in charge
+    expect(odd.calibration?.gravity_sign).toBe(1); // stored as measured (the analysis decides)
+  });
+
+  it('a simulated trial has no engine prior (the simulator is an Android phone whatever runs it)', async () => {
+    const s0 = await realSession('webkit');
+    const s1 = await saveAttempt(s0, makeTrialRecord(s0, plannedTrials(s0)[0], 1, { simulated: true }));
+    expect(s1.calibration).toMatchObject({ gravity_sign: 1, upright_check: 'ok', notes: [] });
+  });
+
+  it('waits for a usable upright hold: not complete, another grip detected, not upright, moving', async () => {
+    const s0 = await realSession('blink');
+    const [p0] = plannedTrials(s0);
+    let s = await saveAttempt(s0, makeTrialRecord(s0, p0, 1, { simulated: false, status: 'no_movement' }));
+    expect(s.calibration?.upright).toBeNull();
+    s = await saveAttempt(s, makeTrialRecord(s0, p0, 2, { simulated: false, orientation_match: false, accgY: 2 }));
+    expect(s.calibration?.upright).toBeNull(); // rejected for its grip: no upright hold, the next one counts
+    const moving = makeTrialRecord(s0, p0, 3, { simulated: false });
+    moving.streams.motion.accg_x = moving.streams.motion.accg_x.map((_, i) => (i % 2 === 0 ? 0.8 : -0.8));
+    s = await saveAttempt(s, moving);
+    expect(s.calibration?.upright).toBeNull();
+    s = await saveAttempt(s, makeTrialRecord(s0, p0, 4, { simulated: false }));
+    expect(s.calibration).toMatchObject({ gravity_sign: 1, upright_check: 'ok' });
+  });
+
+  it('the free (choice) trial is never an upright hold', async () => {
+    const s0 = await createSession(STREET);
+    const s1 = await saveAttempt(s0, makeTrialRecord(s0, plannedTrials(s0)[0], 1));
+    expect(s1.calibration?.upright).toBeNull();
+    // the first upright trial after it is
+    const s2 = await saveAttempt(s1, makeTrialRecord(s0, plannedTrials(s0)[1], 1));
+    expect(s2.calibration?.gravity_sign).toBe(1);
+  });
+});
+
 describe('nextAttemptNumber', () => {
   it('is 1 + the stored attempts of that planned trial', async () => {
     const s0 = await createSession(CUSTOM);
@@ -273,11 +514,29 @@ describe('nextAttemptNumber', () => {
     await services.store.saveTrial(makeTrialRecord(s0, plannedTrials(s0)[0], 1));
     expect(await nextAttemptNumber(s0, 0)).toBe(2);
   });
+
+  it('attemptSummary: counts per planned trial, the ids, the latest attempt and the latest accepted one', async () => {
+    const s0 = await createSession(CUSTOM);
+    const [p0, p1] = plannedTrials(s0);
+    const a = makeTrialRecord(s0, p0, 1, { created_at: '2026-10-23T10:00:01.000Z' });
+    const b = makeTrialRecord(s0, p1, 1, { status: 'no_movement', created_at: '2026-10-23T10:00:09.000Z' });
+    await saveAttempt(s0, a);
+    await saveAttempt(s0, b);
+    const sum = await attemptSummary(s0);
+    expect([...sum.counts]).toEqual([
+      [0, 1],
+      [1, 1],
+    ]);
+    expect(sum.ids).toEqual(new Set([a.trial_id, b.trial_id]));
+    expect(sum.latest?.trial_id).toBe(b.trial_id);
+    expect(sum.latestAccepted?.trial_id).toBe(a.trial_id);
+  });
 });
 
 describe('finishSession', () => {
-  it('stamps the end, saves, enqueues and is final', async () => {
+  it('stamps the end, saves, enqueues, uploads and is final', async () => {
     const s0 = await createSession(CUSTOM);
+    services.uploader.flush.mockClear();
     const done = await finishSession(s0, 'completed');
     expectValid('SessionRecord', done);
     expect(done.status).toBe('completed');
@@ -286,6 +545,7 @@ describe('finishSession', () => {
     expect(getState().session).toBe(done);
     expect(services.store.sessions.get(s0.session_id)?.status).toBe('completed');
     expect(services.store.outbox.get(`session:${s0.session_id}`)?.status).toBe('pending');
+    expect(services.uploader.flush).toHaveBeenCalledTimes(1);
     const again = await finishSession(s0, 'abandoned');
     expect(again.status).toBe('completed');
     expect(again.ended_at).toBe(done.ended_at);
@@ -297,6 +557,73 @@ describe('finishSession', () => {
     const ended = await finishSession(s0, 'abandoned');
     expect(ended.status).toBe('abandoned');
     expect(ended.progress).toEqual(s1.progress);
+  });
+
+  it('endStatusOf picks completed / ended_early from the freshest session (ended_early is schema-valid)', async () => {
+    const s0 = await createSession(STREET);
+    await saveAttempt(s0, makeTrialRecord(s0, plannedTrials(s0)[0], 1)); // s0 is stale from here on
+    const early = await finishSession(s0, endStatusOf);
+    expect(early.status).toBe('ended_early');
+    expect(early.progress.next_trial_index).toBe(1);
+    expectValid('SessionRecord', early);
+
+    const s1 = await createSession(STREET);
+    let s = s1;
+    for (const p of plannedTrials(s1).slice(0, FAKE_STREET.required)) s = await saveAttempt(s, makeTrialRecord(s1, p, 1));
+    expect((await finishSession(s1, endStatusOf)).status).toBe('completed');
+  });
+});
+
+describe('revokeAccepted ("Redo last movement", "Last one was the wrong hand")', () => {
+  it('re-saves the trial as not accepted, counts one accepted less and re-queues it as the next trial', async () => {
+    const s0 = await createSession(CUSTOM);
+    const [p0] = plannedTrials(s0);
+    const t = makeTrialRecord(s0, p0, 1);
+    await saveAttempt(s0, t);
+    services.uploader.flush.mockClear();
+    const s1 = await revokeAccepted(s0, t.trial_id, 'wrong_hand');
+    expect(s1.progress).toEqual({ next_trial_index: 0, n_attempts: 1, n_accepted: 0 });
+    const stored = services.store.trials.get(t.trial_id)!;
+    expect(stored.outcome).toMatchObject({ accepted: false, participant_flag: 'wrong_hand', note: REDO_REQUESTED_NOTE });
+    expectValid('TrialRecord', stored);
+    expect(services.store.outbox.get(`trial:${t.trial_id}`)?.status).toBe('pending');
+    expect(services.uploader.flush).toHaveBeenCalled();
+    expect(getState().session).toBe(s1);
+    // the re-run is attempt 2 of the same planned trial
+    expect(await nextAttemptNumber(s1, 0)).toBe(2);
+    // Redo (no flag)
+    const s2 = await saveAttempt(s1, makeTrialRecord(s0, p0, 2));
+    const t2 = [...services.store.trials.values()].find((x) => x.attempt === 2)!;
+    const s3 = await revokeAccepted(s2, t2.trial_id);
+    expect(services.store.trials.get(t2.trial_id)?.outcome).toMatchObject({ accepted: false, participant_flag: null });
+    expect(s3.progress).toEqual({ next_trial_index: 0, n_attempts: 2, n_accepted: 0 });
+  });
+
+  it('an older trial is never re-queued over later ones; refuses unknown trials and ended sessions', async () => {
+    const s0 = await createSession(CUSTOM);
+    const [p0, p1] = plannedTrials(s0);
+    const a = makeTrialRecord(s0, p0, 1);
+    await saveAttempt(s0, a);
+    await saveAttempt(s0, makeTrialRecord(s0, p1, 1));
+    const s1 = await revokeAccepted(s0, a.trial_id);
+    expect(s1.progress).toEqual({ next_trial_index: 2, n_attempts: 2, n_accepted: 1 });
+    await expect(revokeAccepted(s1, 'nope')).rejects.toThrow(/no such trial/);
+    await finishSession(s1, 'completed');
+    await expect(revokeAccepted(s1, a.trial_id)).rejects.toThrow(/ended/);
+  });
+});
+
+describe('setPosture (the "I\'m sitting" toggle)', () => {
+  it('sets the protocol posture and every planned condition; nothing else changes', async () => {
+    const s0 = await createSession(STREET);
+    const s1 = await setPosture(s0, 'sitting');
+    expect(s1.protocol.posture).toBe('sitting');
+    expect(plannedTrials(s1).every((t) => t.condition.posture === 'sitting')).toBe(true);
+    expect(s1.protocol.plan.map((b) => b.trials.length)).toEqual(s0.protocol.plan.map((b) => b.trials.length));
+    expect(services.store.sessions.get(s0.session_id)?.protocol.posture).toBe('sitting');
+    expectValid('SessionRecord', s1);
+    expect(await setPosture(s1, 'sitting')).toBe(s1); // unchanged: the same object
+    expect((await setPosture(s1, 'standing')).protocol.posture).toBe('standing');
   });
 });
 
@@ -382,11 +709,13 @@ describe('trial set-up helpers', () => {
     const o = buildTrialOptions(s, p0, 2, { source: fakeSource('simulated'), cues, trialId: 'tid' });
     expect(o.params.onset_sustain_ms).toBe(40); // fast override from resolveParams
     expect(o.condition).toEqual(p0.condition);
-    expect(o.calibration).toBe(s.calibration);
+    expect(o.calibration).toBe(s.calibration); // nothing to change (simulated, sign unknown): the stored object
     expect(o.ids.attempt).toBe(2);
     expect(o.ids.trial_id).toBe('tid');
     expect(o.simulated).toBe(true);
     expect(o.cues).toBe(cues);
+    // a tap-started trial by default: ready cue, no return wait, no grip gate
+    expect(o).toMatchObject({ readyCue: true, awaitReturn: false, gripGate: false });
     const again = buildTrialOptions(s, p0, 2, { source: fakeSource('simulated'), cues });
     expect([o.rng(), o.rng(), o.rng()]).toEqual([again.rng(), again.rng(), again.rng()]);
     const other = buildTrialOptions(s, p0, 3, { source: fakeSource('browser'), cues });
@@ -394,11 +723,24 @@ describe('trial set-up helpers', () => {
     expect(other.rng()).not.toBe(buildTrialOptions(s, p0, 2, { source: fakeSource('browser'), cues }).rng());
   });
 
+  it('buildTrialOptions passes the hands-free options; the grip gate needs a known gravity sign and a grip', async () => {
+    const s0 = await createSession(STREET);
+    const [choice, upright] = plannedTrials(s0);
+    const deps = { source: fakeSource('browser'), cues: { play: vi.fn() } };
+    const chained = { ...deps, readyCue: false, awaitReturn: true, gripGate: true };
+    // simulated, before the first upright hold: no sign yet → no gate (a wrong sign must never stall GO)
+    expect(buildTrialOptions(s0, upright, 1, chained)).toMatchObject({ readyCue: false, awaitReturn: true, gripGate: false });
+    const android = onEngine(s0, 'blink'); // the engine prior gives the sign
+    expect(buildTrialOptions(android, upright, 1, chained).gripGate).toBe(true);
+    expect(buildTrialOptions(android, choice, 1, chained).gripGate).toBe(false); // never for 'free'
+    expect(buildTrialOptions(android, upright, 1, deps).gripGate).toBe(false); // only when asked
+    expect(buildTrialOptions(onEngine(s0, 'unknown'), upright, 1, chained).gripGate).toBe(false);
+  });
+
   it('orientation detection does not trust a flat sign that contradicts the engine (screen-down calibration)', async () => {
     const s0 = await createSession({ ...CUSTOM, custom: TWO_TRIALS });
     const contradicted: SessionRecord = {
-      ...s0,
-      device: { ...s0.device, engine: 'blink' },
+      ...onEngine(s0, 'blink'),
       calibration: {
         performed_at: s0.started_at,
         flat: null,
@@ -421,38 +763,38 @@ describe('trial set-up helpers', () => {
     expect(calibrationForDetection(unknown)?.gravity_sign).toBeNull();
   });
 
-  it('orientation detection uses the engine sign when calibration was skipped or measured no sign', async () => {
+  it('orientation detection uses the engine sign while no sign is known (no calibration, or none measured yet)', async () => {
     const s0 = await createSession({ ...CUSTOM, custom: TWO_TRIALS });
-    const skipped: SessionRecord = { ...s0, device: { ...s0.device, engine: 'webkit' }, calibration: null };
+    const skipped: SessionRecord = { ...onEngine(s0, 'webkit'), calibration: null };
     const p0 = plannedTrials(skipped)[0];
     const o = buildTrialOptions(skipped, p0, 1, { source: fakeSource('browser'), cues: { play: vi.fn() } });
     expect(o.calibration?.gravity_sign).toBe(-1); // WebKit's known sign, not the W3C default
     expect(skipped.calibration).toBeNull(); // nothing is stored
-    const android: SessionRecord = { ...skipped, device: { ...skipped.device, engine: 'blink' } };
-    expect(calibrationForDetection(android)?.gravity_sign).toBe(1);
-    const unknown: SessionRecord = { ...skipped, device: { ...skipped.device, engine: 'unknown' } };
-    expect(calibrationForDetection(unknown)).toBeNull();
+    expect(calibrationForDetection(onEngine(skipped, 'blink'))?.gravity_sign).toBe(1);
+    expect(calibrationForDetection(onEngine(skipped, 'unknown'))).toBeNull();
+
+    // the v2 session: implicit_v1, nothing measured yet
+    const implicit: SessionRecord = onEngine(s0, 'webkit');
+    expect(implicit.calibration?.method).toBe('implicit_v1');
+    expect(calibrationForDetection(implicit)).toEqual({ ...implicit.calibration, gravity_sign: -1 });
+    expect(implicit.calibration?.gravity_sign).toBeNull(); // the stored calibration is unchanged
 
     const noSign: SessionRecord = {
       ...skipped,
-      calibration: {
-        performed_at: s0.started_at,
-        flat: null,
-        upright: null,
-        gravity_sign: null, // the flat step failed (moving, not flat)
-        gravity_magnitude: null,
-        upright_check: null,
-        gyro_bias_dps: null,
-        notes: ['flat: moving'],
-        axis_check: null,
-      },
+      calibration: { ...(implicit.calibration as CalibrationResult), method: undefined, notes: ['flat: moving'] },
     };
     expect(calibrationForDetection(noSign)?.gravity_sign).toBe(-1);
     expect(calibrationForDetection(noSign)?.notes).toEqual(['flat: moving']);
-    expect(noSign.calibration?.gravity_sign).toBeNull(); // the stored calibration is unchanged
 
     const measured: SessionRecord = { ...noSign, calibration: { ...noSign.calibration!, gravity_sign: -1, notes: [] } };
     expect(calibrationForDetection(measured)).toBe(measured.calibration); // a trusted measurement passes through
+  });
+
+  it('a simulated session ignores the engine prior: its data follows the simulator, not the browser', async () => {
+    const s0 = await createSession(CUSTOM); // simulated
+    const onIphone: SessionRecord = { ...s0, device: { ...s0.device, engine: 'webkit' } };
+    expect(calibrationForDetection(onIphone)).toBe(onIphone.calibration); // sign unknown, nothing changes
+    expect(calibrationForDetection({ ...onIphone, calibration: null })).toBeNull();
   });
 
   it('applyDecision / asUnreviewed / asFailedAttempt', async () => {
@@ -478,9 +820,44 @@ describe('trial set-up helpers', () => {
     expect(t.quality.warnings).toEqual([]);
     expect(asFailedAttempt(t, null).quality.warnings).toEqual([]);
   });
+
+  it('autoDecision: complete → accepted unless another grip was detected; an unknown match never rejects', async () => {
+    const s = await createSession(STREET);
+    const p = plannedTrials(s)[1];
+    const ok = autoDecision(makeTrialRecord(s, p, 1, { accepted: false }));
+    expect(ok.outcome).toMatchObject({ status: 'complete', accepted: true, participant_flag: null, note: AUTO_ACCEPT_NOTE });
+    expectValid('TrialRecord', ok);
+    expect(autoDecision(makeTrialRecord(s, p, 1, { orientation_match: null })).outcome.accepted).toBe(true);
+    const wrong = autoDecision(makeTrialRecord(s, p, 1, { orientation_match: false }));
+    expect(wrong.outcome).toMatchObject({ accepted: false, note: AUTO_REJECT_ORIENTATION_NOTE });
+    const failed = makeTrialRecord(s, p, 1, { status: 'no_movement' });
+    expect(autoDecision({ ...failed, outcome: { ...failed.outcome, accepted: true, note: 'x' } }).outcome).toMatchObject({
+      accepted: false,
+      note: 'x',
+    });
+  });
+
+  it('the choice trial: saved unanswered first, then with the reported hand (hand_source reported)', async () => {
+    const s = await createSession(STREET);
+    const p0 = plannedTrials(s)[0];
+    const rec = makeTrialRecord(s, p0, 1);
+    expect(rec.condition).toMatchObject({ hand: 'left', hand_source: 'reported' }); // the plan's placeholder
+    const waiting = awaitingHandReport(rec);
+    expect(waiting.outcome).toMatchObject({ accepted: false, note: HAND_NOT_REPORTED_NOTE });
+    const right = withReportedHand(waiting, 'right');
+    expect(right.condition).toMatchObject({ hand: 'right', hand_source: 'reported' });
+    expect(right.outcome).toMatchObject({ accepted: true, participant_flag: null, note: null });
+    expectValid('TrialRecord', right);
+    const unsure = withReportedHand(waiting, 'unsure');
+    expect(unsure.condition.hand).toBe('left');
+    expect(unsure.outcome).toMatchObject({ accepted: false, participant_flag: 'other_problem', note: HAND_UNSURE_NOTE });
+    // an incomplete free trial cannot be accepted, whatever the answer
+    const failed = makeTrialRecord(s, p0, 1, { status: 'too_long' });
+    expect(withReportedHand(failed, 'left').outcome.accepted).toBe(false);
+  });
 });
 
-describe('a complete attempt is saved before its review opens (SessionScreen)', () => {
+describe('a complete attempt is saved before its review opens (tap review mode)', () => {
   it('is stored at once as not accepted; the decision re-saves the same trial and counts it once', async () => {
     const s0 = await createSession(CUSTOM);
     const [p0] = plannedTrials(s0);
@@ -561,6 +938,513 @@ describe('tap guard (double taps on buttons that replace each other)', () => {
   });
 });
 
+// ───────────────────────────── the session runner (hands-free chain, end to end) ─────────────────────────────
+
+interface FakeRun {
+  planned: PlannedTrial;
+  attempt: number;
+  o: RecorderStart;
+}
+
+/**
+ * The trial recorder as the runner sees it: start() records the run; the test ends the current run
+ * with a record built for it (makeTrialRecord) — what the TrialController would deliver.
+ */
+function fakeRecorder() {
+  const runs: FakeRun[] = [];
+  const aborts: UiAbort[] = [];
+  let running = false;
+  return {
+    runs,
+    aborts,
+    port: {
+      start: (_s: SessionRecord, planned: PlannedTrial, attempt: number, o: RecorderStart) => {
+        if (running) throw new Error('a trial is already running');
+        runs.push({ planned, attempt, o });
+        running = true;
+      },
+      abort: (reason: UiAbort) => void aborts.push(reason),
+      isRunning: () => running,
+    },
+    get last(): FakeRun {
+      return runs[runs.length - 1];
+    },
+    get running(): boolean {
+      return running;
+    },
+    /** the current run ends with a record (complete with the arm's return observed, unless overridden) */
+    end(runner: SessionRunner, overrides: Parameters<typeof makeTrialRecord>[3] = RETURNED, uiAbort: UiAbort | null = null): TrialRecord {
+      const run = runs[runs.length - 1];
+      if (!running) throw new Error('no trial is running');
+      running = false;
+      const rec = makeTrialRecord(getState().session!, run.planned, run.attempt, overrides);
+      runner.finished(rec, uiAbort);
+      return rec;
+    },
+  };
+}
+
+type Recorder = ReturnType<typeof fakeRecorder>;
+
+/** A street session on screen: the runner has read the stored attempts. */
+async function streetRunner(opts: NewSessionOptions = STREET): Promise<{ session: SessionRecord; runner: SessionRunner; rec: Recorder }> {
+  const session = await createSession(opts);
+  const rec = fakeRecorder();
+  const runner = createSessionRunner(rec.port);
+  runner.enter();
+  await settle();
+  return { session, runner, rec };
+}
+
+/** The How-to card's tap, the free trial, the hand question (answered left): the first block's intro. */
+async function throughChoice(runner: SessionRunner, rec: Recorder): Promise<TrialRecord> {
+  runner.blockStart();
+  const choice = rec.end(runner);
+  await runner.answerHand('left');
+  await settle();
+  return choice;
+}
+
+/** Taps every intro, answers the hand question, completes every trial — until `stop` says so. */
+async function drive(runner: SessionRunner, rec: Recorder, stop: (r: SessionRunner) => boolean): Promise<void> {
+  for (let i = 0; i < 100 && !stop(runner); i++) {
+    const v = runner.state().view;
+    if (v.kind === 'intro') runner.blockStart();
+    else if (v.kind === 'hand') await runner.answerHand('left');
+    else if (v.kind === 'recording' && rec.running) rec.end(runner);
+    // anything else: a save or the finish is under way
+    await settle();
+  }
+  if (!stop(runner)) throw new Error(`stuck at ${runner.state().view.kind}`);
+}
+
+const stored = (id: string): TrialRecord => services.store.trials.get(id)!;
+const sessionNow = (): SessionRecord => getState().session!;
+
+describe('session runner: the How-to card, the free trial and the hand question', () => {
+  it('the card is the first screen; its tap runs the free trial (ready beep, wake lock, no gate for free)', async () => {
+    const { runner, rec } = await streetRunner();
+    expect(runner.state()).toMatchObject({ view: { kind: 'intro' }, pause: null, cursor: 0, attemptsReady: true, canRedo: false });
+    expect(rec.runs).toHaveLength(0);
+    runner.blockStart();
+    expect(rec.runs).toHaveLength(1);
+    expect(rec.last.planned.trial_index).toBe(0);
+    expect(rec.last).toMatchObject({ attempt: 1, o: { readyCue: true, awaitReturn: false, gripGate: true, idleMs: IDLE_MS } });
+    expect(runner.state().view).toMatchObject({ kind: 'recording', run: { chained: false, attempt: 1 } });
+    expect(services.cues.unlock).toHaveBeenCalled();
+    expect(services.wakeLock.acquire).toHaveBeenCalled();
+    expect(services.cues.say).not.toHaveBeenCalled(); // nothing to announce: the participant chooses
+    runner.blockStart(); // a second tap while recording does nothing
+    expect(rec.runs).toHaveLength(1);
+  });
+
+  it('after the free trial the hand is asked; the answer is stored as the trial\'s hand (hand_source reported)', async () => {
+    const { session, runner, rec } = await streetRunner();
+    runner.blockStart();
+    const choice = rec.end(runner);
+    expect(runner.state().view).toMatchObject({ kind: 'hand' });
+    await settle();
+    expect(stored(choice.trial_id).outcome).toMatchObject({ accepted: false, note: HAND_NOT_REPORTED_NOTE });
+
+    await runner.answerHand('right');
+    const answered = stored(choice.trial_id);
+    expect(answered.condition).toMatchObject({ hand: 'right', hand_source: 'reported' });
+    expect(answered.outcome).toMatchObject({ status: 'complete', accepted: true, participant_flag: null, note: null });
+    expectValid('TrialRecord', answered);
+    expect(services.store.trials.size).toBe(1); // the same attempt, saved again
+    expect(services.store.sessions.get(session.session_id)?.progress).toEqual({ next_trial_index: 1, n_attempts: 1, n_accepted: 1 });
+    // the first block's intro (one tap) — no trial starts by itself after the question
+    expect(runner.state()).toMatchObject({ view: { kind: 'intro' }, cursor: 1, canRedo: true });
+    expect(rec.runs).toHaveLength(1);
+  });
+
+  it('"Not sure" keeps the free trial as not accepted (other_problem) and moves on without a re-run', async () => {
+    const { session, runner, rec } = await streetRunner();
+    runner.blockStart();
+    const choice = rec.end(runner);
+    await runner.answerHand('unsure');
+    expect(stored(choice.trial_id).outcome).toMatchObject({ accepted: false, participant_flag: 'other_problem', note: HAND_UNSURE_NOTE });
+    expect(stored(choice.trial_id).condition.hand_source).toBe('reported');
+    expect(services.store.sessions.get(session.session_id)?.progress).toEqual({ next_trial_index: 1, n_attempts: 1, n_accepted: 0 });
+    expect(runner.state()).toMatchObject({ view: { kind: 'intro' }, cursor: 1, canRedo: false });
+  });
+
+  it('the "I\'m sitting" toggle sets the posture of the session and of every planned trial', async () => {
+    const { runner } = await streetRunner();
+    runner.setSitting(true);
+    await settle();
+    expect(sessionNow().protocol.posture).toBe('sitting');
+    expect(plannedTrials(sessionNow()).every((t) => t.condition.posture === 'sitting')).toBe(true);
+  });
+});
+
+describe('session runner: the hands-free chain', () => {
+  it('a block intro tap names hand and grip; an accepted trial starts the next one at once (no beep, no screen)', async () => {
+    const { runner, rec } = await streetRunner();
+    await throughChoice(runner, rec);
+    services.cues.say.mockClear();
+    runner.blockStart();
+    expect(services.cues.say).toHaveBeenCalledWith(`${en.common.hands.left}. ${en.session.speech.grips.upright_toward}. Normal`, 'en');
+    expect(rec.last).toMatchObject({ planned: { trial_index: 1 }, attempt: 1, o: { readyCue: true, awaitReturn: false, gripGate: true } });
+
+    const t1 = rec.end(runner, RETURNED);
+    expect(rec.runs).toHaveLength(3);
+    expect(rec.last).toMatchObject({ planned: { trial_index: 2 }, attempt: 1, o: { readyCue: false, awaitReturn: false, gripGate: true } });
+    expect(runner.state()).toMatchObject({ view: { kind: 'recording', run: { chained: true, gripHint: false } }, cursor: 2 });
+    // per-trial speech (Android): the speed word, said while the participant gets still
+    expect(services.cues.say).toHaveBeenLastCalledWith('Fast', 'en');
+    await settle();
+    expect(stored(t1.trial_id).outcome).toMatchObject({ accepted: true, note: AUTO_ACCEPT_NOTE });
+    expect(sessionNow().progress).toEqual({ next_trial_index: 2, n_attempts: 2, n_accepted: 2 });
+    expect(services.store.outbox.get(`trial:${t1.trial_id}`)?.status).toBe('pending');
+  });
+
+  it('awaitReturn: the next trial waits for the arm to go out when the return was not seen', async () => {
+    const { runner, rec } = await streetRunner();
+    await throughChoice(runner, rec);
+    runner.blockStart();
+    rec.end(runner, { timing: { return_onset_ms: null, return_end_ms: null } });
+    expect(rec.last).toMatchObject({ planned: { trial_index: 2 }, o: { readyCue: false, awaitReturn: true } });
+  });
+
+  it('hands change only at a block intro: the last trial of a block leads to the next intro, not a trial', async () => {
+    const { runner, rec } = await streetRunner();
+    await throughChoice(runner, rec);
+    runner.blockStart();
+    rec.end(runner); // trial 1
+    rec.end(runner); // trial 2: the last of block 1 (left hand)
+    expect(runner.state()).toMatchObject({ view: { kind: 'intro' }, cursor: 3 });
+    expect(rec.runs).toHaveLength(3);
+    runner.blockStart(); // block 2, right hand: the tap again plays the ready beep
+    expect(rec.last).toMatchObject({ planned: { trial_index: 3, condition: { hand: 'right' } }, o: { readyCue: true, awaitReturn: false } });
+  });
+
+  it('a trial held in another grip is saved as rejected and the same trial runs again at once', async () => {
+    const { runner, rec } = await streetRunner();
+    await throughChoice(runner, rec);
+    runner.blockStart();
+    const wrong = rec.end(runner, { orientation_match: false, ...RETURNED });
+    expect(rec.last).toMatchObject({ planned: { trial_index: 1 }, attempt: 2, o: { readyCue: false, awaitReturn: false } });
+    expect(runner.state()).toMatchObject({ view: { kind: 'recording', run: { gripHint: true, attempt: 2 } }, cursor: 1 });
+    await settle();
+    expect(stored(wrong.trial_id).outcome).toMatchObject({ status: 'complete', accepted: false, note: AUTO_REJECT_ORIENTATION_NOTE });
+    expect(sessionNow().progress).toEqual({ next_trial_index: 1, n_attempts: 2, n_accepted: 1 });
+    rec.end(runner); // held right this time
+    expect(rec.last.planned.trial_index).toBe(2);
+  });
+
+  it('no_movement: the reason shows, the same trial runs again by itself; a second failure in a row pauses', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    const { runner, rec } = await streetRunner();
+    await throughChoice(runner, rec);
+    runner.blockStart();
+    const f1 = rec.end(runner, { status: 'no_movement' });
+    expect(runner.state().view).toMatchObject({ kind: 'recording', run: { flash: 'no_movement', attempt: 1 } });
+    await vi.advanceTimersByTimeAsync(RETRY_FLASH_MS - 1);
+    expect(rec.runs).toHaveLength(2);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(rec.runs).toHaveLength(3);
+    expect(rec.last).toMatchObject({ planned: { trial_index: 1 }, attempt: 2, o: { readyCue: false, awaitReturn: false } });
+
+    const f2 = rec.end(runner, { status: 'too_long' });
+    expect(runner.state()).toMatchObject({ view: { kind: 'resume' }, pause: 'failed_twice' });
+    await vi.advanceTimersByTimeAsync(RETRY_FLASH_MS * 2);
+    expect(rec.runs).toHaveLength(3); // paused: nothing runs by itself
+    await settle();
+    expect(stored(f1.trial_id).outcome).toMatchObject({ status: 'no_movement', accepted: false });
+    expect(stored(f2.trial_id).outcome).toMatchObject({ status: 'too_long', accepted: false });
+
+    // Continue is a tap: audio and wake lock again, then the same trial at once (with its ready beep)
+    services.cues.unlock.mockClear();
+    services.wakeLock.acquire.mockClear();
+    await runner.continueSession();
+    expect(services.cues.unlock).toHaveBeenCalled();
+    expect(services.wakeLock.acquire).toHaveBeenCalled();
+    expect(runner.state().pause).toBeNull();
+    expect(rec.last).toMatchObject({ planned: { trial_index: 1 }, attempt: 3, o: { readyCue: true } });
+    // a success in between resets the count: one failure later only flashes
+    rec.end(runner); // trial 1 accepted → trial 2
+    rec.end(runner, { status: 'no_movement' });
+    expect(runner.state().view).toMatchObject({ kind: 'recording', run: { flash: 'no_movement' } });
+  });
+
+  it('pause control / back / page hidden / no GO: an attempt without GO is discarded, one with GO is kept', async () => {
+    const { runner, rec } = await streetRunner();
+    await throughChoice(runner, rec);
+    runner.blockStart();
+    // the long press: the recorder stops the trial ('user') before GO
+    rec.end(runner, NO_GO, 'user');
+    expect(runner.state()).toMatchObject({ view: { kind: 'resume' }, pause: 'paused' });
+    await settle();
+    expect(services.store.trials.size).toBe(1); // only the free trial: the attempt is discarded
+
+    await runner.continueSession();
+    expect(rec.last).toMatchObject({ planned: { trial_index: 1 }, attempt: 1 }); // the attempt number is free again
+    // the system back button during a trial: the trial stops, the sheet opens
+    expect(runner.back()).toBe(true);
+    expect(rec.aborts).toEqual(['user']);
+    expect(runner.state().pause).toBe('paused');
+    const kept = rec.end(runner, { status: 'aborted', timing: { go_ms: 900, onset_ms: null } }, 'user');
+    await settle();
+    expect(stored(kept.trial_id).outcome).toMatchObject({ status: 'aborted', accepted: false });
+    expect(stored(kept.trial_id).quality.warnings).toEqual(['ui_abort:user']);
+
+    await runner.continueSession();
+    runner.pageHidden();
+    expect(rec.aborts).toEqual(['user', 'hidden']);
+    rec.end(runner, { ...NO_GO, status: 'interrupted' }, 'hidden');
+    expect(runner.state()).toMatchObject({ view: { kind: 'resume' }, pause: 'hidden' });
+
+    await runner.continueSession();
+    rec.end(runner, { ...NO_GO, status: 'interrupted' }, 'idle'); // 25 s without GO
+    expect(runner.state().pause).toBe('idle');
+    await runner.continueSession();
+    rec.end(runner, { ...NO_GO, status: 'interrupted' }, 'stalled');
+    expect(runner.state().pause).toBe('stalled');
+    await settle();
+    expect(sessionNow().progress).toEqual({ next_trial_index: 1, n_attempts: 2, n_accepted: 1 });
+  });
+
+  it('a back press with no trial running only opens the sheet; a finished session lets back leave', async () => {
+    const { runner, rec } = await streetRunner();
+    expect(runner.back()).toBe(true);
+    expect(rec.aborts).toEqual([]);
+    expect(runner.state()).toMatchObject({ view: { kind: 'intro' }, pause: 'paused' });
+    await runner.continueSession(); // back to the screen under the sheet
+    expect(runner.state()).toMatchObject({ view: { kind: 'intro' }, pause: null });
+    expect(rec.runs).toHaveLength(0);
+    await runner.finishNow();
+    expect(runner.back()).toBe(false);
+  });
+
+  it('a page hidden during the return of the arm keeps the complete trial and pauses', async () => {
+    const { runner, rec } = await streetRunner();
+    await throughChoice(runner, rec);
+    runner.blockStart();
+    runner.pageHidden();
+    const t1 = rec.end(runner, { timing: { return_onset_ms: null, return_end_ms: null } }, 'hidden');
+    expect(runner.state()).toMatchObject({ view: { kind: 'resume' }, pause: 'hidden', cursor: 2 });
+    await settle();
+    expect(stored(t1.trial_id).outcome).toMatchObject({ accepted: true, note: AUTO_ACCEPT_NOTE });
+    await runner.continueSession(); // still inside block 1: trial 2 runs at once
+    expect(rec.last).toMatchObject({ planned: { trial_index: 2 }, o: { readyCue: true } });
+  });
+
+  it('a failed background save pauses the session; Continue saves it again before going on', async () => {
+    const { runner, rec } = await streetRunner();
+    await throughChoice(runner, rec);
+    runner.blockStart();
+    const realSave = services.store.saveTrial;
+    services.store.saveTrial = vi.fn(async () => {
+      throw new Error('QuotaExceededError');
+    });
+    const quiet = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    let t1: TrialRecord;
+    try {
+      t1 = rec.end(runner); // accepted, its save fails while trial 2 is already running
+      await settle();
+      expect(rec.aborts).toEqual(['save_failed']);
+      rec.end(runner, NO_GO, 'save_failed');
+      expect(runner.state()).toMatchObject({ view: { kind: 'resume' }, pause: 'save_failed' });
+      await runner.continueSession(); // still failing: stays paused
+      expect(runner.state().pause).toBe('save_failed');
+    } finally {
+      services.store.saveTrial = realSave;
+      quiet.mockRestore();
+    }
+    await runner.continueSession();
+    expect(stored(t1.trial_id).outcome).toMatchObject({ accepted: true, note: AUTO_ACCEPT_NOTE });
+    expect(sessionNow().progress).toEqual({ next_trial_index: 2, n_attempts: 2, n_accepted: 2 });
+    expect(runner.state().pause).toBeNull();
+    expect(rec.last).toMatchObject({ planned: { trial_index: 2 }, attempt: 1 });
+  });
+});
+
+describe('session runner: pause sheet redo, checkpoint, finishing', () => {
+  it('"Last one was the wrong hand" takes the last accepted trial back and shows its block intro again', async () => {
+    const { runner, rec } = await streetRunner();
+    await throughChoice(runner, rec);
+    runner.blockStart();
+    const t1 = rec.end(runner); // accepted; trial 2 runs
+    rec.end(runner, NO_GO, 'user'); // long press during trial 2, before GO
+    expect(runner.state()).toMatchObject({ pause: 'paused', canRedo: true });
+
+    await runner.revoke('wrong_hand');
+    expect(stored(t1.trial_id).outcome).toMatchObject({ accepted: false, participant_flag: 'wrong_hand', note: REDO_REQUESTED_NOTE });
+    expect(sessionNow().progress).toEqual({ next_trial_index: 1, n_attempts: 2, n_accepted: 1 });
+    expect(runner.state()).toMatchObject({ pause: null, view: { kind: 'intro', redo: true }, cursor: 1, canRedo: false });
+    runner.blockStart(); // the intro names the hand again; trial 1 runs as attempt 2
+    expect(rec.last).toMatchObject({ planned: { trial_index: 1 }, attempt: 2, o: { readyCue: true } });
+  });
+
+  it('"Redo last movement" works the same without a flag, also after failed attempts', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    const { runner, rec } = await streetRunner();
+    await throughChoice(runner, rec);
+    runner.blockStart();
+    const t1 = rec.end(runner);
+    rec.end(runner, { status: 'no_movement' }); // trial 2 fails once…
+    await vi.advanceTimersByTimeAsync(RETRY_FLASH_MS);
+    rec.end(runner, { status: 'no_movement' }); // …and twice: the sheet
+    expect(runner.state()).toMatchObject({ pause: 'failed_twice', canRedo: true });
+    await runner.revoke(null);
+    expect(stored(t1.trial_id).outcome).toMatchObject({ accepted: false, participant_flag: null, note: REDO_REQUESTED_NOTE });
+    expect(runner.state()).toMatchObject({ view: { kind: 'intro', redo: true }, cursor: 1 });
+  });
+
+  it('the checkpoint after tier 3: Finish ends the session completed and uploads the session record', async () => {
+    const { session, runner, rec } = await streetRunner();
+    await drive(runner, rec, (r) => r.state().view.kind === 'checkpoint');
+    expect(runner.state()).toMatchObject({ view: { kind: 'checkpoint' }, cursor: FAKE_STREET.firstOptionalTrial });
+    expect(sessionNow().progress).toEqual({ next_trial_index: 7, n_attempts: 7, n_accepted: 7 });
+    expect(rec.runs.every((r) => r.planned.trial_index < FAKE_STREET.firstOptionalTrial)).toBe(true);
+
+    services.uploader.flush.mockClear();
+    await runner.finishNow();
+    const done = services.store.sessions.get(session.session_id)!;
+    expect(done).toMatchObject({ status: 'completed' });
+    expect(done.ended_at).not.toBeNull();
+    expectValid('SessionRecord', done);
+    expect(services.store.outbox.get(`session:${session.session_id}`)?.status).toBe('pending');
+    expect(services.uploader.flush).toHaveBeenCalled(); // the session record goes out at once
+    expect(getState().screen).toBe('done');
+    expect(services.wakeLock.release).toHaveBeenCalled();
+  });
+
+  it('Bonus opens the optional blocks; after the last one the session ends by itself (completed)', async () => {
+    const { session, runner, rec } = await streetRunner();
+    await drive(runner, rec, (r) => r.state().view.kind === 'checkpoint');
+    runner.startBonus();
+    expect(runner.state()).toMatchObject({ view: { kind: 'intro' }, bonus: true, cursor: FAKE_STREET.firstOptionalTrial });
+    await drive(runner, rec, () => getState().screen === 'done');
+    expect(rec.last.planned.trial_index).toBe(FAKE_STREET.trials - 1);
+    const done = services.store.sessions.get(session.session_id)!;
+    expect(done.status).toBe('completed');
+    expect(done.progress).toEqual({ next_trial_index: FAKE_STREET.trials, n_attempts: FAKE_STREET.trials, n_accepted: FAKE_STREET.trials });
+    // every record of the visit is valid and queued for upload
+    for (const t of services.store.trials.values()) {
+      expectValid('TrialRecord', t);
+      expect(services.store.outbox.get(`trial:${t.trial_id}`)?.status).toBe('pending');
+    }
+    expect(new Set([...services.store.trials.values()].map((t) => t.condition.hand_source))).toEqual(new Set(['reported', 'instructed']));
+  });
+
+  it('Finish now before the main part is done ends the session ended_early (and is final)', async () => {
+    const { session, runner, rec } = await streetRunner();
+    await throughChoice(runner, rec);
+    runner.blockStart();
+    rec.end(runner); // trial 1
+    rec.end(runner, NO_GO, 'user'); // pause during trial 2
+    await runner.finishNow();
+    const done = services.store.sessions.get(session.session_id)!;
+    expect(done.status).toBe('ended_early');
+    expect(done.progress).toEqual({ next_trial_index: 2, n_attempts: 2, n_accepted: 2 });
+    expectValid('SessionRecord', done);
+    expect(services.store.outbox.get(`session:${session.session_id}`)?.status).toBe('pending');
+    expect(getState().screen).toBe('done');
+    await runner.finishNow(); // a second tap changes nothing
+    expect(services.store.sessions.get(session.session_id)?.ended_at).toBe(done.ended_at);
+  });
+
+  it('Continue later leaves the session resumable; entering again starts at its next trial\'s intro', async () => {
+    const { session, runner, rec } = await streetRunner();
+    await throughChoice(runner, rec);
+    runner.blockStart();
+    rec.end(runner);
+    rec.end(runner, NO_GO, 'user');
+    await runner.later();
+    expect(getState().screen).toBe('welcome');
+    expect(services.store.sessions.get(session.session_id)?.status).toBe('in_progress');
+    runner.dispose();
+
+    const again = createSessionRunner(fakeRecorder().port);
+    again.enter();
+    await settle();
+    expect(again.state()).toMatchObject({ view: { kind: 'intro' }, cursor: 2, canRedo: true, attemptsReady: true });
+    expect(again.nextAttempt(2)).toBe(1);
+    expect(again.nextAttempt(1)).toBe(2);
+  });
+
+  it('entering a finished session goes to Done; a session at its checkpoint shows it again', async () => {
+    const s0 = await createSession(STREET);
+    await finishSession(s0, 'completed');
+    const r1 = createSessionRunner(fakeRecorder().port);
+    navigate('session');
+    r1.enter();
+    expect(getState().screen).toBe('done');
+
+    const { runner, rec } = await streetRunner();
+    await drive(runner, rec, (r) => r.state().view.kind === 'checkpoint');
+    runner.dispose();
+    const r2 = createSessionRunner(fakeRecorder().port);
+    r2.enter();
+    expect(r2.state().view.kind).toBe('checkpoint');
+  });
+});
+
+describe('session runner: tap review mode (researcher setting review_each_trial)', () => {
+  beforeEach(() => {
+    setState({ settings: { ...getState().settings, review_each_trial: true } });
+  });
+
+  it('keeps the v1 flow: intro → Ready → recording → review (saved first) → Next → break → … → Done', async () => {
+    const { session, runner, rec } = await streetRunner(CUSTOM);
+    expect(session.settings.review_mode).toBe('tap');
+    runner.blockStart();
+    expect(runner.state().view.kind).toBe('ready');
+    expect(rec.runs).toHaveLength(0);
+    runner.ready();
+    expect(rec.last).toMatchObject({ planned: { trial_index: 0 }, o: { readyCue: true, awaitReturn: false, gripGate: false, idleMs: null } });
+    const t0 = rec.end(runner);
+    expect(runner.state().view).toMatchObject({ kind: 'review' });
+    await settle();
+    expect(stored(t0.trial_id).outcome).toMatchObject({ accepted: false, note: REVIEW_INTERRUPTED_NOTE });
+
+    await runner.decide({ kind: 'accept' });
+    expect(stored(t0.trial_id).outcome).toMatchObject({ accepted: true, note: null });
+    expect(runner.state()).toMatchObject({ view: { kind: 'break', fromBlock: 0 }, cursor: 1 });
+    runner.nextBlock();
+    runner.blockStart();
+    runner.ready();
+    rec.end(runner);
+    await runner.decide({ kind: 'redo' }); // not accepted: Ready for the same trial
+    expect(runner.state()).toMatchObject({ view: { kind: 'ready' }, cursor: 1 });
+    runner.ready();
+    expect(rec.last.attempt).toBe(2);
+    rec.end(runner);
+    await runner.decide({ kind: 'accept' });
+    expect(getState().screen).toBe('done');
+    expect(services.store.sessions.get(session.session_id)?.status).toBe('completed');
+  });
+
+  it('a failed attempt is kept and shown; "Try again" goes back to Ready', async () => {
+    const { runner, rec } = await streetRunner(CUSTOM);
+    runner.blockStart();
+    runner.ready();
+    const f = rec.end(runner, { status: 'no_movement' });
+    expect(runner.state().view).toMatchObject({ kind: 'failed', reason: 'no_movement' });
+    await settle();
+    expect(runner.state().view).toMatchObject({ kind: 'failed', saving: false });
+    expect(stored(f.trial_id).outcome.accepted).toBe(false);
+    runner.retryFailed();
+    expect(runner.state().view.kind).toBe('ready');
+  });
+
+  it('the page hidden during a trial stops it; tap mode keeps every attempt, also one without GO', async () => {
+    const { runner, rec } = await streetRunner(CUSTOM);
+    runner.blockStart();
+    runner.ready();
+    runner.pageHidden();
+    expect(rec.aborts).toEqual(['hidden']);
+    const t0 = rec.end(runner, { ...NO_GO, status: 'interrupted' }, 'hidden');
+    expect(runner.state().view).toMatchObject({ kind: 'failed', reason: 'interrupted' });
+    await settle();
+    expect(stored(t0.trial_id).outcome).toMatchObject({ status: 'interrupted', accepted: false });
+    expect(stored(t0.trial_id).quality.warnings).toEqual(['ui_abort:page_hidden']);
+    expect(runner.state().pause).toBeNull(); // tap mode: the failed screen says what happened
+  });
+});
+
 /** history as the browser keeps it for one tab: entries, popstate on traversal, leaving before the first. */
 class FakeHistory {
   entries: unknown[] = [null];
@@ -598,7 +1482,7 @@ class FakeHistory {
 }
 
 describe('system back button (history guard)', () => {
-  const settle = () => new Promise((r) => setTimeout(r, 5));
+  const settleHistory = () => new Promise((r) => setTimeout(r, 5));
   let fake: FakeHistory;
   let uninstall: () => void;
   const g = globalThis as { history?: unknown };
@@ -618,12 +1502,12 @@ describe('system back button (history guard)', () => {
 
   const press = async () => {
     fake.back();
-    await settle();
+    await settleHistory();
   };
 
   it('a forward move pushes ONE guard entry; later moves replace it', () => {
     expect(fake.entries).toHaveLength(1);
-    for (const screen of ['consent', 'profile', 'sensors', 'calibration', 'setup'] as ScreenId[]) {
+    for (const screen of ['profile', 'sensors', 'setup', 'session', 'done'] as ScreenId[]) {
       navigate(screen);
       expect(fake.entries).toHaveLength(2);
       expect(fake.index).toBe(1);
@@ -631,9 +1515,9 @@ describe('system back button (history guard)', () => {
     }
   });
 
-  it("back walks the screens' ← arrows and leaves the app only from the root", async () => {
-    for (const screen of ['consent', 'profile', 'sensors', 'calibration', 'setup'] as ScreenId[]) navigate(screen);
-    for (const expected of ['calibration', 'sensors', 'profile', 'welcome'] as ScreenId[]) {
+  it("back walks the screens' ← arrows and leaves the app only from the root (welcome ← profile ← sensors / setup)", async () => {
+    for (const screen of ['profile', 'sensors'] as ScreenId[]) navigate(screen);
+    for (const expected of ['profile', 'welcome'] as ScreenId[]) {
       await press();
       expect(getState().screen).toBe(expected);
       expect(fake.left).toBe(false);
@@ -643,10 +1527,17 @@ describe('system back button (history guard)', () => {
     expect(fake.left).toBe(true);
   });
 
+  it('the researchers\' setup screen goes back to the profile', async () => {
+    navigate('profile');
+    navigate('setup');
+    await press();
+    expect(getState().screen).toBe('profile');
+  });
+
   it('returning to the root in the app drops the guard, so back there leaves at once', async () => {
-    navigate('consent');
-    navigate('welcome'); // e.g. "Not now", or Pause in a session
-    await settle();
+    navigate('profile');
+    navigate('welcome'); // e.g. "Continue later" in a session
+    await settleHistory();
     expect(fake.index).toBe(0);
     expect(getState().screen).toBe('welcome');
     await press();
@@ -657,7 +1548,7 @@ describe('system back button (history guard)', () => {
     const handler = vi.fn(() => true);
     const remove = setBackHandler(handler);
     try {
-      navigate('setup');
+      navigate('profile');
       navigate('session');
       for (let i = 1; i <= 3; i++) {
         await press();
@@ -671,7 +1562,7 @@ describe('system back button (history guard)', () => {
     }
     remove(); // removing twice is harmless
     await press();
-    expect(getState().screen).toBe('welcome'); // no handler: the fallback target
+    expect(getState().screen).toBe('profile'); // no handler: the session's ← target
   });
 
   it('a handler that declines (no session running) lets back go to the fallback target', async () => {
@@ -679,7 +1570,26 @@ describe('system back button (history guard)', () => {
     try {
       navigate('session');
       await press();
-      expect(getState().screen).toBe('welcome');
+      expect(getState().screen).toBe('profile');
+    } finally {
+      remove();
+    }
+  });
+
+  it("the runner is the session screen's back handler: it pauses a running session and declines a finished one", async () => {
+    const { runner } = await streetRunner();
+    const remove = setBackHandler(() => runner.back());
+    try {
+      navigate('profile');
+      navigate('session');
+      await press();
+      expect(getState().screen).toBe('session');
+      expect(runner.state().pause).toBe('paused');
+      await runner.finishNow(); // → done
+      expect(getState().screen).toBe('done');
+      navigate('session'); // (a stale session screen)
+      await press();
+      expect(getState().screen).toBe('profile');
     } finally {
       remove();
     }
@@ -714,17 +1624,17 @@ describe('system back button (history guard)', () => {
   });
 
   it('forward onto an old guard at the root is undone', async () => {
-    navigate('consent');
+    navigate('profile');
     navigate('welcome');
-    await settle();
+    await settleHistory();
     fake.go(1); // the browser's forward button
-    await settle();
+    await settleHistory();
     expect(fake.index).toBe(0);
     expect(getState().screen).toBe('welcome');
   });
 
   it('a popstate of its own that never arrives does not swallow a later press', async () => {
-    navigate('consent');
+    navigate('profile');
     fake.silent = true;
     navigate('welcome'); // drops the guard; the browser never reports it
     fake.silent = false;

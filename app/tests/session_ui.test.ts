@@ -23,12 +23,22 @@ import {
 import { phoneFigureSpec } from '../src/ui/PhoneFigure';
 import {
   failureKind,
+  gestureFor,
+  introWords,
   panelTone,
+  pauseReasonOf,
   permissionDeniedText,
+  perTrialSpeechAllowed,
+  reachedGo,
+  statusKey,
   stopAllowed,
+  trialWords,
   uiAbortWarning,
+  variesLine,
   type FailureKind,
+  type StatusKey,
 } from '../src/app/screens/SessionScreen';
+import type { PlannedBlock, PlannedTrial, TrialCondition } from '../src/core/types';
 import { deniedContext, deniedText, iosBrowserName, issueText } from '../src/app/screens/SensorCheckScreen';
 import { SandboxDetector, type SegmenterLike } from '../src/app/screens/SandboxScreen';
 import { aroundSlot } from '../src/app/App';
@@ -283,7 +293,186 @@ describe('session screen helpers', () => {
     expect(stopAllowed('armed')).toBe(true);
     expect(stopAllowed('moving')).toBe(false);
     expect(stopAllowed('post_roll')).toBe(false);
+    expect(stopAllowed('returning')).toBe(false); // the arm goes back out: the nose may be on the screen
     expect(stopAllowed('done')).toBe(false);
+  });
+});
+
+// ───────────────────────────── the hands-free live panel and intros (protocol 2.0.0) ─────────────────────────────
+
+const condition = (o: Partial<TrialCondition> = {}): TrialCondition => ({
+  hand: 'left',
+  orientation: 'upright_toward',
+  speed: 'natural',
+  start_position: 'natural',
+  variant: 'standard',
+  posture: 'standing',
+  rep: 0,
+  hand_source: 'instructed',
+  ...o,
+});
+const planned = (c: TrialCondition, i = 0): PlannedTrial => ({ trial_index: i, block_index: 0, trial_in_block: i, condition: c });
+const block = (conds: TrialCondition[], o: Partial<PlannedBlock> = {}): PlannedBlock => ({
+  block_index: 0,
+  kind: 'main',
+  hand: conds[0].hand,
+  orientation: conds[0].orientation,
+  trials: conds.map((c, i) => planned(c, i)),
+  ...o,
+});
+
+describe('live panel: status line and tone', () => {
+  it('the status line follows the phase; special messages come first', () => {
+    const cases: [TrialPhase | null, TrialMessage | null, StatusKey][] = [
+      [null, null, 'starting'],
+      ['waiting_still', 'hold_still', 'waiting'],
+      ['waiting_still', 'return_arm', 'returning'], // awaitReturn: the arm is not back out yet
+      ['waiting_still', 'wrong_grip', 'wrong_grip'],
+      ['waiting_still', 'too_early', 'too_early'],
+      ['foreperiod', 'hold_still', 'foreperiod'],
+      ['armed', 'go', 'go'],
+      ['moving', 'moving', 'moving'],
+      ['post_roll', 'hold_at_nose', 'at_nose'],
+      ['post_roll', 'return_arm', 'returning'], // the double beep: arm out again
+      ['returning', 'return_arm', 'returning'],
+      ['returning', null, 'returning'],
+      ['done', 'done', 'done'],
+      ['done', 'no_movement', 'no_movement'],
+      ['moving', 'too_long', 'too_long'],
+      ['armed', 'sensor_stalled', 'sensor_stalled'],
+    ];
+    for (const [phase, message, key] of cases) expect(statusKey(phase, message), `${phase}/${message}`).toBe(key);
+    for (const strings of [enSession, heSession]) {
+      for (const key of Object.keys(enSession.live.status) as StatusKey[]) expect(strings.live.status[key], key).toBeTruthy();
+    }
+  });
+
+  it('a wrong grip is an error tone; the return of the arm is part of the end', () => {
+    expect(panelTone('waiting_still', 'wrong_grip')).toBe('error');
+    expect(panelTone('waiting_still', 'return_arm')).toBe('wait');
+    expect(panelTone('post_roll', 'return_arm')).toBe('done');
+    expect(panelTone('returning', 'return_arm')).toBe('done');
+  });
+
+  it('pauseReasonOf and reachedGo (an attempt without GO is discarded in the hands-free flow)', () => {
+    expect(pauseReasonOf('user')).toBe('paused');
+    expect(pauseReasonOf('hidden')).toBe('hidden');
+    expect(pauseReasonOf('stalled')).toBe('stalled');
+    expect(pauseReasonOf('idle')).toBe('idle');
+    expect(pauseReasonOf('save_failed')).toBe('save_failed');
+    expect(pauseReasonOf('start_failed')).toBe('error');
+    expect(pauseReasonOf(null)).toBe('error');
+    const rec = (go: number | null) => ({ timing: { go_ms: go } }) as TrialRecord;
+    expect(reachedGo(rec(900))).toBe(true);
+    expect(reachedGo(rec(0))).toBe(true);
+    expect(reachedGo(rec(null))).toBe(false);
+    expect(reachedGo(null)).toBe(false);
+    for (const strings of [enSession, heSession]) {
+      for (const r of ['paused', 'hidden', 'stalled', 'idle', 'failed_twice', 'save_failed', 'error'] as const) {
+        expect(strings.pause.reasons[r].length, r).toBeGreaterThan(10);
+      }
+    }
+  });
+});
+
+describe('block intros, illustrations and speech', () => {
+  it('gestureFor: tilted_touch arrives angled; curved and pause keep their own path; the rest is standard', () => {
+    expect(gestureFor(condition())).toEqual({ contact: 'straight', variant: 'standard' });
+    expect(gestureFor(condition({ variant: 'tilted_touch' }))).toEqual({ contact: 'angled', variant: 'standard' });
+    expect(gestureFor(condition({ variant: 'curved' }))).toEqual({ contact: 'straight', variant: 'curved' });
+    expect(gestureFor(condition({ variant: 'pause' }))).toEqual({ contact: 'straight', variant: 'pause' });
+    expect(gestureFor(condition({ variant: 'jerky', start_position: 'shoulder' }))).toEqual({ contact: 'straight', variant: 'standard' });
+  });
+
+  it('variesLine: the special movements of a block (once each), else "speeds change", else nothing', () => {
+    const odd = block([
+      condition({ variant: 'tilted_touch' }),
+      condition({ start_position: 'center' }),
+      condition({ variant: 'tilted_touch' }),
+      condition({ variant: 'jerky' }),
+    ]);
+    expect(variesLine(odd, en)).toBe(en.session.intro.variesList('Tilted touch · In front of your face · Jerky movement'));
+    expect(variesLine(block([condition(), condition({ speed: 'fast' })]), en)).toBe(en.session.intro.speedsVary);
+    expect(variesLine(block([condition(), condition()]), en)).toBeNull();
+    expect(variesLine(odd, he)).toContain(he.common.variants.tilted_touch.label);
+  });
+
+  it('what is said: hand + grip + the first trial at the intro tap; speed (+ variant) per chained trial', () => {
+    const sideways = condition({ hand: 'right', orientation: 'top_left_toward', speed: 'fast' });
+    expect(introWords(block([sideways]), planned(sideways), en)).toEqual([
+      'Right hand',
+      'Sideways, top of the phone to your left',
+      'Fast',
+    ]);
+    expect(trialWords(condition({ speed: 'slow' }), en)).toEqual(['Slow']);
+    expect(trialWords(condition({ variant: 'tilted_touch', start_position: 'shoulder' }), en)).toEqual([
+      'Normal',
+      'In line with your shoulder',
+      'Tilted touch',
+    ]);
+    // the choice trial: the participant picks hand and grip, nothing is announced
+    const free = condition({ orientation: 'free', hand_source: 'reported' });
+    expect(introWords(block([free], { kind: 'choice' }), planned(free), en)).toEqual([]);
+    // the 2–4-word variant names are short enough to be said between trials
+    for (const v of Object.values(en.common.variants)) expect(v.label.split(/\s+/).length).toBeLessThanOrEqual(4);
+    expect(introWords(block([sideways]), planned(sideways), he)[0]).toBe(he.common.hands.right);
+  });
+
+  it('per-trial speech only where the platform speaks outside a tap (never iOS / WebKit)', () => {
+    expect(perTrialSpeechAllowed({ ...makeDevice(), platform: 'android', engine: 'blink' })).toBe(true);
+    expect(perTrialSpeechAllowed({ ...makeDevice(), platform: 'ios', engine: 'webkit' })).toBe(false);
+    expect(perTrialSpeechAllowed({ ...makeDevice(), platform: 'other', engine: 'webkit' })).toBe(false); // desktop Safari
+    expect(perTrialSpeechAllowed(null)).toBe(false);
+  });
+
+  it('the cards say what the study spec says (English copy)', () => {
+    const s = enSession;
+    expect(s.howTo.title).toBe('How to do it');
+    expect(s.howTo.anyPart).toBe('Any part of the phone may touch your nose.');
+    expect(s.howTo.steps).toEqual([
+      'Hold the phone in front of you, arm straight, screen facing you.',
+      'At the beep, bring it to touch your nose.',
+      'Hold still until the double beep, then stretch your arm out again — the next one starts by itself.',
+    ]);
+    expect(s.howTo.safety).toBe('Touch gently and hold the phone firmly.');
+    expect(s.howTo.try).toBe('Try it once — your way');
+    expect([s.hand.question, s.hand.left, s.hand.right, s.hand.unsure]).toEqual([
+      'Which hand did you use?',
+      'Left hand',
+      'Right hand',
+      'Not sure / something went wrong',
+    ]);
+    expect([1, 2, 3, 4].map((t) => s.intro.tier(t))).toEqual([
+      'Part 1 of 3 · Basics',
+      'Part 2 of 3 · Sideways',
+      'Part 3 of 3 · Different movements',
+      'Bonus',
+    ]);
+    expect(s.intro.phoneIn('left')).toBe('Phone in your LEFT hand');
+    expect(s.intro.keepIn('left')).toBe('Keep the phone in your LEFT hand');
+    expect(s.intro.startIn('right')).toBe('Start — phone in RIGHT hand');
+    expect(s.intro.speedsVary).toBe('Speeds change — the screen tells you each time.');
+    expect(s.intro.basicsDone).toBe('Basics done — great! The rest adds variety. You can stop any time.');
+    expect(s.live.status).toMatchObject({
+      waiting: 'Arm straight — hold still',
+      foreperiod: 'Get ready…',
+      go: 'GO!',
+      moving: 'Touch your nose',
+      at_nose: 'Hold…',
+      returning: 'Arm out again',
+      wrong_grip: 'Hold the phone like the picture',
+    });
+    expect(s.live.speedWords).toEqual({ natural: 'NORMAL', fast: 'FAST', slow: 'SLOW' });
+    expect(s.live.pause).toBe('Hold to pause');
+    expect(s.live.minutesLeft(3)).toBe('about 3 min left');
+    expect([s.pause.continue, s.pause.redo, s.pause.wrongHand, s.pause.finish]).toEqual([
+      'Continue',
+      'Redo last movement',
+      'Last one was the wrong hand',
+      'Finish now',
+    ]);
+    expect(s.checkpoint.title).toBe('Main part done — thank you!');
+    expect(s.checkpoint.bonus(1)).toBe('Bonus: about 1 more minute');
   });
 });
 

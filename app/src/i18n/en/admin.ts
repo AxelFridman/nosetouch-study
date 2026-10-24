@@ -17,6 +17,7 @@ export const admin = {
       in_progress: 'Unfinished',
       completed: 'Completed',
       abandoned: 'Stopped early',
+      ended_early: 'Finished early',
     } as Record<SessionRecord['status'], string>,
     simulated: 'Simulated',
     uploadState: {
@@ -87,6 +88,13 @@ export const admin = {
     simulateHint:
       'A built-in simulated participant replaces the real sensors. Never use it for real data. It switches off when the app is reloaded.',
     simulateLocked: 'Cannot be changed while a session is in progress.',
+    sessionTitle: 'For researchers: session',
+    setupMode: 'Choose the session after the profile',
+    setupModeHint:
+      'Opens the session setup (presets, custom sessions) instead of starting the study session. Same as opening the app with ?setup=1. It switches off when the app is reloaded.',
+    reviewEachTrial: 'Review every movement (lab use)',
+    reviewEachTrialHint:
+      'After each movement the participant confirms it with a tap, instead of the hands-free flow that goes on by itself. Applies to sessions started from now on.',
     researcherTitle: 'For researchers: upload',
     researcherHint: 'Overrides the upload settings of the study (config.json) on this phone only.',
     uploadMode: 'Upload mode',
@@ -155,9 +163,9 @@ export const admin = {
     ],
     dataTitle: 'Your data',
     data: [
-      'Pseudonymous: you are identified only by a random participant code.',
+      'Your recordings carry a random participant code, together with your name (if you gave it), age, sex, dominant hand and height.',
       'Only the motion sensors and screen touches during the movements: never the camera, the microphone, your location or your contacts.',
-      'Stored on this phone and, when uploading is set up, in the study storage of the research team.',
+      'Stored on this phone and, when uploading is set up, on the private research server of the research team.',
       'You can export or delete the data on this phone at any time on the "My data" screen.',
     ],
     contactTitle: 'Contact',

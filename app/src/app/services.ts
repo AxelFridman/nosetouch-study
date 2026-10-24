@@ -7,8 +7,8 @@ import { createCueSink, createWakeLockGuard, isAutomatedBrowser, type AppCueSink
 import { createBrowserSensorSource } from '../core/sensors';
 import { effectiveUpload, redactSession } from '../core/config';
 import { makeRng, randomSeed } from '../core/util';
-import type { SensorSource, TrialCondition } from '../core/types';
-import { createSimulatedSource, type SimBehavior } from '../sim/simulatedSource';
+import type { ParticipantProfile, SensorSource, TrialCondition } from '../core/types';
+import { createSimulatedSource, type SimBehavior, type SimSourceOptions } from '../sim/simulatedSource';
 import { defaultSimPlatform, simParticipantFromProfile } from '../sim/model';
 import { getState, setState } from './store';
 
@@ -17,6 +17,13 @@ export interface SourceRequest {
   condition?: TrialCondition;
   /** simulated behaviour, e.g. 'static' for the phone-on-a-table calibration (ignored by real sensors) */
   behavior?: SimBehavior;
+  /**
+   * The trial waits for the return of the arm (awaitReturn: the previous trial ended before the arm was
+   * seen going back out). The simulated participant then starts at the nose and brings the phone back
+   * out first, as a real one would; without it the simulated arm is already out, no return movement
+   * ever comes and the trial waits for the no-GO pause. Ignored by real sensors.
+   */
+  startAtNose?: boolean;
 }
 
 export interface Services {
@@ -52,6 +59,24 @@ function seedFromId(id: string | undefined): number {
   return h >>> 0;
 }
 
+/**
+ * The simulator's options for one source of the app (?sim=1): the participant's simulated person
+ * (stable per participant_id), an Android-like platform, the requested condition and behaviour, and
+ * startAtNose for a trial that waits for the return of the arm. `seed` drives this source's draws.
+ */
+export function simulatedSourceOptions(req: SourceRequest, participant: ParticipantProfile | null, seed: number): SimSourceOptions {
+  const participantSeed = seedFromId(participant?.participant_id);
+  return {
+    mode: 'realtime',
+    participant: simParticipantFromProfile(participant, participantSeed),
+    platform: defaultSimPlatform('android', makeRng(participantSeed)),
+    condition: req.condition ?? DEFAULT_CONDITION,
+    seed,
+    behavior: req.behavior ?? 'normal',
+    startAtNose: req.startAtNose === true,
+  };
+}
+
 export async function initServices(): Promise<Services> {
   const st = getState();
   const store = await openLocalStore();
@@ -73,16 +98,7 @@ export async function initServices(): Promise<Services> {
   const createSource = (req: SourceRequest = {}): SensorSource => {
     const now = getState();
     if (!now.settings.simulate) return createBrowserSensorSource({ quaternion: true, frequencyHz: 60 });
-    const participantSeed = seedFromId(now.participant?.participant_id);
-    const seed = randomSeed();
-    return createSimulatedSource({
-      mode: 'realtime',
-      participant: simParticipantFromProfile(now.participant, participantSeed),
-      platform: defaultSimPlatform('android', makeRng(participantSeed)),
-      condition: req.condition ?? DEFAULT_CONDITION,
-      seed,
-      behavior: req.behavior ?? 'normal',
-    });
+    return createSimulatedSource(simulatedSourceOptions(req, now.participant, randomSeed()));
   };
 
   services = { store, uploader, cues, wakeLock, createSource };

@@ -43,7 +43,8 @@ export const CONFIG_TIMEOUT_MS = 8000;
 const STUDY_CODE_RE = /^[A-Za-z0-9_-]{1,64}$/;
 const UPLOAD_MODES: readonly UploadMode[] = ['apps_script', 'json_post', 'none'];
 const LANGUAGES: readonly Language[] = ['en', 'he'];
-const PRESETS: readonly ProtocolPreset[] = ['quick', 'standard', 'full', 'custom'];
+/** Every ProtocolPreset (a config naming another value falls back to the default preset). */
+export const PRESETS: readonly ProtocolPreset[] = ['street', 'quick', 'standard', 'full', 'custom'];
 
 function isRecord(v: unknown): v is Record<string, unknown> {
   return typeof v === 'object' && v !== null && !Array.isArray(v);

@@ -9,9 +9,25 @@ import pytest
 from _mlhelpers import condition
 
 from motionlab import segment, synth
-from motionlab.conventions import DEFAULT_SEGMENTATION_PARAMS
+from motionlab.conventions import DEFAULT_SEGMENTATION_PARAMS, SEGMENTATION_PARAM_KEYS
 
 P = dict(DEFAULT_SEGMENTATION_PARAMS)
+
+
+def _segmenter_view(seg):
+    """A segmentation result with `params` reduced to the keys online_v1 reads (SEGMENTATION_PARAM_KEYS):
+    the app echoes optional schema 1.2 keys such as return_cap_ms, which only drive its trial controller."""
+    return {**seg, 'params': {k: seg['params'][k] for k in SEGMENTATION_PARAM_KEYS}}
+
+
+def test_the_port_echoes_the_optional_params_like_the_app(ts_reference):
+    """Optional schema 1.2 keys (return_cap_ms) are not read by online_v1 but echoed in its result, like the app:
+    a rerun reproduces the stored segmentation block whole, params included."""
+    rec = next(r for r in ts_reference['records'] if 'return_cap_ms' in r['segmentation']['params'])
+    run = segment.rerun_online_v1(rec, keep_trace=False)
+    assert run.result['params'] == rec['segmentation']['params']
+    v1 = {k: v for k, v in rec['segmentation']['params'].items() if k != 'return_cap_ms'}
+    assert 'return_cap_ms' not in segment.run_online_v1(rec['streams']['motion'], v1, go_t=rec['timing']['go_ms']).result['params']
 
 
 def _close(a, b, rel=1e-12):
@@ -43,7 +59,7 @@ def test_rerun_reproduces_every_ts_record(ts_reference):
     for rec in ts_reference['records']:
         run = segment.rerun_online_v1(rec, keep_trace=False)
         # floating values agree to the last bits (Math.exp differs between JS engines and libm)
-        _close(run.result, rec['segmentation'], rel=1e-12)
+        _close(_segmenter_view(run.result), _segmenter_view(rec['segmentation']), rel=1e-12)
         on = rec['segmentation']['onset_index']
         if on is not None:
             assert rec['streams']['motion']['t'][on] == rec['timing']['onset_ms']
@@ -57,7 +73,7 @@ def test_scenarios_match_ts_events_exactly(ts_reference):
         assert run.events == ts['events'], sc['id']
         assert run.go_t == ts['goT'], sc['id']
         assert (run.result['onset_index'], run.result['end_index']) == (ts['result']['onset_index'], ts['result']['end_index'])
-        _close(run.result, ts['result'], rel=1e-12)
+        _close(_segmenter_view(run.result), _segmenter_view(ts['result']), rel=1e-12)
 
 
 # ───────────────────────────── known truth ─────────────────────────────
@@ -107,7 +123,9 @@ def test_onset_is_backdated_to_the_last_still_sample():
     assert run.status == 'complete'
     assert run.onset_index == int(np.flatnonzero(rate >= P['still_gyro_dps'])[0])
     j0 = int(np.flatnonzero(rate > P['onset_gyro_min_dps'])[0])
-    assert t[j0] - t[run.onset_index] > 250  # back-dated by ~300 ms
+    # back-dated by (onset floor - still threshold) / ramp slope: 200 ms with the 2.0.0 params (300 ms with 1.0.0)
+    backdate_ms = (P['onset_gyro_min_dps'] - P['still_gyro_dps']) / 0.05
+    assert t[j0] - t[run.onset_index] > backdate_ms - 50
     # a movement that starts before GO is a false start: GO is not given
     m2, _, _ = _stream(move=(900.0, 1600.0))
     early = segment.run_online_v1(m2, P, go_t=1000.0)
@@ -165,6 +183,8 @@ def test_go_not_given_when_not_still():
 def test_online_v1_against_synthetic_truth(symmetric_participant):
     # absolute thresholds detect slow movements late (docs/05 section 8.1, segmentation bias)
     late_ms = {'fast': 150, 'natural': 250, 'slow': 800}
+    # protocol 2.0.0 raised the slow onset floors to 25 deg/s / 0.55 m/s^2; synth's slow movement (SPEED_FACTOR
+    # 1.7, peak ~44 deg/s like the pilot's >= 50 deg/s) stays well above them
     for speed in ('fast', 'natural', 'slow'):
         plat = synth.default_platform('android', np.random.default_rng(2))
         rec, truth = synth.simulate_trial(symmetric_participant, plat, condition(speed=speed), seed=13)
@@ -193,7 +213,7 @@ def test_offline_v1_against_synthetic_truth(symmetric_participant):
         errs_on.append(off.onset_ms - truth.onset_ms)
         errs_end.append(off.end_ms - truth.end_ms)
         assert off.peak_gyro_dps > 10 and off.duration_ms > 200
-    # a %-of-peak threshold cuts a fixed fraction of the duration (largest for the 3 s slow trial)
+    # a %-of-peak threshold cuts a fixed fraction of the duration (largest for the longest trial)
     assert max(abs(e) for e in errs_on) < 250, errs_on
     assert max(abs(e) for e in errs_end) < 350, errs_end
     rec, _ = synth.simulate_trial(symmetric_participant, plat, condition(), seed=3, behavior='no_move')

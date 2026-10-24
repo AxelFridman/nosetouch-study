@@ -21,9 +21,11 @@ def table():
     for p in range(12):
         plat = 'ios' if p % 2 else 'android'
         ehi = 'left' if p % 3 == 0 else 'right'
+        hand = 'left' if p % 3 == 0 else 'right'  # protocol 2.0.0 profiles: self-reported handedness, no EHI
         for k in range(60):
             rows.append({'trial_id': f't{p}-{k}', 'participant_id': f'P{p}', 'orientation': orients[k % 4],
-                         'platform': plat, 'ehi_class': ehi, 'y_right': k % 2, 'x': rng.normal()})
+                         'platform': plat, 'ehi_class': ehi, 'handedness_self': hand, 'y_right': k % 2,
+                         'x': rng.normal()})
     df = pd.DataFrame(rows)
     df.loc[(df['participant_id'] == 'P5') & (df.index % 7 == 0), 'platform'] = 'android'  # one person, 2 phones
     return df
@@ -72,6 +74,19 @@ def test_stratified_folds_spread_the_strata(table):
         assert len(set(strata[s.test])) >= 2  # each test fold mixes strata
     again = E.make_splits('stratified_group_kfold', g, strata=strata, n_splits=3, seed=1)
     assert all((a.test == b.test).all() for a, b in zip(splits, again))  # seeded, reproducible
+
+
+def test_default_strata_are_handedness_and_platform(table):
+    """EHI is not collected from protocol 2.0.0 on: the CV stratifies on handedness_self x platform; the
+    protocol 1.0.0 stratum (ehi_class x platform) stays available."""
+    assert E.DEFAULT_STRATA == ('handedness_self', 'platform')
+    assert set(E.participant_strata(table)) == {'left|android', 'left|ios', 'right|android', 'right|ios'}
+    meta = pd.DataFrame({'handedness_self': ['right', 'ambidextrous', None], 'platform': ['ios', 'android', 'ios'],
+                         'ehi_class': [None, None, 'left']})
+    assert list(E.participant_strata(meta)) == ['right|ios', 'ambidextrous|android', 'unknown|ios']
+    assert list(E.participant_strata(meta, ('ehi_class', 'platform'))) == ['unknown|ios', 'unknown|android', 'left|ios']
+    assert list(E.participant_strata(meta.drop(columns=['handedness_self', 'platform']), E.DEFAULT_STRATA)) == ['all'] * 3
+    assert {'hand_is_phone_hand', 'hand_source', 'ehi_class'} <= set(E.SUBGROUP_COLUMNS)
 
 
 def test_leakage_is_detected():

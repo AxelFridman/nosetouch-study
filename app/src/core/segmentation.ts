@@ -409,6 +409,77 @@ export class OnlineSegmenter {
 }
 
 /**
+ * The smoothed activity signals of spec step 1 (gyro_s = EMA |ω|, acc_s = EMA |a_lin| with the same
+ * acc_source rule), WITHOUT any state machine: identical arithmetic to OnlineSegmenter (a test pins
+ * that both give the same values sample by sample), but it keeps running after the segmenter has
+ * ENDED / FAILED, whose `live` is frozen. The TrialController uses it for what happens around the
+ * segmented movement (the return of the arm, the false-start policy). Not part of online_v1: the
+ * Python port does not need it.
+ */
+export class MotionSignals {
+  private readonly smoothingMs: number;
+  private readonly gravityTauMs: number;
+  private accSource: AccSource | null = null;
+  private lastT: number | null = null;
+  private gyroRaw = 0;
+  private accRaw = 0;
+  private gyroS = 0;
+  private accS = 0;
+  private grav: Vec3 | null = null;
+
+  constructor(params: Pick<SegmentationParams, 'smoothing_ms' | 'gravity_tau_ms'>) {
+    this.smoothingMs = params.smoothing_ms;
+    this.gravityTauMs = params.gravity_tau_ms;
+  }
+
+  /** Feeds one sample (non-decreasing t); returns the smoothed values after it (unchanged for a non-finite t). */
+  push(s: MotionSample): { gyro: number; acc: number } {
+    const t = s.t;
+    if (typeof t !== 'number' || !Number.isFinite(t)) return { gyro: this.gyroS, acc: this.accS };
+    const first = this.lastT === null;
+    const dt = first ? 0 : Math.max(0, t - (this.lastT as number));
+    this.lastT = t;
+    const rr = s.rr;
+    if (rr && Number.isFinite(rr.alpha) && Number.isFinite(rr.beta) && Number.isFinite(rr.gamma)) {
+      this.gyroRaw = norm3(rr.alpha, rr.beta, rr.gamma);
+    }
+    const accg = isVec3(s.accg) ? s.accg : null;
+    if (first) this.accSource = isVec3(s.acc) ? 'linear' : accg ? 'highpass' : 'none';
+    if (this.accSource === 'linear') {
+      const a = s.acc;
+      if (isVec3(a)) this.accRaw = norm3(a[0], a[1], a[2]);
+    } else if (this.accSource === 'highpass' && accg) {
+      const g = this.grav;
+      if (g === null) {
+        this.grav = [accg[0], accg[1], accg[2]];
+      } else {
+        g[0] = emaStep(g[0], accg[0], dt, this.gravityTauMs);
+        g[1] = emaStep(g[1], accg[1], dt, this.gravityTauMs);
+        g[2] = emaStep(g[2], accg[2], dt, this.gravityTauMs);
+      }
+      const G = this.grav as Vec3;
+      this.accRaw = norm3(accg[0] - G[0], accg[1] - G[1], accg[2] - G[2]);
+    }
+    if (first) {
+      this.gyroS = this.gyroRaw;
+      this.accS = this.accRaw;
+    } else {
+      this.gyroS = emaStep(this.gyroS, this.gyroRaw, dt, this.smoothingMs);
+      this.accS = emaStep(this.accS, this.accRaw, dt, this.smoothingMs);
+    }
+    return { gyro: this.gyroS, acc: this.accS };
+  }
+
+  get gyro(): number {
+    return this.gyroS;
+  }
+
+  get acc(): number {
+    return this.accS;
+  }
+}
+
+/**
  * Convenience for tests/offline re-runs: feeds all samples, calling markGo at the first sample with
  * t ≥ goT (if goT is null, GO is given automatically `foreperiodMs` after the 'still' event).
  *

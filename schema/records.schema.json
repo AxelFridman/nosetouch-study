@@ -37,10 +37,14 @@
     "Speed": { "enum": ["natural", "fast", "slow"] },
     "StartPosition": { "enum": ["natural", "shoulder", "center"] },
     "Variant": {
-      "enum": ["standard", "curved", "pause", "twist", "elbow_high", "bent_start", "lean_in", "chin", "forehead", "jerky"]
+      "enum": ["standard", "curved", "pause", "twist", "elbow_high", "bent_start", "lean_in", "chin", "forehead", "jerky", "tilted_touch"],
+      "description": "tilted_touch (schema 1.2): the top edge of the phone touches the nose, tilted as it arrives"
     },
     "Posture": { "enum": ["standing", "sitting"] },
-    "ProtocolPreset": { "enum": ["quick", "standard", "full", "custom"] },
+    "ProtocolPreset": {
+      "enum": ["quick", "standard", "full", "custom", "street"],
+      "description": "street (schema 1.2, protocol 2.0.0): the ~5 minute default visit in priority tiers"
+    },
     "Language": { "enum": ["en", "he"] },
     "CueKind": { "enum": ["ready", "go", "end", "error", "block_start"] },
     "EhiAnswer": { "enum": ["always_right", "usually_right", "both", "usually_left", "always_left"] },
@@ -56,7 +60,11 @@
         "start_position": { "$ref": "#/$defs/StartPosition" },
         "variant": { "$ref": "#/$defs/Variant" },
         "posture": { "$ref": "#/$defs/Posture" },
-        "rep": { "type": "integer", "minimum": 0 }
+        "rep": { "type": "integer", "minimum": 0 },
+        "hand_source": {
+          "enum": ["instructed", "reported"],
+          "description": "optional (schema 1.2): 'reported' = the participant chose the hand and reported it after the trial (street 'choice' block); absent = instructed"
+        }
       }
     },
 
@@ -87,7 +95,12 @@
         "min_movement_ms": { "type": "number", "minimum": 0 },
         "max_wait_ms": { "type": "number", "minimum": 0 },
         "max_movement_ms": { "type": "number", "minimum": 0 },
-        "post_roll_ms": { "type": "number", "minimum": 0 }
+        "post_roll_ms": { "type": "number", "minimum": 0 },
+        "return_cap_ms": {
+          "type": "number",
+          "minimum": 0,
+          "description": "optional (schema 1.2): after the end is confirmed, recording continues through the return of the arm for at most this long"
+        }
       }
     },
 
@@ -234,6 +247,10 @@
         "axis_check": {
           "anyOf": [{ "$ref": "#/$defs/AxisCheck" }, { "type": "null" }],
           "description": "optional (schema 1.1): empirical check of the rotationRate axis mapping/sign/units from a tilt gesture"
+        },
+        "method": {
+          "enum": ["guided_v1", "implicit_v1"],
+          "description": "optional (schema 1.2): guided_v1 = the calibration screen (table + upright + tilt steps); implicit_v1 = derived from the pre-GO hold of the first still upright trial. Absent = guided_v1"
         }
       }
     },
@@ -280,10 +297,23 @@
       "required": ["block_index", "kind", "hand", "orientation", "trials"],
       "properties": {
         "block_index": { "type": "integer", "minimum": 0 },
-        "kind": { "enum": ["main", "odd", "free"] },
+        "kind": {
+          "enum": ["main", "odd", "free", "choice"],
+          "description": "choice (schema 1.2): one trial whose hand the participant chooses and reports afterwards; the planned hand is a placeholder"
+        },
         "hand": { "$ref": "#/$defs/Hand" },
         "orientation": { "$ref": "#/$defs/OrientationId" },
-        "trials": { "type": "array", "items": { "$ref": "#/$defs/PlannedTrial" } }
+        "trials": { "type": "array", "items": { "$ref": "#/$defs/PlannedTrial" } },
+        "tier": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9,
+          "description": "optional (schema 1.2): priority tier; lower tiers run first (street: 0 choice, 1 basics, 2 sideways, 3 variety, 4 bonus)"
+        },
+        "optional": {
+          "type": "boolean",
+          "description": "optional (schema 1.2): true = bonus block, run only when the participant opts in; a session is complete without it"
+        }
       }
     },
 
@@ -319,7 +349,10 @@
         "started_at": { "$ref": "#/$defs/IsoTime" },
         "updated_at": { "$ref": "#/$defs/IsoTime" },
         "ended_at": { "anyOf": [{ "$ref": "#/$defs/IsoTime" }, { "type": "null" }] },
-        "status": { "enum": ["in_progress", "completed", "abandoned"] },
+        "status": {
+          "enum": ["in_progress", "completed", "abandoned", "ended_early"],
+          "description": "ended_early (schema 1.2): the participant chose Finish before every non-optional block was done"
+        },
         "participant": { "$ref": "#/$defs/ParticipantProfile" },
         "device": { "$ref": "#/$defs/DeviceInfo" },
         "capabilities": { "$ref": "#/$defs/SensorCapabilities" },
@@ -351,7 +384,11 @@
             "language": { "$ref": "#/$defs/Language" },
             "audio": { "type": "boolean" },
             "speech": { "type": "boolean" },
-            "segmentation_params": { "$ref": "#/$defs/SegmentationParams" }
+            "segmentation_params": { "$ref": "#/$defs/SegmentationParams" },
+            "review_mode": {
+              "enum": ["auto", "tap"],
+              "description": "optional (schema 1.2): auto = complete trials were accepted without a review screen (outcome.note 'auto_accept'); tap = the participant reviewed every trial. Absent = tap"
+            }
           }
         },
         "progress": {
@@ -415,7 +452,11 @@
         "gamma": { "$ref": "#/$defs/NullableNumArray" },
         "compass": { "$ref": "#/$defs/NullableNumArray", "description": "iOS webkitCompassHeading (deg) when present" },
         "absolute": { "type": ["boolean", "null"] },
-        "ts_first_raw": { "$ref": "#/$defs/NullableNumber" }
+        "ts_first_raw": { "$ref": "#/$defs/NullableNumber" },
+        "compass_accuracy": {
+          "$ref": "#/$defs/NullableNumArray",
+          "description": "optional (schema 1.2): iOS webkitCompassAccuracy (deg; negative = invalid) when present, one entry per sample"
+        }
       }
     },
 
@@ -443,7 +484,39 @@
         "type": { "enum": ["start", "end", "cancel"] },
         "n": { "type": "integer", "minimum": 0 },
         "x": { "$ref": "#/$defs/NullableNumber" },
-        "y": { "$ref": "#/$defs/NullableNumber" }
+        "y": { "$ref": "#/$defs/NullableNumber" },
+        "radius_x": { "$ref": "#/$defs/NullableNumber", "description": "optional (schema 1.2): Touch.radiusX (CSS px) of the same touch as x / y" },
+        "radius_y": { "$ref": "#/$defs/NullableNumber", "description": "optional (schema 1.2): Touch.radiusY (CSS px)" },
+        "force": { "$ref": "#/$defs/NullableNumber", "description": "optional (schema 1.2): Touch.force (0..1; 0 where the device does not measure it)" },
+        "rotation_angle": { "$ref": "#/$defs/NullableNumber", "description": "optional (schema 1.2): Touch.rotationAngle (deg)" },
+        "x_norm": { "$ref": "#/$defs/NullableNumber", "description": "optional (schema 1.2): x / viewport width (0..1)" },
+        "y_norm": { "$ref": "#/$defs/NullableNumber", "description": "optional (schema 1.2): y / viewport height (0..1)" }
+      }
+    },
+
+    "ScreenEvent": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "schema 1.2: a screen orientation change during the trial (screen.orientation 'change' event)",
+      "required": ["t", "type", "angle"],
+      "properties": {
+        "t": { "type": "number" },
+        "type": { "type": ["string", "null"], "description": "screen.orientation.type after the change, e.g. 'landscape-primary'" },
+        "angle": { "$ref": "#/$defs/NullableNumber", "description": "screen.orientation.angle after the change (deg)" }
+      }
+    },
+
+    "MagnetometerStream": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "schema 1.2: Generic Sensor API Magnetometer readings (µT, device frame), only where the browser exposes Magnetometer",
+      "required": ["t", "x", "y", "z", "frequency_hz"],
+      "properties": {
+        "t": { "$ref": "#/$defs/NumArray" },
+        "x": { "$ref": "#/$defs/NullableNumArray" },
+        "y": { "$ref": "#/$defs/NullableNumArray" },
+        "z": { "$ref": "#/$defs/NullableNumArray" },
+        "frequency_hz": { "type": "number", "description": "requested sampling frequency" }
       }
     },
 
@@ -523,7 +596,15 @@
             "stop_ms": { "type": "number" },
             "first_touch_ms": { "$ref": "#/$defs/NullableNumber", "description": "first touchstart after GO (nose contact candidate when the screen faces the user)" },
             "foreperiod_ms": { "$ref": "#/$defs/NullableNumber" },
-            "false_starts": { "type": "integer", "minimum": 0 }
+            "false_starts": { "type": "integer", "minimum": 0 },
+            "return_onset_ms": {
+              "$ref": "#/$defs/NullableNumber",
+              "description": "optional (schema 1.2): start of the return movement (arm back out) after the end; null when it was not observed"
+            },
+            "return_end_ms": {
+              "$ref": "#/$defs/NullableNumber",
+              "description": "optional (schema 1.2): when the phone was still again after the return movement; null when not observed"
+            }
           }
         },
         "segmentation": {
@@ -574,7 +655,9 @@
             "acc_available": { "type": "boolean" },
             "rotation_available": { "type": "boolean" },
             "hidden_during": { "type": "boolean" },
-            "warnings": { "type": "array", "items": { "type": "string" } }
+            "warnings": { "type": "array", "items": { "type": "string" } },
+            "n_quaternion_abs": { "type": "integer", "minimum": 0, "description": "optional (schema 1.2): samples in streams.quaternion_abs" },
+            "n_orientation_abs": { "type": "integer", "minimum": 0, "description": "optional (schema 1.2): samples in streams.orientation_abs" }
           }
         },
         "screen": {
@@ -597,7 +680,24 @@
             "orientation": { "anyOf": [{ "$ref": "#/$defs/OrientationStream" }, { "type": "null" }] },
             "quaternion": { "anyOf": [{ "$ref": "#/$defs/QuaternionStream" }, { "type": "null" }] },
             "touches": { "type": "array", "items": { "$ref": "#/$defs/TouchRecord" } },
-            "cues": { "type": "array", "items": { "$ref": "#/$defs/CueRecord" } }
+            "cues": { "type": "array", "items": { "$ref": "#/$defs/CueRecord" } },
+            "quaternion_abs": {
+              "anyOf": [{ "$ref": "#/$defs/QuaternionStream" }, { "type": "null" }],
+              "description": "optional (schema 1.2): AbsoluteOrientationSensor (magnetometer-fused, Earth-referenced) where available; null when no sample"
+            },
+            "orientation_abs": {
+              "anyOf": [{ "$ref": "#/$defs/OrientationStream" }, { "type": "null" }],
+              "description": "optional (schema 1.2): 'deviceorientationabsolute' events (Chrome Android); null when no event"
+            },
+            "screen_events": {
+              "type": "array",
+              "items": { "$ref": "#/$defs/ScreenEvent" },
+              "description": "optional (schema 1.2): screen orientation changes during the trial"
+            },
+            "magnetometer": {
+              "anyOf": [{ "$ref": "#/$defs/MagnetometerStream" }, { "type": "null" }],
+              "description": "optional (schema 1.2): Magnetometer readings where exposed (usually behind a browser flag); null otherwise"
+            }
           }
         }
       }

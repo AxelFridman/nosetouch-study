@@ -6,12 +6,15 @@ import {
   buildEnvelope,
   createUploadQueue,
   isDue,
+  KEEPALIVE_MAX_BYTES,
   orderForUpload,
   sendEnvelope,
+  sendKeepalive,
   uploadEnabled,
   UPLOAD_TIMEOUT_MS,
+  utf8Bytes,
 } from '../src/core/uploader';
-import type { OutboxItem, SessionRecord, UploadConfig, UploadEnvelope } from '../src/core/types';
+import type { OutboxItem, SessionRecord, TrialRecord, UploadConfig, UploadEnvelope } from '../src/core/types';
 import { isRefused, summarizeOutbox, uploadLabel } from '../src/app/screens/DataScreen';
 import { admin as enAdmin } from '../src/i18n/en/admin';
 import { admin as heAdmin } from '../src/i18n/he/admin';
@@ -79,6 +82,26 @@ async function seedSession(store: LocalStore, sid: string, nTrials: number, pid 
 
 const byId = async (store: LocalStore, id: string): Promise<OutboxItem | undefined> =>
   (await store.listOutbox()).find((i) => i.id === id);
+
+/** The v2 study's upload mode (the Heroku backend). */
+const JSON_POST: UploadConfig = { mode: 'json_post', endpoint: 'https://nosetouch.example/api/ingest', study_key: 'k-123' };
+
+/** Size of a record's upload envelope as the keepalive budget counts it. */
+const envelopeBytes = (t: TrialRecord): number => utf8Bytes(JSON.stringify(buildEnvelope('trial', t, JSON_POST)));
+
+/** A trial whose upload envelope is about `kib` KiB: its motion stream holds as many samples as needed. */
+function trialOfSize(session_id: string, trial_id: string, kib: number): TrialRecord {
+  const withSamples = (n: number): TrialRecord => {
+    const base = makeTrial({ trial_id, session_id });
+    const t = Array.from({ length: n }, (_, i) => Math.round(i * 1666.7) / 100);
+    const v = Array.from({ length: n }, (_, i) => Math.round(Math.sin(i) * 981) / 100);
+    const m = { ...base.streams.motion, t, ts: t, acc_x: v, acc_y: v, acc_z: v, accg_x: v, accg_y: v, accg_z: v };
+    return { ...base, streams: { ...base.streams, motion: { ...m, rr_alpha: v, rr_beta: v, rr_gamma: v } } };
+  };
+  const perSample = (envelopeBytes(withSamples(200)) - envelopeBytes(withSamples(100))) / 100;
+  const fixed = envelopeBytes(withSamples(100)) - 100 * perSample;
+  return withSamples(Math.max(1, Math.round((kib * 1024 - fixed) / perSample)));
+}
 
 afterEach(() => {
   vi.useRealTimers();
@@ -227,6 +250,38 @@ describe('sendEnvelope — json_post and disabled modes', () => {
     expect(f).not.toHaveBeenCalled();
     expect(uploadEnabled({ mode: 'none', endpoint: 'https://x.org', study_key: '' })).toBe(false);
     expect(uploadEnabled(appsScriptCfg())).toBe(true);
+  });
+});
+
+describe('sendKeepalive (the page-leave upload)', () => {
+  const body = JSON.stringify(makeEnvelope('trial', makeTrial(), 'k-123'));
+
+  it('POSTs with keepalive and no headers at all (no preflight), and judges the reply like any upload', async () => {
+    const f = fakeFetch(json({ ok: true }));
+    expect(await sendKeepalive(JSON_POST, body, f)).toMatchObject({ ok: true, confirmed: true, error: null });
+    const [url, init] = f.mock.calls[0] as FetchArgs;
+    expect(url).toBe(JSON_POST.endpoint);
+    expect(init).toMatchObject({ method: 'POST', body, keepalive: true, mode: 'cors', credentials: 'omit' });
+    expect(init).not.toHaveProperty('headers');
+    expect(init).not.toHaveProperty('signal'); // no timeout of its own: the page may be gone before any answer
+    const refused = fakeFetch(json({ ok: false, error: 'bad record', retry: false }, 400));
+    expect(await sendKeepalive(JSON_POST, body, refused)).toMatchObject({ ok: false, permanent: true });
+    expect(await sendKeepalive(JSON_POST, body, fakeFetch(networkError()))).toMatchObject({ ok: false, transient: true });
+    expect(await sendKeepalive(appsScriptCfg(), body, fakeFetch(json({ ok: true })))).toMatchObject({ ok: true });
+  });
+
+  it('never fetches without a usable upload config', async () => {
+    const f = fakeFetch(json({ ok: true }));
+    expect((await sendKeepalive({ mode: 'none', endpoint: '', study_key: '' }, body, f)).ok).toBe(false);
+    expect((await sendKeepalive({ ...JSON_POST, endpoint: '  ' }, body, f)).ok).toBe(false);
+    expect(f).not.toHaveBeenCalled();
+  });
+
+  it('utf8Bytes counts bytes, not characters (the 64 KiB keepalive cap is in bytes)', () => {
+    expect(utf8Bytes('abc')).toBe(3);
+    expect(utf8Bytes('שלום')).toBe(8);
+    expect(utf8Bytes('✓')).toBe(3);
+    expect(KEEPALIVE_MAX_BYTES).toBe(60 * 1024);
   });
 });
 
@@ -728,22 +783,152 @@ describe('upload queue triggers (start/stop)', () => {
     q.stop();
   });
 
-  it('does not flush on visibilitychange to hidden', async () => {
+  it('page leave (visibility → hidden, pagehide): small records go out with fetch keepalive, bigger ones stay queued', async () => {
     const win = new EventTarget();
-    const doc = Object.assign(new EventTarget(), { visibilityState: 'hidden' as DocumentVisibilityState });
+    const doc = Object.assign(new EventTarget(), { visibilityState: 'visible' as DocumentVisibilityState });
     vi.stubGlobal('window', win);
     vi.stubGlobal('document', doc);
     const store = await freshStore();
-    const spy = vi.spyOn(store, 'listOutbox');
-    const q = createUploadQueue(store, () => appsScriptCfg(), { fetchImpl: fakeFetch(json({ ok: true })) });
+    const f = fakeFetch(json({ ok: true }));
+    const q = createUploadQueue(store, () => JSON_POST, { fetchImpl: f });
     q.start();
-    await vi.waitFor(() => expect(spy).toHaveBeenCalledTimes(1));
-    await q.flush(); // second call (a new run)
-    const before = spy.mock.calls.length;
+    await drain();
+    expect(f).not.toHaveBeenCalled(); // nothing queued yet
+
+    await seedSession(store, 'S', 1); // a small session record and a small trial…
+    const big = trialOfSize('S', 'S-big', 100); // …and a trial over the keepalive limit
+    expect(envelopeBytes(big)).toBeGreaterThan(KEEPALIVE_MAX_BYTES);
+    await store.saveTrial(big);
+    await store.enqueue('trial', 'S-big', 'S');
+
+    doc.visibilityState = 'hidden';
     doc.dispatchEvent(new Event('visibilitychange'));
-    await new Promise((r) => setTimeout(r, 20));
-    expect(spy.mock.calls.length).toBe(before);
+    await vi.waitFor(() => expect(f).toHaveBeenCalledTimes(2));
+    await drain();
+    expect(sentEnvelopes(f).map((e) => `${e.kind}:${'trial_id' in e.record ? e.record.trial_id : e.record.session_id}`)).toEqual([
+      'session:S',
+      'trial:S-t0',
+    ]);
+    for (const [url, init] of f.mock.calls as FetchArgs[]) {
+      expect(url).toBe(JSON_POST.endpoint);
+      // a CORS simple request: keepalive requests must not need a preflight
+      expect(init).toMatchObject({ method: 'POST', keepalive: true, credentials: 'omit' });
+      expect(init).not.toHaveProperty('headers');
+      expect(utf8Bytes(String(init?.body))).toBeLessThan(KEEPALIVE_MAX_BYTES);
+    }
+    expect(await byId(store, 'session:S')).toMatchObject({ status: 'sent', confirmed: true, attempts: 1 });
+    expect((await byId(store, 'trial:S-t0'))?.status).toBe('sent');
+    expect(await byId(store, 'trial:S-big')).toMatchObject({ status: 'pending', attempts: 0 }); // for the next visit
+
+    win.dispatchEvent(new Event('pagehide')); // the page goes away for good: nothing small is left
+    await drain();
+    expect(f).toHaveBeenCalledTimes(2);
     q.stop();
+    doc.dispatchEvent(new Event('visibilitychange'));
+    win.dispatchEvent(new Event('pagehide'));
+    await drain();
+    expect(f).toHaveBeenCalledTimes(2);
+  });
+
+  it('page leave: the keepalive bodies in flight stay within the 60 KB budget; an item in flight is not sent twice', async () => {
+    const store = await freshStore();
+    await store.saveSession(makeSession({ session_id: 'S' }));
+    const trials = ['a', 'b', 'c'].map((x) => trialOfSize('S', `S-${x}`, 25));
+    for (const t of trials) {
+      expect(envelopeBytes(t)).toBeGreaterThan(20 * 1024);
+      expect(envelopeBytes(t)).toBeLessThan(KEEPALIVE_MAX_BYTES / 2);
+      await store.saveTrial(t);
+      await store.enqueue('trial', t.trial_id, 'S');
+    }
+    const gate = deferred<void>();
+    const f = vi.fn(async () => {
+      await gate.promise;
+      return json({ ok: true })();
+    });
+    const q = createUploadQueue(store, () => JSON_POST, { fetchImpl: f });
+    expect(await q.flushOnLeave()).toBe(2); // 2 × 25 KB in flight; the third would exceed 60 KB
+    expect(await q.flushOnLeave()).toBe(0); // pagehide right after visibilitychange: nothing twice
+    expect(f).toHaveBeenCalledTimes(2);
+    gate.resolve();
+    await drain();
+    expect((await store.listOutbox()).map((i) => `${i.id}=${i.status}`)).toEqual([
+      'trial:S-a=sent',
+      'trial:S-b=sent',
+      'trial:S-c=pending',
+    ]);
+    expect(await q.flushOnLeave()).toBe(1); // the budget is free again
+    await drain();
+    expect((await byId(store, 'trial:S-c'))?.status).toBe('sent');
+  });
+
+  it('page leave ignores the backoff but never sends a refused record; a failed keepalive changes nothing', async () => {
+    const store = await freshStore();
+    await seedSession(store, 'S', 1);
+    const recent = new Date().toISOString();
+    const session = (await byId(store, 'session:S'))!;
+    await store.updateOutbox({ ...session, status: 'failed', attempts: 1, permanent: true, last_error: 'bad key', last_attempt_at: recent });
+    const trial = (await byId(store, 'trial:S-t0'))!;
+    await store.updateOutbox({ ...trial, status: 'failed', attempts: 3, last_error: 'HTTP 503', last_attempt_at: recent });
+
+    const down = fakeFetch(networkError());
+    expect(await createUploadQueue(store, () => JSON_POST, { fetchImpl: down }).flushOnLeave()).toBe(1);
+    await drain();
+    expect(sentEnvelopes(down).map((e) => e.kind)).toEqual(['trial']); // backing off, but sent: the last chance
+    // the failure leaves the item exactly as it was: not counted, still failed, retried later
+    expect(await byId(store, 'trial:S-t0')).toMatchObject({ status: 'failed', attempts: 3, last_error: 'HTTP 503' });
+
+    const up = fakeFetch(json({ ok: true }));
+    expect(await createUploadQueue(store, () => JSON_POST, { fetchImpl: up }).flushOnLeave()).toBe(1);
+    await drain();
+    expect(await byId(store, 'trial:S-t0')).toMatchObject({ status: 'sent', attempts: 4, last_error: null });
+    expect(await byId(store, 'session:S')).toMatchObject({ status: 'failed', permanent: true }); // never on its own
+
+    const off = fakeFetch(json({ ok: true }));
+    await seedSession(store, 'T', 0);
+    expect(await createUploadQueue(store, () => ({ mode: 'none', endpoint: '', study_key: '' }), { fetchImpl: off }).flushOnLeave()).toBe(0);
+    expect(off).not.toHaveBeenCalled();
+  });
+
+  it('a record re-enqueued while its keepalive is in flight stays pending (the newer content is sent later)', async () => {
+    const store = await freshStore();
+    await seedSession(store, 'S', 0);
+    const gate = deferred<void>();
+    const f = vi.fn(async () => {
+      await gate.promise;
+      return json({ ok: true })();
+    });
+    const q = createUploadQueue(store, () => JSON_POST, { fetchImpl: f });
+    expect(await q.flushOnLeave()).toBe(1);
+    await store.saveSession(makeSession({ session_id: 'S', status: 'completed' }));
+    await store.enqueue('session', 'S', 'S');
+    gate.resolve();
+    await drain();
+    expect(await byId(store, 'session:S')).toMatchObject({ status: 'pending', attempts: 0 });
+  });
+
+  it('a flush() during a run sends what was enqueued after the run\'s last listing at once (one more run)', async () => {
+    const store = await freshStore();
+    await seedSession(store, 'S', 0);
+    const f = fakeFetch(json({ ok: true }));
+    const q = createUploadQueue(store, () => appsScriptCfg(), { fetchImpl: f });
+    // the app saves a trial and calls flush() (sessionFlow does after every enqueue) just after the
+    // running pass listed the outbox for the last time
+    const realList = store.listOutbox.bind(store);
+    let listings = 0;
+    vi.spyOn(store, 'listOutbox').mockImplementation(async (status?: OutboxItem['status']) => {
+      const items = await realList(status);
+      listings += 1;
+      if (listings === 2) {
+        await store.saveTrial(makeTrial({ trial_id: 'late', session_id: 'S' }));
+        await store.enqueue('trial', 'late', 'S');
+        void q.flush();
+      }
+      return items;
+    });
+    const report = await q.flush();
+    expect(report.sent).toBe(1); // this run only saw the session record
+    await vi.waitFor(async () => expect((await byId(store, 'trial:late'))?.status).toBe('sent'));
+    expect(f).toHaveBeenCalledTimes(2);
   });
 });
 

@@ -46,7 +46,7 @@ from typing import Any
 
 import numpy as np
 
-from .conventions import DEFAULT_SEGMENTATION_PARAMS, SEGMENTATION_PARAM_KEYS
+from .conventions import DEFAULT_SEGMENTATION_PARAMS, OPTIONAL_SEGMENTATION_PARAM_KEYS, SEGMENTATION_PARAM_KEYS
 from .preprocess import lowpass, resample_uniform
 
 ONLINE_METHOD = 'online_v1'
@@ -110,6 +110,9 @@ class OnlineSegmenterV1:
             if missing:
                 raise KeyError(f'segmentation params missing {missing}')
             p = {k: float(params[k]) for k in SEGMENTATION_PARAM_KEYS}
+            # optional schema 1.2 keys (return_cap_ms) are not read here but echoed in the result's params,
+            # like the app does: the result then equals the stored segmentation block
+            p.update({k: float(params[k]) for k in OPTIONAL_SEGMENTATION_PARAM_KEYS if params.get(k) is not None})
         self.params: dict[str, float] = p
         self._state = 'waiting_still'
         # per pushed sample

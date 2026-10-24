@@ -15,23 +15,76 @@ from _mlhelpers import REPO, condition
 from motionlab import conventions as C
 from motionlab import evaluate as E
 from motionlab import features, load_dataset, models, synth
+from motionlab import io as motionlab_io
+from motionlab import schema as S
 from motionlab.qa import qa_summary
 
 CONSTANTS_TS = (REPO / 'app' / 'src' / 'core' / 'constants.ts').read_text(encoding='utf-8')
+PROTOCOL_TS = (REPO / 'app' / 'src' / 'core' / 'protocol.ts').read_text(encoding='utf-8')
 
 
-def _ts_block(name: str) -> str:
-    m = re.search(name + r'[^=]*=\s*\{(.*?)\n\}(?: as const)?;', CONSTANTS_TS, re.S)
-    assert m, f'{name} not found in constants.ts'
-    return m.group(1)
+def _ts_block(name: str, source: str = CONSTANTS_TS) -> str:
+    """Body of the object literal declared as `const <name> ... = { ... };`, without line comments."""
+    m = re.search(r'\bconst\s+' + name + r'\b[^=]*=\s*\{(.*?)\n\}(?: as const)?;', source, re.S)
+    assert m, f'{name} not found'
+    return re.sub(r'//[^\n]*', '', m.group(1))
+
+
+def _ts_numbers(block: str) -> dict[str, float]:
+    return {k: float(v) for k, v in re.findall(r'(\w+):\s*([-\d.]+)\s*[,}\n]', block)}
+
+
+def _ts_nested_numbers(block: str) -> dict[str, dict[str, float]]:
+    """{outer: {inner: number}} from a TS object literal of object literals (one nesting level)."""
+    return {k: _ts_numbers(inner + '\n') for k, inner in re.findall(r'(\w+):\s*\{([^{}]*)\}', block)}
 
 
 # ───────────────────────────── drift against the TypeScript contract ─────────────────────────────
 
 
 def test_default_segmentation_params_match_constants_ts():
-    ts = {k: float(v) for k, v in re.findall(r'(\w+):\s*([-\d.]+),', _ts_block('DEFAULT_SEGMENTATION_PARAMS'))}
+    ts = _ts_numbers(_ts_block('DEFAULT_SEGMENTATION_PARAMS'))
     assert ts == {k: float(v) for k, v in C.DEFAULT_SEGMENTATION_PARAMS.items()}
+    assert ts['still_gyro_dps'] == 20 and ts['post_roll_ms'] == 500 and ts['return_cap_ms'] == 3000  # protocol 2.0.0
+
+
+def test_segmentation_param_keys_follow_the_schema():
+    """online_v1 needs exactly the required keys (present in every record since schema 1.0); the optional
+    schema 1.2 keys (return_cap_ms) are for the trial controller, so old records still re-segment."""
+    sp = S.load_schema()['$defs']['SegmentationParams']
+    assert set(C.SEGMENTATION_PARAM_KEYS) == set(sp['required'])
+    assert set(C.OPTIONAL_SEGMENTATION_PARAM_KEYS) == set(sp['properties']) - set(sp['required'])
+    assert set(C.DEFAULT_SEGMENTATION_PARAMS) == set(sp['properties'])
+
+
+def test_parameter_overrides_match_protocol_ts():
+    assert _ts_nested_numbers(_ts_block('SPEED_OVERRIDES', PROTOCOL_TS)) == C._SPEED_OVERRIDES
+    assert _ts_nested_numbers(_ts_block('VARIANT_OVERRIDES', PROTOCOL_TS)) == C._VARIANT_OVERRIDES
+    tune = dict(re.findall(r"(\w+):\s*'(min|max)'", _ts_block('TUNE_DIRECTION', PROTOCOL_TS)))
+    assert tune == C._TUNE_DIRECTION
+    # protocol 2.0.0: slow onset floors above the still thresholds (no false start from a still sway)
+    slow = C._SPEED_OVERRIDES['slow']
+    assert slow['onset_gyro_min_dps'] > C.DEFAULT_SEGMENTATION_PARAMS['still_gyro_dps']
+    assert slow['onset_acc_min_ms2'] > C.DEFAULT_SEGMENTATION_PARAMS['still_acc_ms2']
+
+
+def test_enums_and_orientation_lists_match_the_contract():
+    defs = S.load_schema()['$defs']
+    assert C.VARIANTS == tuple(defs['Variant']['enum']) and 'tilted_touch' in C.ODD_VARIANTS
+    assert C.PROTOCOL_PRESETS == tuple(defs['ProtocolPreset']['enum'])
+    assert C.SPEEDS == tuple(defs['Speed']['enum']) and C.START_POSITIONS == tuple(defs['StartPosition']['enum'])
+    assert C.ALL_ORIENTATIONS == tuple(defs['OrientationId']['enum'])
+    assert C.COLLECTED_ORIENTATIONS == (
+        'upright_toward', 'top_left_toward', 'top_right_toward', 'upside_down_toward', 'flat_up', 'free')
+    assert re.search(r"COLLECTED_ORIENTATIONS[^=]*=\s*ALL_ORIENTATIONS\.filter\(\(o\) => ORIENTATIONS\[o\]\.screen !== 'away'\)",
+                     CONSTANTS_TS)
+
+
+def test_versions_match_constants_ts():
+    assert re.search(r"SCHEMA_VERSION = '([\d.]+)'", CONSTANTS_TS).group(1) == C.SCHEMA_VERSION == '1.2.0'
+    assert re.search(r"PROTOCOL_VERSION = '([\d.]+)'", CONSTANTS_TS).group(1) == C.APP_PROTOCOL_VERSION == '2.0.0'
+    assert synth.SCHEMA_VERSION == C.SCHEMA_VERSION
+    assert motionlab_io.SCHEMA_VERSION == C.SCHEMA_VERSION  # Dataset.to_bundle
 
 
 def test_orientation_table_matches_constants_ts():
@@ -58,7 +111,10 @@ def test_grip_matrices_are_rotations_and_mirror_consistent():
 
 def test_resolve_params_composes_like_protocol_ts():
     p = C.resolve_params(C.DEFAULT_SEGMENTATION_PARAMS, {'speed': 'slow', 'variant': 'pause'})
-    assert p['end_sustain_ms'] == 1800 and p['max_movement_ms'] == 12000 and p['onset_gyro_min_dps'] == 15
+    assert p['end_sustain_ms'] == 1800 and p['max_movement_ms'] == 12000 and p['onset_gyro_min_dps'] == 25
+    assert p['onset_acc_min_ms2'] == 0.55 and p['return_cap_ms'] == 3000  # keys no override names are copied
+    assert C.resolve_params(C.DEFAULT_SEGMENTATION_PARAMS, {'speed': 'natural', 'variant': 'tilted_touch'}) == \
+        C.DEFAULT_SEGMENTATION_PARAMS
     p = C.resolve_params({**C.DEFAULT_SEGMENTATION_PARAMS, 'onset_sustain_ms': 30}, {'speed': 'fast', 'variant': 'jerky'})
     assert p['onset_sustain_ms'] == 30  # 'min' direction: an override never loosens a stricter base
     assert p['end_sustain_ms'] == 600
@@ -181,8 +237,9 @@ def test_calibration_gyro_bias_needs_a_still_flat_window_and_a_small_norm():
 
 
 def test_a_moving_calibration_bias_is_not_subtracted_from_the_trials(symmetric_participant):
-    """A hand on the phone during the flat step: the stored 'bias' is motion; prepare_trial must use the
-    pre-GO estimate instead of subtracting it from every trial."""
+    """A hand on the phone during the flat step: the stored 'bias' is motion; prepare_trial must not subtract
+    it from every trial. norm_v2 subtracts nothing then (a hand-held pre-GO mean is tremor, not bias); the
+    norm_v1 pre-GO estimate is still available on request."""
     p = synth.default_platform('android', None, gyro_bias_dps=(0.15, -0.1, 0.05))
     rec = synth.simulate_trial(symmetric_participant, p, condition('right', 'upright_toward'), seed=3, noise=1.0)[0]
     moving = {'gravity_sign': None, 'upright_check': 'unclear', 'notes': ['flat: moving'],
@@ -191,8 +248,11 @@ def test_a_moving_calibration_bias_is_not_subtracted_from_the_trials(symmetric_p
     nm = C.session_normalization({'calibration': moving, 'device': {'engine': 'blink'}})
     assert nm.gyro_bias is None
     pt = features.prepare_trial(rec, norm=nm)
-    assert pt.ok
-    assert np.linalg.norm(pt.gyro_bias) < 1.0  # the pre-GO rest rate (the true bias is 0.19 deg/s)
+    assert pt.ok and pt.gyro_bias_source == 'none'
+    np.testing.assert_array_equal(pt.gyro_bias, np.zeros(3))
+    pre = features.prepare_trial(rec, norm=nm, remove_gyro_bias='pre_go')
+    assert pre.gyro_bias_source == 'pre_go'
+    assert np.linalg.norm(pre.gyro_bias) < 1.0  # the pre-GO rest rate (the true bias is 0.19 deg/s)
     still = dict(moving, flat={'still': True}, gyro_bias_dps={'alpha': 0.15, 'beta': -0.1, 'gamma': 0.05})
     pt2 = features.prepare_trial(rec, norm=C.session_normalization({'calibration': still, 'device': {'engine': 'blink'}}))
     np.testing.assert_allclose(pt2.gyro_bias, [0.15, -0.1, 0.05])

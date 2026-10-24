@@ -28,10 +28,15 @@ SCHEMA_PATH: Path = Path(__file__).resolve().parents[2] / 'schema' / 'records.sc
 DEFS = (
     'SessionRecord', 'TrialRecord', 'ParticipantProfile', 'UploadEnvelope', 'ExportBundle',
     'CalibrationResult', 'PlannedBlock', 'SegmentationParams', 'MotionStream', 'OrientationStream',
-    'QuaternionStream',
+    'QuaternionStream', 'MagnetometerStream', 'TouchRecord', 'ScreenEvent',
 )
 
-_STREAM_DEFS = {'motion': 'MotionStream', 'orientation': 'OrientationStream', 'quaternion': 'QuaternionStream'}
+#: Streams whose long number columns the fast mode truncates (and checks vectorised). Schema 1.2 added the
+#: optional quaternion_abs / orientation_abs / magnetometer streams (same element types).
+_STREAM_DEFS = {
+    'motion': 'MotionStream', 'orientation': 'OrientationStream', 'quaternion': 'QuaternionStream',
+    'quaternion_abs': 'QuaternionStream', 'orientation_abs': 'OrientationStream', 'magnetometer': 'MagnetometerStream',
+}
 _KEEP = 2  # stream elements kept for the structural (jsonschema) pass in fast mode
 
 
@@ -117,7 +122,7 @@ def _jsonschema_errors(def_name: str, obj: Any, max_errors: int) -> list[str]:
     return errs
 
 
-@functools.lru_cache(maxsize=4)
+@functools.lru_cache(maxsize=8)  # one entry per stream definition (4 since schema 1.2)
 def _stream_column_kinds(stream_def: str) -> dict[str, bool]:
     """column -> nullable, for the array-of-number columns of a stream definition."""
     props = load_schema()['$defs'][stream_def]['properties']

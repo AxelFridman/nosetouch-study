@@ -23,8 +23,8 @@ export function segParamsForSpeed(speed: Speed, base: SegmentationParams = DEFAU
   if (speed === 'slow') {
     return {
       ...base,
-      onset_gyro_min_dps: 15,
-      onset_acc_min_ms2: 0.3,
+      onset_gyro_min_dps: 25,
+      onset_acc_min_ms2: 0.55,
       end_gyro_dps: 10,
       end_acc_ms2: 0.25,
       end_sustain_ms: 450,

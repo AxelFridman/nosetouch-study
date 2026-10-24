@@ -10,13 +10,16 @@ import type {
 } from '../core/types';
 import { DEFAULT_STUDY_CONFIG } from '../core/constants';
 
+/**
+ * Screens. Participant path (spec v2 §1): welcome (with the consent) → profile → session → done.
+ * 'sensors' is the repair screen (shown only when the sensors cannot record), 'setup' the researchers'
+ * session setup (?setup=1 or Settings); data/settings/sandbox/about are secondary screens.
+ */
 export type ScreenId =
   | 'loading'
   | 'welcome'
-  | 'consent'
   | 'profile'
   | 'sensors'
-  | 'calibration'
   | 'setup'
   | 'session'
   | 'done'
@@ -37,6 +40,11 @@ export interface LocalSettings {
   upload_override: Partial<UploadConfig> | null;
   /** id of the participant last used on this device */
   last_participant_id: string | null;
+  /**
+   * Researcher setting (lab use): review every trial on a screen with a tap (session settings.review_mode
+   * 'tap') instead of the hands-free flow that accepts complete trials automatically ('auto'). Default false.
+   */
+  review_each_trial: boolean;
 }
 
 export interface OutboxSummary {
@@ -54,12 +62,18 @@ export interface AppState {
   participant: ParticipantProfile | null;
   device: DeviceInfo | null;
   capabilities: SensorCapabilities | null;
+  /** v2 has no calibration screen: stays null unless a caller sets one (createSession stores it) */
   calibration: CalibrationResult | null;
   /** consent accepted in this app run (ISO time); persisted into the session record */
   consentAcceptedAt: string | null;
   session: SessionRecord | null;
   outbox: OutboxSummary;
   toast: { text: string; kind: 'info' | 'ok' | 'warn' | 'error' } | null;
+  /**
+   * Researchers: the profile's Continue opens the session setup (presets, custom builder) instead of
+   * starting config.default_preset. Set by ?setup=1 or in Settings; like `simulate`, never remembered.
+   */
+  setupRequested: boolean;
 }
 
 const SETTINGS_KEY = 'nosetouch.settings.v1';
@@ -72,12 +86,17 @@ export const DEFAULT_SETTINGS: LocalSettings = {
   simulate: false,
   upload_override: null,
   last_participant_id: null,
+  review_each_trial: false,
 };
 
 export function loadSettings(defaultLanguage: Language): LocalSettings {
   try {
     const raw = localStorage.getItem(SETTINGS_KEY);
-    if (raw) return { ...DEFAULT_SETTINGS, language: defaultLanguage, ...JSON.parse(raw), simulate: false };
+    if (raw) {
+      const merged: LocalSettings = { ...DEFAULT_SETTINGS, language: defaultLanguage, ...JSON.parse(raw), simulate: false };
+      // settings saved before v0.2.0 lack the field; anything but true keeps the hands-free flow
+      return { ...merged, review_each_trial: merged.review_each_trial === true };
+    }
   } catch {
     // storage blocked (private mode) — fall through to defaults
   }
@@ -136,5 +155,6 @@ export function initialState(): AppState {
     session: null,
     outbox: { pending: 0, sent: 0, failed: 0 },
     toast: null,
+    setupRequested: false,
   };
 }

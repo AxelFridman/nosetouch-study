@@ -8,18 +8,24 @@ import {
   NO_EVENTS_TIMEOUT_MS,
   parseUserAgent,
   rateSummary,
+  readTouch,
   requestMotionPermission,
 } from '../src/core/sensors';
 import type {
+  MagnetometerSample,
   MotionSample,
   OrientationSample,
   QuaternionSample,
+  ScreenSample,
   SensorError,
   SensorListener,
   SensorSource,
 } from '../src/core/types';
 import {
   FakeDocument,
+  FakeScreenOrientation,
+  fakeEvent,
+  fakeMagnetometerClass,
   fakeMotionInterfaces,
   fakeOrientationSensorClass,
   fakePermissionsApi,
@@ -315,19 +321,27 @@ describe('createBrowserSensorSource: samples', () => {
     src.stop();
   });
 
-  it('converts deviceorientation events, including iOS webkitCompassHeading', async () => {
+  it('converts deviceorientation events, including iOS webkitCompassHeading and webkitCompassAccuracy', async () => {
     const { win } = installBrowser({ webkit: true });
     const c = collector();
     const src = createBrowserSensorSource({ quaternion: false });
     await src.start(c.listener);
     vi.spyOn(performance, 'now').mockReturnValueOnce(50).mockReturnValueOnce(66);
     win.dispatchEvent(
-      orientationEvent({ alpha: 120.5, beta: 80.25, gamma: -3.5, absolute: false, webkitCompassHeading: 271.5, timeStamp: 40 }),
+      orientationEvent({
+        alpha: 120.5,
+        beta: 80.25,
+        gamma: -3.5,
+        absolute: false,
+        webkitCompassHeading: 271.5,
+        webkitCompassAccuracy: 15,
+        timeStamp: 40,
+      }),
     );
-    win.dispatchEvent(orientationEvent({ alpha: null, beta: undefined, absolute: 'yes', timeStamp: 56 }));
+    win.dispatchEvent(orientationEvent({ alpha: null, beta: undefined, absolute: 'yes', webkitCompassAccuracy: 'bad', timeStamp: 56 }));
     expect(c.orientation).toEqual([
-      { t: 50, ts: 40, alpha: 120.5, beta: 80.25, gamma: -3.5, absolute: false, compass: 271.5 },
-      { t: 66, ts: 56, alpha: null, beta: null, gamma: null, absolute: null, compass: null },
+      { t: 50, ts: 40, alpha: 120.5, beta: 80.25, gamma: -3.5, absolute: false, compass: 271.5, compass_accuracy: 15 },
+      { t: 66, ts: 56, alpha: null, beta: null, gamma: null, absolute: null, compass: null, compass_accuracy: null },
     ]);
     src.stop();
   });
@@ -608,6 +622,270 @@ describe('createBrowserSensorSource: RelativeOrientationSensor quaternions', () 
     src.stop();
     await p;
     expect(instances).toHaveLength(0);
+  });
+});
+
+// ───────────────────────────── schema 1.2 optional streams ─────────────────────────────
+
+describe('createBrowserSensorSource: schema 1.2 optional streams (best effort)', () => {
+  /** A listener with every schema 1.2 callback, plus onWarning (trialController.SensorWarningListener). */
+  function fullCollector() {
+    const c = collector();
+    const orientationAbs: OrientationSample[] = [];
+    const quaternionAbs: QuaternionSample[] = [];
+    const magnetometer: MagnetometerSample[] = [];
+    const screens: ScreenSample[] = [];
+    const warnings: string[] = [];
+    const listener: SensorListener & { onWarning(code: string): void } = {
+      ...c.listener,
+      onOrientationAbs: (s) => orientationAbs.push(s),
+      onQuaternionAbs: (s) => quaternionAbs.push(s),
+      onMagnetometer: (s) => magnetometer.push(s),
+      onScreen: (s) => screens.push(s),
+      onWarning: (code) => warnings.push(code),
+    };
+    return { ...c, orientationAbs, quaternionAbs, magnetometer, screens, warnings, listener };
+  }
+
+  it('AbsoluteOrientationSensor at 60 Hz in the device frame → onQuaternionAbs (no Permissions API needed); stop() stops it', async () => {
+    const abs = fakeOrientationSensorClass();
+    installBrowser();
+    vi.stubGlobal('AbsoluteOrientationSensor', abs.Sensor);
+    const c = fullCollector();
+    const src = createBrowserSensorSource();
+    await src.start(c.listener);
+    expect(abs.instances).toHaveLength(1);
+    expect(abs.instances[0].options).toEqual({ frequency: 60, referenceFrame: 'device' });
+    expect(abs.instances[0].started).toBe(1);
+    vi.spyOn(performance, 'now').mockReturnValueOnce(321);
+    abs.instances[0].emitReading([0, 0, 0.5, 0.866]);
+    abs.instances[0].emitReading([0, Number.NaN, 0, 1]); // dropped
+    abs.instances[0].emitReading(null); // no reading yet
+    expect(c.quaternionAbs).toEqual([{ t: 321, q: [0, 0, 0.5, 0.866], sensor: 'AbsoluteOrientationSensor' }]);
+    expect(c.quaternion).toEqual([]); // never mixed into the relative stream
+    expect(c.warnings).toEqual([]);
+    src.stop();
+    expect(abs.instances[0].stopped).toBe(1);
+    expect(abs.instances[0].listenerCount()).toBe(0);
+  });
+
+  it.each<[string, Record<string, string>, number]>([
+    ['magnetometer denied', { accelerometer: 'granted', gyroscope: 'granted', magnetometer: 'denied' }, 0],
+    ['gyroscope denied', { accelerometer: 'granted', gyroscope: 'denied' }, 0],
+    ['names unknown to the browser (queries reject)', {}, 1],
+    ['still to be asked (prompt)', { accelerometer: 'prompt', gyroscope: 'prompt', magnetometer: 'prompt' }, 1],
+  ])('AbsoluteOrientationSensor and permissions: %s', async (_label, states, expected) => {
+    const abs = fakeOrientationSensorClass();
+    installBrowser({ navigator: { permissions: fakePermissionsApi(states) } });
+    vi.stubGlobal('AbsoluteOrientationSensor', abs.Sensor);
+    const c = fullCollector();
+    const src = createBrowserSensorSource({ quaternion: false });
+    await src.start(c.listener);
+    expect(abs.instances).toHaveLength(expected);
+    expect(c.warnings).toEqual(expected === 0 ? ['abs_orientation_denied'] : []);
+    expect(c.errors).toEqual([]);
+    src.stop();
+  });
+
+  it('a failing optional sensor ends only its own stream, with one warning and never onError', async () => {
+    const abs = fakeOrientationSensorClass();
+    const rel = fakeOrientationSensorClass();
+    const { win } = installBrowser({
+      sensorClass: rel.Sensor,
+      navigator: { permissions: fakePermissionsApi({ accelerometer: 'granted', gyroscope: 'granted' }) },
+    });
+    vi.stubGlobal('AbsoluteOrientationSensor', abs.Sensor);
+    const c = fullCollector();
+    const src = createBrowserSensorSource();
+    await src.start(c.listener);
+    abs.instances[0].emitError();
+    abs.instances[0].emitError(); // already stopped: no second warning
+    expect(abs.instances[0].stopped).toBe(1);
+    abs.instances[0].emitReading([0, 0, 0, 1]);
+    expect(c.quaternionAbs).toEqual([]);
+    rel.instances[0].emitReading([0, 0, 0, 1]); // the relative sensor keeps going
+    expect(c.quaternion).toHaveLength(1);
+    rel.instances[0].emitError();
+    win.dispatchEvent(motionEvent(FULL_MOTION));
+    expect(c.motion).toHaveLength(1);
+    expect(c.warnings).toEqual(['abs_orientation_unavailable', 'quaternion_unavailable']);
+    expect(c.errors).toEqual([]);
+    src.stop();
+
+    // a constructor that throws (permissions policy): a warning, start() still resolves
+    const blocked = fakeOrientationSensorClass({ throwOnConstruct: true });
+    installBrowser();
+    vi.stubGlobal('AbsoluteOrientationSensor', blocked.Sensor);
+    const c2 = fullCollector();
+    const src2 = createBrowserSensorSource();
+    await expect(src2.start(c2.listener)).resolves.toBeUndefined();
+    expect(c2.warnings).toEqual(['abs_orientation_unavailable']);
+    expect(c2.errors).toEqual([]);
+    src2.stop();
+  });
+
+  it('the optional streams start only for a listener that implements them, and each can be switched off', async () => {
+    const abs = fakeOrientationSensorClass();
+    const mag = fakeMagnetometerClass();
+    const so = new FakeScreenOrientation();
+    const { win } = installBrowser();
+    Object.defineProperty(win, 'ondeviceorientationabsolute', { value: null, configurable: true });
+    vi.stubGlobal('AbsoluteOrientationSensor', abs.Sensor);
+    vi.stubGlobal('Magnetometer', mag.Sensor);
+    vi.stubGlobal('screen', { width: 390, height: 844, orientation: so });
+    const nothingStarted = (): void => {
+      expect(abs.instances).toHaveLength(0);
+      expect(mag.instances).toHaveLength(0);
+      expect(win.listenerCount('deviceorientationabsolute')).toBe(0);
+      expect(so.listenerCount('change')).toBe(0);
+    };
+    // a measureRates-style listener (motion + orientation only)
+    const plain = createBrowserSensorSource();
+    await plain.start(collector().listener);
+    nothingStarted();
+    plain.stop();
+    const off = createBrowserSensorSource({ absoluteQuaternion: false, orientationAbs: false, magnetometer: false, screenEvents: false });
+    await off.start(fullCollector().listener);
+    nothingStarted();
+    off.stop();
+    // defaults: everything on
+    const on = createBrowserSensorSource();
+    await on.start(fullCollector().listener);
+    expect(abs.instances).toHaveLength(1);
+    expect(mag.instances).toHaveLength(1);
+    expect(win.listenerCount('deviceorientationabsolute')).toBe(1);
+    expect(so.listenerCount('change')).toBe(1);
+    on.stop();
+    expect(win.listenerCount()).toBe(0);
+    expect(so.listenerCount()).toBe(0);
+    expect(abs.instances[0].stopped).toBe(1);
+    expect(mag.instances[0].stopped).toBe(1);
+  });
+
+  it("'deviceorientationabsolute' events → onOrientationAbs (feature-detected; never onOrientation)", async () => {
+    const { win } = installBrowser();
+    Object.defineProperty(win, 'ondeviceorientationabsolute', { value: null, configurable: true });
+    const c = fullCollector();
+    const src = createBrowserSensorSource({ quaternion: false });
+    await src.start(c.listener);
+    vi.spyOn(performance, 'now').mockReturnValueOnce(70);
+    win.dispatchEvent(fakeEvent('deviceorientationabsolute', { alpha: 10.5, beta: 80, gamma: -2, absolute: true, timeStamp: 60 }));
+    expect(c.orientationAbs).toEqual([
+      { t: 70, ts: 60, alpha: 10.5, beta: 80, gamma: -2, absolute: true, compass: null, compass_accuracy: null },
+    ]);
+    expect(c.orientation).toEqual([]);
+    src.stop();
+    win.dispatchEvent(fakeEvent('deviceorientationabsolute', { alpha: 1, beta: 2, gamma: 3, absolute: true }));
+    expect(c.orientationAbs).toHaveLength(1);
+
+    // a browser without the event (iOS Safari, Firefox): nothing is attached
+    const { win: win2 } = installBrowser();
+    const src2 = createBrowserSensorSource({ quaternion: false });
+    await src2.start(fullCollector().listener);
+    expect(win2.listenerCount('deviceorientationabsolute')).toBe(0);
+    src2.stop();
+  });
+
+  it('Magnetometer readings (µT) → onMagnetometer; no reading yet is skipped; a denial or a failure is one warning', async () => {
+    const mag = fakeMagnetometerClass();
+    installBrowser({ navigator: { permissions: fakePermissionsApi({ magnetometer: 'granted' }) } });
+    vi.stubGlobal('Magnetometer', mag.Sensor);
+    const c = fullCollector();
+    const src = createBrowserSensorSource({ quaternion: false, frequencyHz: 50 });
+    await src.start(c.listener);
+    expect(mag.instances[0].options).toEqual({ frequency: 50, referenceFrame: 'device' });
+    vi.spyOn(performance, 'now').mockReturnValueOnce(88);
+    mag.instances[0].emitReading(20.5, -30.25, Number.NaN);
+    mag.instances[0].emitReading(null, null, null); // no reading yet
+    expect(c.magnetometer).toEqual([{ t: 88, x: 20.5, y: -30.25, z: null }]);
+    mag.instances[0].emitError();
+    expect(c.warnings).toEqual(['magnetometer_unavailable']);
+    expect(c.errors).toEqual([]);
+    src.stop();
+    expect(mag.instances[0].stopped).toBe(1);
+
+    const denied = fakeMagnetometerClass();
+    installBrowser({ navigator: { permissions: fakePermissionsApi({ magnetometer: 'denied' }) } });
+    vi.stubGlobal('Magnetometer', denied.Sensor);
+    const c2 = fullCollector();
+    const src2 = createBrowserSensorSource({ quaternion: false });
+    await src2.start(c2.listener);
+    expect(denied.instances).toHaveLength(0); // never constructed, never prompted
+    expect(c2.warnings).toEqual(['magnetometer_denied']);
+    src2.stop();
+
+    const refusing = fakeMagnetometerClass({ throwOnStart: true });
+    installBrowser();
+    vi.stubGlobal('Magnetometer', refusing.Sensor);
+    const c3 = fullCollector();
+    const src3 = createBrowserSensorSource({ quaternion: false });
+    await src3.start(c3.listener);
+    expect(refusing.instances[0].stopped).toBe(1);
+    expect(c3.warnings).toEqual(['magnetometer_unavailable']);
+    src3.stop();
+    expect(refusing.instances[0].stopped).toBe(1);
+  });
+
+  it('screen orientation changes → onScreen with the orientation after the change (legacy orientationchange fallback)', async () => {
+    const so = new FakeScreenOrientation();
+    installBrowser();
+    vi.stubGlobal('screen', { width: 390, height: 844, orientation: so });
+    const c = fullCollector();
+    const src = createBrowserSensorSource({ quaternion: false });
+    await src.start(c.listener);
+    vi.spyOn(performance, 'now').mockReturnValueOnce(1500);
+    so.rotate('landscape-primary', 90);
+    expect(c.screens).toEqual([{ t: 1500, type: 'landscape-primary', angle: 90 }]);
+    src.stop();
+    expect(so.listenerCount()).toBe(0);
+    so.rotate('portrait-primary', 0);
+    expect(c.screens).toHaveLength(1);
+
+    // iOS < 16.4: no screen.orientation → window 'orientationchange' with window.orientation
+    const { win } = installBrowser();
+    Object.defineProperty(win, 'onorientationchange', { value: null, configurable: true });
+    vi.stubGlobal('screen', { width: 390, height: 844 });
+    vi.stubGlobal('orientation', -90);
+    const c2 = fullCollector();
+    const src2 = createBrowserSensorSource({ quaternion: false });
+    await src2.start(c2.listener);
+    win.dispatchEvent(new Event('orientationchange'));
+    expect(c2.screens).toHaveLength(1);
+    expect(c2.screens[0]).toMatchObject({ type: 'landscape-secondary', angle: 270 });
+    src2.stop();
+    expect(win.listenerCount()).toBe(0);
+  });
+});
+
+describe('readTouch', () => {
+  const NONE = { radius_x: null, radius_y: null, force: null, rotation_angle: null, x_norm: null, y_norm: null };
+
+  it('reads clientX / clientY and the contact details; the position is normalised by the viewport and clamped to [0, 1]', () => {
+    vi.stubGlobal('innerWidth', 400);
+    vi.stubGlobal('innerHeight', 800);
+    expect(readTouch({ clientX: 100, clientY: 200, radiusX: 11.5, radiusY: 9, force: 0.42, rotationAngle: 30 })).toEqual({
+      x: 100,
+      y: 200,
+      details: { radius_x: 11.5, radius_y: 9, force: 0.42, rotation_angle: 30, x_norm: 0.25, y_norm: 0.25 },
+    });
+    // a finger sliding past the edge of the viewport
+    expect(readTouch({ clientX: -5, clientY: 900 }).details).toEqual({ ...NONE, x_norm: 0, y_norm: 1 });
+    // an explicit viewport wins
+    expect(readTouch({ clientX: 50, clientY: 50 }, { width: 100, height: 200 }).details).toMatchObject({ x_norm: 0.5, y_norm: 0.25 });
+  });
+
+  it('never throws: missing, non-numeric or throwing fields and unknown viewports give nulls', () => {
+    expect(readTouch(undefined)).toEqual({ x: null, y: null, details: NONE });
+    expect(readTouch(null)).toEqual({ x: null, y: null, details: NONE });
+    expect(readTouch({ clientX: '5', clientY: Number.NaN, force: Number.POSITIVE_INFINITY })).toEqual({ x: null, y: null, details: NONE });
+    expect(readTouch({ clientX: 10, clientY: 20 })).toEqual({ x: 10, y: 20, details: NONE }); // Node: no window size
+    expect(readTouch({ clientX: 10, clientY: 20 }, { width: 0, height: -1 }).details).toEqual(NONE);
+    const detached = {
+      get clientX(): number {
+        throw new Error('detached touch');
+      },
+    };
+    expect(readTouch(detached)).toEqual({ x: null, y: null, details: NONE });
   });
 });
 

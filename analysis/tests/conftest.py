@@ -35,3 +35,27 @@ def tiny_tree(tiny_dataset: synth.SynthDataset, tmp_path_factory: pytest.TempPat
     root = tmp_path_factory.mktemp('tree')
     synth.write_folder_tree(tiny_dataset, root)
     return root
+
+
+@pytest.fixture(scope='session')
+def street_dataset() -> synth.SynthDataset:
+    """4 protocol 2.0.0 'street' visits (schema 1.2, implicit_v1 calibration, short profile, auto-accept):
+    android (Chrome's 0.1 grid) / ios alternating; a few failures, redos, one early finish and "not sure"
+    answers to the hand question (seed 5: statuses completed x3 + ended_early; 2 choice trials unsure)."""
+    return synth.make_dataset(4, seed=5, preset='street', failure_rate=0.05, ended_early_fraction=0.25,
+                              redo_rate=0.05, choice_unsure_fraction=0.25,
+                              platform_overrides={'android': {'quantize': True}})
+
+
+@pytest.fixture(scope='session')
+def street_tree(street_dataset: synth.SynthDataset, tmp_path_factory: pytest.TempPathFactory) -> Path:
+    root = tmp_path_factory.mktemp('street')
+    synth.write_folder_tree(street_dataset, root)
+    return root
+
+
+@pytest.fixture(scope='session')
+def street_ds(street_tree: Path):
+    """``street_tree`` loaded with the default options (norm_v2: closure check of every session). Read-only."""
+    from motionlab import load_dataset
+    return load_dataset(street_tree)

@@ -1,20 +1,35 @@
 import { describe, expect, it } from 'vitest';
-import { flatVerdict, resultMessages, uprightVerdict } from '../src/app/screens/CalibrationScreen';
+import { axisVerdict, flatVerdict, uprightVerdict } from '../src/app/calibrationVerdicts';
 import {
   axisCheck,
   buildCalibration,
   CALIBRATION_LIMITS,
+  detectionCalibration,
   engineGravitySign,
   FLAT_SIGN_CONTRADICTS_ENGINE,
   flatSignContradictsEngine,
   gravityFromFlat,
+  implicitCalibration,
   poseStats,
+  preGoWindow,
+  UPRIGHT_SIGN_CONTRADICTS_ENGINE,
   uprightCheck,
+  withUprightHold,
 } from '../src/core/calibration';
-import type { AxisCheck, MotionSample, PoseStats, Vec3 } from '../src/core/types';
-import { en } from '../src/i18n/en';
-import { he } from '../src/i18n/he';
+import type {
+  AxisCheck,
+  CalibrationResult,
+  MotionSample,
+  OrientationId,
+  PlannedTrial,
+  PoseStats,
+  SessionRecord,
+  TrialRecord,
+  TrialStatus,
+  Vec3,
+} from '../src/core/types';
 import { expectValid } from './helpers/schema';
+import { makeTrialRecord } from './helpers/sessionFakes';
 import { cross, encodeRotationRate, G, normalize, rotate, stillWindow, tiltGesture } from './helpers/sensorsCalib';
 import { expectValidDef } from './helpers/sensorsSchema';
 
@@ -372,6 +387,7 @@ describe('buildCalibration', () => {
     expect(cal.notes).toEqual([]);
     expect(cal.flat).toBe(flat);
     expect(cal.upright).toBe(upright);
+    expect(cal.method).toBe('guided_v1'); // a measured (screen) calibration says so; v2 sessions are implicit_v1
     expectValid('CalibrationResult', cal);
   });
 
@@ -524,7 +540,7 @@ describe('flat sign against the engine expectation', () => {
     expect(notesOf(androidDown)).toEqual([]);
   });
 
-  it('the screen judges the flat result against the engine: a contradicted sign is "face_down"', () => {
+  it('the verdict judges the flat result against the engine: a contradicted sign is "face_down"', () => {
     expect(flatVerdict(androidUp, sign(androidUp), engineGravitySign('blink'))).toBe('ok');
     expect(flatVerdict(androidDown, sign(androidDown), engineGravitySign('blink'))).toBe('face_down');
     expect(flatVerdict(iosUp, sign(iosUp), engineGravitySign('webkit'))).toBe('ok_inverted');
@@ -540,17 +556,189 @@ describe('flat sign against the engine expectation', () => {
     expect(uprightVerdict(androidUpright, uprightCheck(androidUpright, sign(androidDown)))).toBe('inverted');
   });
 
-  it('a screen-down flat step and an inverted upright check are warnings, never "Done ✓" (en and he)', () => {
-    for (const strings of [en, he]) {
-      const m = resultMessages(strings.onboarding.calibration);
-      expect(m.flat.face_down[1]).toBe('warn');
-      expect(m.upright.inverted[1]).toBe('warn');
-      expect(m.flat.ok[1]).toBe('ok');
-      expect(m.flat.ok_inverted[1]).toBe('ok');
-      // the success mark appears exactly in the 'ok' results (the screen's ✓ also follows the kind)
-      for (const table of [m.flat, m.upright, m.axis]) {
-        for (const [text, kind] of Object.values(table)) expect(text.includes('✓'), text).toBe(kind === 'ok');
-      }
+  // v2 has no calibration screen (spec §1), so its result texts are gone; the verdict rules stay.
+  it('the remaining verdicts: a still flat window that is not flat, odd magnitudes, upright and axis results', () => {
+    const tilted = poseStats(stillWindow({ up: rotate([0, 0, 1], [1, 0, 0], 40 * DEG) }));
+    expect(flatVerdict(tilted, sign(tilted), 1)).toBe('not_flat');
+    const inG = poseStats(stillWindow({ up: [0, 0, 1], magnitude: 1, accgNoise: 0.003 }));
+    expect(flatVerdict(inG, sign(inG), 1)).toBe('odd');
+    expect(uprightVerdict(androidUpright, uprightCheck(androidUpright, 1))).toBe('ok');
+    const flatAsUpright = poseStats(stillWindow({ up: [0, 0, 1] }));
+    expect(uprightVerdict(flatAsUpright, uprightCheck(flatAsUpright, 1))).toBe('unclear');
+    // not upright AND not still: the hand moved (an upright reading counts whatever the wobble)
+    const shaking = poseStats(stillWindow({ up: [0, 0, 1], shake: 1.5 }));
+    expect(uprightVerdict(shaking, uprightCheck(shaking, 1))).toBe('moving');
+    expect(uprightVerdict(null, null)).toBeNull();
+    expect(axisVerdict(axisCheck(tiltGesture({ axis: [0, 1, 0], tiltDeg: 45 })))).toBe('ok');
+    expect(axisVerdict(axisCheck(tiltGesture({ axis: [0, 1, 0], tiltDeg: 45, rrEncoding: 'legacy' })))).toBe('noted');
+    expect(axisVerdict(axisCheck(tiltGesture({ axis: [0, 1, 0], tiltDeg: 45, rrUnits: 'rad' })))).toBe('radians');
+    expect(axisVerdict(axisCheck(tiltGesture({ axis: [0, 1, 0], tiltDeg: 20 })))).toBe('unclear');
+    expect(axisVerdict(null)).toBeNull();
+  });
+});
+
+// ───────────────────────────── implicit calibration (implicit_v1, spec v2 §5) ─────────────────────────────
+
+const AT = '2026-10-24T10:00:00.000Z';
+
+/**
+ * A trial whose phone rests from 0 to 1000 ms with the given accg. Its pre-GO hold is 100…900 ms
+ * (makeTrialRecord: still_ms 500, go_ms 900; still_hold_ms 400 in the v2 parameters). `wobble`
+ * alternates ± that much on x (population sd = wobble).
+ */
+function holdTrial(
+  o: { accg?: Vec3; wobble?: number; orientation?: OrientationId; status?: TrialStatus; goMs?: number | null } = {},
+): TrialRecord {
+  const session = { session_id: 'S-1', participant_id: 'P-ABC234', study_code: 'test' } as SessionRecord;
+  const planned: PlannedTrial = {
+    trial_index: 0,
+    block_index: 0,
+    trial_in_block: 0,
+    condition: {
+      hand: 'right',
+      orientation: o.orientation ?? 'upright_toward',
+      speed: 'natural',
+      start_position: 'natural',
+      variant: 'standard',
+      posture: 'standing',
+      rep: 0,
+      hand_source: 'instructed',
+    },
+  };
+  const rec = makeTrialRecord(session, planned, 1, { status: o.status, timing: o.goMs === undefined ? {} : { go_ms: o.goMs } });
+  const g = o.accg ?? [0, 9.81, 0];
+  const m = rec.streams.motion;
+  m.t.forEach((t, i) => {
+    if (t >= 1000) return;
+    m.accg_x[i] = g[0] + (o.wobble ? (i % 2 === 0 ? o.wobble : -o.wobble) : 0);
+    m.accg_y[i] = g[1];
+    m.accg_z[i] = g[2];
+  });
+  return rec;
+}
+
+describe('implicit calibration (implicit_v1)', () => {
+  it('starts empty: every measured field null, no notes, no axis check; schema-valid', () => {
+    const cal = implicitCalibration(AT);
+    expect(cal).toEqual({
+      method: 'implicit_v1',
+      performed_at: AT,
+      flat: null,
+      upright: null,
+      gravity_sign: null,
+      gravity_magnitude: null,
+      upright_check: null,
+      gyro_bias_dps: null,
+      notes: [],
+      axis_check: null,
+    });
+    expectValid('CalibrationResult', cal);
+  });
+
+  it('preGoWindow is the stored hold before GO: still_ms − still_hold_ms … go_ms', () => {
+    const rec = holdTrial();
+    const w = preGoWindow(rec);
+    const from = rec.timing.still_ms! - rec.segmentation.params.still_hold_ms;
+    expect(w.map((x) => x.t)).toEqual(rec.streams.motion.t.filter((t) => t >= from && t <= rec.timing.go_ms!));
+    expect(w.length).toBeGreaterThanOrEqual(20); // enough for poseStats to call it still
+    expect(w[0].accg).toEqual([0, 9.81, 0]);
+    expect(preGoWindow(holdTrial({ goMs: null }))).toEqual([]);
+  });
+
+  it('fills the sign, magnitude and upright check from the first still upright hold (Android, W3C)', () => {
+    const before = implicitCalibration(AT);
+    const cal = withUprightHold(before, holdTrial(), 'blink')!;
+    expect(cal).not.toBe(before);
+    expect(before.upright).toBeNull(); // the stored object is not changed
+    expect(cal).toMatchObject({ method: 'implicit_v1', performed_at: AT, gravity_sign: 1, upright_check: 'ok', notes: [] });
+    expect(cal.upright?.still).toBe(true);
+    expect(cal.gravity_magnitude!).toBeCloseTo(9.81, 6);
+    // an in-hand hold measures tremor, never the gyroscope's bias; the axis mapping is the analysis' job
+    expect(cal.gyro_bias_dps).toBeNull();
+    expect(cal.axis_check).toBeNull();
+    expect(cal.flat).toBeNull();
+    expectValid('CalibrationResult', cal);
+  });
+
+  it('iPhone (WebKit) reports upright as y ≈ −9.81: sign −1 is ok there', () => {
+    const cal = withUprightHold(implicitCalibration(AT), holdTrial({ accg: [0, -9.81, 0] }), 'webkit')!;
+    expect(cal).toMatchObject({ gravity_sign: -1, upright_check: 'ok', notes: [] });
+  });
+
+  it('a sign against the engine prior is kept, marked inverted and noted; no prior accepts either sign', () => {
+    const cal = withUprightHold(implicitCalibration(AT), holdTrial({ accg: [0, 9.81, 0] }), 'webkit')!;
+    expect(cal).toMatchObject({ gravity_sign: 1, upright_check: 'inverted', notes: [UPRIGHT_SIGN_CONTRADICTS_ENGINE] });
+    expectValid('CalibrationResult', cal);
+    for (const engine of ['unknown', null, undefined] as const) {
+      expect(withUprightHold(implicitCalibration(AT), holdTrial({ accg: [0, -9.81, 0] }), engine)?.upright_check).toBe('ok');
     }
+  });
+
+  it('a still hold that is not upright enough (|y| ≤ 7) is unclear: no sign; an implausible |g| is not stored', () => {
+    const leaning: Vec3 = [0, 6, 7.76]; // ≈ 52° back from upright, |g| ≈ 9.81
+    const cal = withUprightHold(implicitCalibration(AT), holdTrial({ accg: leaning }), 'blink')!;
+    expect(cal.upright).not.toBeNull();
+    expect(cal).toMatchObject({ gravity_sign: null, upright_check: 'unclear', notes: [] });
+    expect(cal.gravity_magnitude!).toBeCloseTo(Math.hypot(...leaning), 6);
+    const odd = withUprightHold(implicitCalibration(AT), holdTrial({ accg: [0, 12, 0] }), 'blink')!;
+    expect(odd.gravity_sign).toBe(1);
+    expect(odd.gravity_magnitude).toBeNull();
+  });
+
+  it('changes nothing for a moving hold (the next upright trial is tried) or any other trial', () => {
+    const cal = implicitCalibration(AT);
+    const moving = holdTrial({ wobble: 0.6 });
+    expect(poseStats(preGoWindow(moving)).still).toBe(false);
+    expect(withUprightHold(cal, moving, 'blink')).toBe(cal);
+    expect(withUprightHold(cal, holdTrial({ orientation: 'top_left_toward' }), 'blink')).toBe(cal);
+    expect(withUprightHold(cal, holdTrial({ status: 'no_movement' }), 'blink')).toBe(cal);
+    expect(withUprightHold(cal, holdTrial({ goMs: null }), 'blink')).toBe(cal);
+    expect(withUprightHold(null, holdTrial(), 'blink')).toBeNull();
+    // only the FIRST still upright hold counts, and never on top of a guided calibration
+    const filled = withUprightHold(cal, holdTrial(), 'blink')!;
+    expect(withUprightHold(filled, holdTrial({ accg: [0, -9.81, 0] }), 'blink')).toBe(filled);
+    const guided = buildCalibration({ performedAt: AT, flat: null, upright: null, axis: null });
+    expect(withUprightHold(guided, holdTrial(), 'blink')).toBe(guided);
+    const legacy: CalibrationResult = { ...implicitCalibration(AT), method: undefined };
+    expect(withUprightHold(legacy, holdTrial(), 'blink')).toBe(legacy);
+  });
+});
+
+describe('detectionCalibration (the online grip classification)', () => {
+  const measured = (sign: 1 | -1 | null, notes: string[] = []): CalibrationResult => ({
+    ...implicitCalibration(AT),
+    gravity_sign: sign,
+    notes,
+  });
+
+  it('a trusted sign passes through as the very same object', () => {
+    const cal = measured(1);
+    expect(detectionCalibration(cal, 'blink', AT)).toBe(cal);
+    expect(detectionCalibration(cal, 'unknown', AT)).toBe(cal);
+    const ios = measured(-1);
+    expect(detectionCalibration(ios, 'webkit', AT)).toBe(ios);
+  });
+
+  it('while the sign is unknown the engine prior stands in, without changing the stored object', () => {
+    const cal = implicitCalibration(AT);
+    expect(detectionCalibration(cal, 'webkit', AT)).toEqual({ ...cal, gravity_sign: -1 });
+    expect(detectionCalibration(cal, 'blink', AT)?.gravity_sign).toBe(1);
+    expect(cal.gravity_sign).toBeNull();
+    expect(detectionCalibration(cal, null, AT)).toBe(cal); // nothing to change: the same object
+    expect(detectionCalibration(cal, 'unknown', AT)).toBe(cal);
+  });
+
+  it('a sign that contradicts the engine is distrusted, noted or not', () => {
+    expect(detectionCalibration(measured(1, [UPRIGHT_SIGN_CONTRADICTS_ENGINE]), 'webkit', AT)?.gravity_sign).toBe(-1);
+    expect(detectionCalibration(measured(-1, [FLAT_SIGN_CONTRADICTS_ENGINE]), 'blink', AT)?.gravity_sign).toBe(1);
+    expect(detectionCalibration(measured(-1), 'gecko', AT)?.gravity_sign).toBe(1);
+    // noted, but no prior to fall back to: unknown
+    expect(detectionCalibration(measured(-1, [FLAT_SIGN_CONTRADICTS_ENGINE]), 'unknown', AT)?.gravity_sign).toBeNull();
+  });
+
+  it('without any calibration: a stand-in with the engine sign, or nothing', () => {
+    expect(detectionCalibration(null, 'webkit', AT)).toMatchObject({ performed_at: AT, gravity_sign: -1, flat: null, notes: [] });
+    expect(detectionCalibration(null, 'unknown', AT)).toBeNull();
+    expect(detectionCalibration(null, null, AT)).toBeNull();
   });
 });

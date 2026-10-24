@@ -6,6 +6,7 @@ import {
   mDet,
   mExp,
   mIdentity,
+  mLog,
   mMul,
   mT,
   mVec,
@@ -16,15 +17,27 @@ import {
   type Mat3,
 } from '../src/core/math3d';
 import { mirrorCondition, mirrorMotionSample } from '../src/core/mirror';
-import type { MotionSample, OrientationId, ParticipantProfile, Speed, TrialCondition, Variant, Vec3 } from '../src/core/types';
+import type {
+  MotionSample,
+  OrientationId,
+  OrientationSample,
+  ParticipantProfile,
+  QuaternionSample,
+  Speed,
+  TrialCondition,
+  Variant,
+  Vec3,
+} from '../src/core/types';
 import {
   GRIP_ORIENTATIONS,
   IOS_GRAVITY_SIGN,
   defaultSimPlatform,
   earthFromBody,
   gripMatrix,
+  performedCondition,
   planMovement,
   randomSimParticipant,
+  simChoiceHand,
   simParticipantFromProfile,
   simRng,
   type GripOrientation,
@@ -639,7 +652,7 @@ describe('behaviours', () => {
     }
   });
 
-  it('false_start: an abrupt twitch 800 ms after start that the segmenter would classify as a false start', () => {
+  it(`false_start: an abrupt twitch ${FALSE_START_AFTER_STILL_MS} ms after start that the segmenter would classify as a false start`, () => {
     for (let seed = 0; seed < 12; seed++) {
       const st = setup(4000 + seed, seed % 2 ? 'ios' : 'android');
       const c = collect(offlineSource(st, condition({ hand: seed % 3 ? 'right' : 'left' }), seed, { behavior: 'false_start' }), { goAtMs: 2600, stopAfterMs: 3000 });
@@ -729,6 +742,220 @@ describe('behaviours', () => {
     const first = c.motion[0].accg!;
     const lastS = c.motion[c.motion.length - 1].accg!;
     for (let a = 0; a < 3; a++) expect(lastS[a]).toBeCloseTo(first[a], 9); // back at the start pose
+  });
+});
+
+// ───────────────────────────── protocol 2.0.0 (street) behaviours ─────────────────────────────
+
+describe('protocol 2.0.0: the return of the arm, starting at the nose, sway, tilted touch, choice trial', () => {
+  /** Rotation angle (deg) of R. */
+  const angleOf = (R: Mat3): number => (vNorm(mLog(R)) * 180) / Math.PI;
+
+  it('every trial starts still with the arm out (the grip pose), not at the nose', () => {
+    for (let seed = 0; seed < 6; seed++) {
+      const c = collect(offlineSource(setup(9500 + seed), condition({ orientation: 'top_left_toward' }), seed, { noise: false }), {
+        goAtMs: 800,
+        stopAfterMs: 100,
+      });
+      const plan = c.source.plan;
+      for (const s of c.motion.filter((x) => x.ts! < c.source.truth.go_t!)) {
+        expect(gyroMag(s)).toBeLessThan(1e-9);
+        expect(angleBetweenDeg(s.accg!, mVec(mT(plan.grip), [0, 1, 0]))).toBeLessThan(1e-6);
+      }
+    }
+  });
+
+  it('end cue: the return starts 250–450 ms later, lasts 0.8–1.2 s and ends still at the start pose', () => {
+    const delays: number[] = [];
+    const durations: number[] = [];
+    for (let seed = 0; seed < 60; seed++) {
+      const c = run(9600 + seed, condition({ speed: (['natural', 'fast', 'slow'] as const)[seed % 3] }), { noise: false }, {
+        goAtMs: 1000,
+        endCueAfterArriveMs: 300,
+        stopAfterMs: 7000,
+      });
+      const tr = c.source.truth;
+      const cueT = c.motion.find((s) => s.t >= tr.end_t! + 300)!.t; // the motion sample that sent the cue
+      delays.push(tr.return_t! - cueT);
+      durations.push(tr.return_end_t! - tr.return_t!);
+      const after = c.motion.filter((s) => s.ts! > tr.return_end_t! + 5);
+      expect(after.length).toBeGreaterThan(10);
+      for (const s of after) {
+        expect(gyroMag(s)).toBeLessThan(1e-6);
+        for (let a = 0; a < 3; a++) expect(s.accg![a]).toBeCloseTo(c.motion[0].accg![a], 6);
+      }
+      const back = c.motion.filter((s) => s.ts! > tr.return_t! && s.ts! < tr.return_end_t!);
+      expect(Math.max(...back.map(gyroMag))).toBeGreaterThan(45); // a return the controller can see
+    }
+    expect(Math.min(...delays)).toBeGreaterThanOrEqual(250);
+    expect(Math.max(...delays)).toBeLessThanOrEqual(450);
+    expect(Math.max(...delays) - Math.min(...delays)).toBeGreaterThan(120); // drawn, not fixed
+    expect(Math.min(...durations)).toBeGreaterThanOrEqual(800);
+    expect(Math.max(...durations)).toBeLessThanOrEqual(1200);
+    expect(Math.max(...durations) - Math.min(...durations)).toBeGreaterThan(200);
+  });
+
+  it('returnDelayMs: a participant who lingers at the nose returns that long after the cue', () => {
+    const c = collect(offlineSource(setup(9700), condition(), 3, { noise: false, returnDelayMs: 3500 }), {
+      goAtMs: 1000,
+      endCueAfterArriveMs: 300,
+      stopAfterMs: 9000,
+    });
+    const tr = c.source.truth;
+    const cueT = c.motion.find((s) => s.t >= tr.end_t! + 300)!.t;
+    expect(tr.return_t! - cueT).toBe(3500);
+    expect(maxOver(c.motion, gyroMag, tr.end_t! + 100, tr.return_t!)).toBeLessThan(1e-6);
+  });
+
+  it('startAtNose: still at the nose pose, back out 300–800 ms after start (0.8–1.2 s), then still at p0 until GO', () => {
+    for (let seed = 0; seed < 8; seed++) {
+      const st = setup(9800 + seed);
+      const c = collect(offlineSource(st, condition({ speed: 'fast' }), seed, { noise: false, startAtNose: true }), { goAtMs: 3500, stopAfterMs: 100 });
+      const tr = c.source.truth;
+      const plan = c.source.plan;
+      const delay = tr.initial_return_t! - START_T;
+      expect(delay).toBeGreaterThanOrEqual(300);
+      expect(delay).toBeLessThanOrEqual(800);
+      const atNose = mVec(mT(plan.pose(plan.duration_s).R), [0, 1, 0]);
+      const out = mVec(mT(plan.grip), [0, 1, 0]);
+      for (const s of c.motion) {
+        if (s.ts! < tr.initial_return_t!) expect(angleBetweenDeg(s.accg!, atNose)).toBeLessThan(1e-6);
+      }
+      // the return ends somewhere in 0.8–1.2 s; from then on the phone is still at the start pose
+      const settled = c.motion.filter((s) => s.ts! > tr.initial_return_t! + 1200 && s.ts! < tr.go_t!);
+      expect(settled.length).toBeGreaterThan(30);
+      for (const s of settled) {
+        expect(angleBetweenDeg(s.accg!, out)).toBeLessThan(1e-6);
+        expect(gyroMag(s)).toBeLessThan(1e-6);
+      }
+      expect(maxOver(c.motion, gyroMag, tr.initial_return_t!, tr.initial_return_t! + 1200)).toBeGreaterThan(45);
+      expect(tr.onset_t).not.toBeNull(); // then the trial's own movement after GO
+    }
+    // an anticipation or a sway comes once the arm is out again, not during the return
+    const fs = offlineSource(setup(9900), condition(), 1, { behavior: 'false_start', startAtNose: true });
+    collect(fs, { goAtMs: 5000, stopAfterMs: 100 });
+    expect(fs.truth.false_start_t! - fs.truth.initial_return_t!).toBeGreaterThan(800 + FALSE_START_AFTER_STILL_MS - 1);
+  });
+
+  it("sway: a slow posture shift before GO breaks a 20 deg/s hold but stays under the 30 deg/s / 0.6 m/s² false-start floors", () => {
+    let maxG = 0;
+    let minG = Infinity;
+    let maxA = 0;
+    for (let seed = 0; seed < 20; seed++) {
+      for (const platform of ['android', 'ios'] as const) {
+        const st = setup(10_000 + seed, platform);
+        for (const hand of ['right', 'left'] as const) {
+          const c = collect(offlineSource(st, condition({ hand }), seed, { behavior: 'sway' }), { goAtMs: 2500, stopAfterMs: 100 });
+          const tr = c.source.truth;
+          expect(tr.sway_t).toBe(START_T + FALSE_START_AFTER_STILL_MS);
+          const sm = smoothed(c.motion);
+          let g = 0;
+          let a = 0;
+          for (let i = 0; i < sm.t.length; i++) {
+            if (sm.t[i] < tr.sway_t! || sm.t[i] > tr.sway_t! + 700) continue;
+            g = Math.max(g, sm.gyro[i]);
+            a = Math.max(a, sm.acc[i]);
+          }
+          maxG = Math.max(maxG, g);
+          minG = Math.min(minG, g);
+          maxA = Math.max(maxA, a);
+        }
+      }
+    }
+    expect(minG).toBeGreaterThan(20);
+    expect(maxG).toBeLessThan(30);
+    expect(maxA).toBeLessThan(0.6);
+    // GO before the sway cancels it
+    const early = offlineSource(setup(10_100), condition(), 1, { behavior: 'sway' });
+    collect(early, { goAtMs: 300, stopAfterMs: 3000 });
+    expect(early.truth.sway_t).toBeNull();
+    expect(early.truth.onset_t).not.toBeNull();
+    // anticipationAfterMs moves the anticipation (e.g. into the longer foreperiod of other parameters)
+    for (const behavior of ['sway', 'false_start'] as const) {
+      const late = offlineSource(setup(10_101), condition(), 1, { behavior, anticipationAfterMs: 900 });
+      collect(late, { goAtMs: 2500, stopAfterMs: 100 });
+      expect(behavior === 'sway' ? late.truth.sway_t : late.truth.false_start_t).toBe(START_T + 900);
+    }
+  });
+
+  it('tilted_touch: the same movement, with the end pose turned 30–40° about the device x axis', () => {
+    const angles: number[] = [];
+    for (let seed = 0; seed < 25; seed++) {
+      const st = setup(10_200 + seed);
+      const hand = seed % 2 ? 'left' : 'right';
+      const tilted = offlineSource(st, condition({ hand, variant: 'tilted_touch' }), seed);
+      const standard = offlineSource(st, condition({ hand, variant: 'standard' }), seed);
+      expect(tilted.plan.duration_s).toBe(standard.plan.duration_s);
+      expectMatClose(tilted.plan.pose(0).R, standard.plan.pose(0).R); // same start
+      const d = mLog(mMul(mT(standard.plan.pose(standard.plan.duration_s).R), tilted.plan.pose(tilted.plan.duration_s).R));
+      expect(Math.abs(d[1])).toBeLessThan(1e-9);
+      expect(Math.abs(d[2])).toBeLessThan(1e-9);
+      angles.push((d[0] * 180) / Math.PI);
+    }
+    expect(Math.min(...angles)).toBeGreaterThanOrEqual(30);
+    expect(Math.max(...angles)).toBeLessThanOrEqual(40);
+    // a direction, not a sign convention: the top edge tips towards the face (+x rotation for both hands)
+    expect(angles.every((a) => a > 0)).toBe(true);
+    expect(angleOf(mIdentity())).toBe(0);
+  });
+
+  it("choice trial (hand_source 'reported'): the participant's own phone hand ('both' → dominant) and the upright grip", () => {
+    const st = setup(10_300);
+    const p = { ...st.participant, dominant: 'right' as const };
+    const choice = condition({ hand: 'right', orientation: 'free', hand_source: 'reported' });
+    expect(performedCondition({ ...p, phone_hand: 'left' }, choice)).toEqual({ ...choice, hand: 'left', orientation: 'upright_toward' });
+    expect(performedCondition({ ...p, phone_hand: 'both' }, choice)).toMatchObject({ hand: 'right', orientation: 'upright_toward' });
+    expect(performedCondition(p, choice).hand).toBe('right'); // unknown phone hand → dominant
+    expect(simChoiceHand({ ...p, dominant: 'left' })).toBe('left');
+    // instructed trials (and v1 'free' blocks) are performed exactly as planned
+    for (const c of [condition({ hand: 'left' }), condition({ orientation: 'free' }), condition({ hand_source: 'instructed' })]) {
+      expect(performedCondition({ ...p, phone_hand: 'left' }, c)).toBe(c);
+    }
+    // the simulated source performs it
+    const src = offlineSource({ ...st, participant: { ...p, phone_hand: 'left' } }, choice, 4, { noise: false });
+    expect(src.performed).toMatchObject({ hand: 'left', orientation: 'upright_toward', hand_source: 'reported' });
+    expect(src.plan.h).toBe(-1);
+    expectMatClose(src.plan.grip, gripMatrix('upright_toward'), 0.2); // the nominal upright grip (± the ≤ 10° tilt)
+    // simParticipantFromProfile copies the usual phone hand
+    const profile = { participant_id: 'P-ABCDEF', sex: 'female', handedness_self: 'right', phone_hand: 'left', age_years: 30, height_cm: 170 } as ParticipantProfile;
+    expect(simParticipantFromProfile(profile, 5).phone_hand).toBe('left');
+  });
+
+  it('absolute orientation streams (Android-like platforms): one per relative sample, same pose up to fusion noise; none on iOS', () => {
+    const got = (platform: 'ios' | 'android') => {
+      const src = offlineSource(setup(10_400, platform), condition(), 2, { behavior: 'no_move', maxDurationMs: 1500 });
+      const rel: QuaternionSample[] = [];
+      const abs: QuaternionSample[] = [];
+      const ori: OrientationSample[] = [];
+      const oriAbs: OrientationSample[] = [];
+      void src.start({
+        onMotion() {},
+        onOrientation: (s) => ori.push(s),
+        onQuaternion: (s) => rel.push(s),
+        onQuaternionAbs: (s) => abs.push(s),
+        onOrientationAbs: (s) => oriAbs.push(s),
+      });
+      return { rel, abs, ori, oriAbs };
+    };
+    const a = got('android');
+    expect(a.abs.length).toBe(a.rel.length);
+    expect(a.oriAbs.length).toBe(a.ori.length);
+    expect(a.abs.length).toBeGreaterThan(60);
+    a.abs.forEach((s, i) => {
+      expect(s.sensor).toBe('AbsoluteOrientationSensor');
+      expect(s.t).toBe(a.rel[i].t);
+      const d = mMul(mT(matFromQuat(s.q)), matFromQuat(a.rel[i].q));
+      expect(angleOf(d)).toBeLessThan(1); // both fused from the same pose
+    });
+    a.oriAbs.forEach((s, i) => {
+      expect(s.absolute).toBe(true);
+      expect(a.ori[i].absolute).toBe(false);
+      expect(s.ts).toBe(a.ori[i].ts);
+    });
+    const i = got('ios');
+    expect(i.abs).toEqual([]);
+    expect(i.oriAbs).toEqual([]);
+    expect(i.ori.length).toBeGreaterThan(60);
   });
 });
 

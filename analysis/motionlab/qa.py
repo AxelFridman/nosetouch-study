@@ -7,9 +7,12 @@
     accepted attempts of one planned trial;
   * sampling: rate per platform, dt, gaps > 50 ms, hidden pages, missing gyroscope / acc, repeated
     samples (duplicated snapshots) and clipping candidates (|accg| > 3.5 g, |w| > 950 deg/s);
-  * normalisation (norm_v1): gravity-sign source per platform / engine, rotationRate mapping, and a
-    gyro-gravity closure check on a sample of trials (a wrong axis mapping or sign shows up as large
-    closure errors);
+  * normalisation (norm_v2): calibration method, gravity-sign source per platform / engine (engine prior
+    confirmed by the votes = 'engine_vote'), rotationRate mapping and its source (axis_check, the closure
+    check of the trials, or assumed) per session with the closure numbers, and a gyro-gravity closure
+    check on a sample of trials (a wrong axis mapping or sign shows up as large closure errors);
+  * protocol 2.0.0 / schema 1.2: session status (ended_early) and review mode, choice trials (hand
+    reported), the return of the arm, the optional streams and the touch contact details;
   * segmentation success: stored online_v1 found, this package's port agreeing with the stored indices
     (``check_online``), offline_v1 success and its timing differences (``offline``);
   * orientation mismatch: the app's ``detected.orientation_match`` and a recomputation from the baseline.
@@ -237,10 +240,12 @@ def qa_summary(ds: Dataset, *, check_online: bool = True, offline: bool = True, 
     if n_clip:
         warnings.append(f'{n_clip} trials reach |accg| > 3.5 g or |w| > 950 deg/s (possible sensor clipping, rule T10)')
 
-    # normalisation (norm_v1)
+    # normalisation (norm_v2)
     if len(ss):
-        keys = [c for c in ('platform', 'engine_effective', 'gravity_sign_source', 'gravity_sign') if c in ss.columns]
+        keys = [c for c in ('platform', 'engine_effective', 'calibration_method', 'gravity_sign_source', 'gravity_sign')
+                if c in ss.columns]
         tables['gravity_sign'] = ss.assign(**{c: ss[c].astype(object).fillna('unknown') for c in keys}).groupby(keys).size().rename('sessions').reset_index()
+        _normalisation_summary(ss, summary, tables, warnings)
         nw = int(_bool(ss['gravity_sign_warning'].astype('boolean').fillna(True)).sum()) if 'gravity_sign_warning' in ss.columns else 0
         summary['sessions with uncertain gravity sign'] = nw
         if nw:
@@ -258,9 +263,11 @@ def qa_summary(ds: Dataset, *, check_online: bool = True, offline: bool = True, 
                                 f'(flat step done face-down?): the vote sign is used, check them by hand ({ids})')
         if 'rr_mapping' in ss.columns:
             ax = ss.assign(axis_check_verdict=ss['axis_check_verdict'].astype(object).fillna('absent'),
-                           rr_units=ss['rr_units'].astype(object).fillna('unknown'))
-            tables['rotation_rate_mapping'] = ax.groupby(['platform', 'axis_check_verdict', 'rr_mapping', 'rr_units'],
-                                                         dropna=False).size().rename('sessions').reset_index()
+                           rr_units=ss['rr_units'].astype(object).fillna('unknown'),
+                           rr_source=(ss['rr_source'] if 'rr_source' in ss.columns else pd.Series('assumed', index=ss.index)
+                                      ).astype(object).fillna('unknown'))
+            tables['rotation_rate_mapping'] = ax.groupby(['platform', 'axis_check_verdict', 'rr_source', 'rr_mapping',
+                                                          'rr_units'], dropna=False).size().rename('sessions').reset_index()
             nu = int((~_bool(ss['rr_verified'])).sum())
             summary['sessions with unverified rotationRate mapping'] = nu
             nr = int((ss['rr_mapping'] != 'w3c').sum())
@@ -352,6 +359,8 @@ def qa_summary(ds: Dataset, *, check_online: bool = True, offline: bool = True, 
         for o in badr.index:
             warnings.append(f'orientation {o}: only {badr.loc[o, "recomputed_match_rate"]:.0%} of baselines match the instructed rotation')
 
+    _protocol_v2_summary(tr, ss, summary, tables)
+
     # warnings & issues
     wc = Counter(w for ws in tr['warnings'].fillna('') for w in str(ws).split(';') if w)
     if wc:
@@ -363,6 +372,95 @@ def qa_summary(ds: Dataset, *, check_online: bool = True, offline: bool = True, 
         if ne:
             warnings.append(f'{ne} record(s)/file(s) failed validation or parsing and were skipped (see load issues)')
     return QAReport(summary, tables, warnings)
+
+
+#: Per-session normalisation columns of the 'normalisation' table (the headline numbers of norm_v2).
+_NORM_COLUMNS = ('session_id', 'platform', 'engine_effective', 'calibration_method', 'gravity_sign', 'gravity_sign_source',
+                 'gravity_votes_for', 'gravity_votes_against', 'rr_mapping', 'rr_units', 'rr_source', 'rr_verified',
+                 'rr_closure_best', 'rr_closure_deg', 'rr_closure_runner_up', 'rr_closure_runner_up_deg',
+                 'rr_closure_trials', 'rr_closure_verified', 'gyro_bias_subtracted', 'norm_flags')
+
+
+def _counts_text(s: pd.Series) -> str:
+    vc = s.astype(object).fillna('unknown').value_counts()
+    return ', '.join(f'{k} {int(v)}' for k, v in vc.items())
+
+
+def _normalisation_summary(ss: pd.DataFrame, summary: dict[str, Any], tables: dict[str, pd.DataFrame],
+                           warnings: list[str]) -> None:
+    """Per-session norm_v2 table and headline numbers: calibration method, gravity-sign source, mapping
+    source and the closure check (``conventions.infer_rate_mapping``)."""
+    cols = [c for c in _NORM_COLUMNS if c in ss.columns]
+    tables['normalisation'] = ss[cols].reset_index(drop=True)
+    if 'calibration_method' in ss.columns:
+        summary['calibration methods'] = _counts_text(ss['calibration_method'])
+    if 'gravity_sign_source' in ss.columns:
+        summary['gravity sign sources'] = _counts_text(ss['gravity_sign_source'])
+    if 'rr_source' in ss.columns:
+        summary['rotationRate mapping sources'] = _counts_text(ss['rr_source'].astype(object) + ' ' +
+                                                               ss['rr_mapping'].astype(object) + '/' +
+                                                               ss['rr_units'].astype(object))
+    if 'rr_closure_deg' in ss.columns:
+        ran = ss['rr_closure_deg'].notna()
+        summary['sessions with a rotationRate closure check'] = int(ran.sum())
+        if ran.any():
+            v = ss.loc[ran]
+            summary['closure check: best / runner-up (median over sessions, deg)'] = (
+                f"{float(v['rr_closure_deg'].median()):.2f} / {float(v['rr_closure_runner_up_deg'].median()):.2f}")
+            summary['closure check: decisive sessions'] = int(v['rr_closure_verified'].astype('boolean').fillna(False).sum())
+    if 'rr_closure_disagrees' in ss.columns:
+        bad = ss['rr_closure_disagrees'].astype('boolean').fillna(False).astype(bool)
+        if bad.any():
+            ids = ', '.join(str(x) for x in ss.loc[bad, 'session_id'].head(5))
+            warnings.append(f'{int(bad.sum())} session(s) where the closure check of the trials names another '
+                            f'rotationRate mapping than the calibration axis_check ({ids}); the axis_check is used')
+    if 'gyro_bias_subtracted' in ss.columns:
+        summary['sessions with a trusted calibration gyro bias'] = int(ss['gyro_bias_subtracted'].astype('boolean').fillna(False).sum())
+
+
+def _protocol_v2_summary(tr: pd.DataFrame, ss: pd.DataFrame, summary: dict[str, Any],
+                         tables: dict[str, pd.DataFrame]) -> None:
+    """Protocol 2.0.0 / schema 1.2 fields: session status and review mode, choice trials, the return of the
+    arm, the optional streams and the touch details (absent in older records: reported as such)."""
+    if len(ss) and 'status' in ss.columns:
+        keys = [c for c in ('preset', 'status', 'review_mode') if c in ss.columns]
+        tables['sessions_by_status'] = ss.assign(**{c: ss[c].astype(object).fillna('unknown') for c in keys}).groupby(
+            keys).size().rename('sessions').reset_index()
+        summary['sessions ended early'] = int((ss['status'] == 'ended_early').sum())
+    if 'hand_source' in tr.columns:
+        rep = tr['hand_source'] == 'reported'
+        summary['choice trials (hand reported)'] = int(rep.sum())
+        if rep.any():
+            summary['choice trials accepted'] = int(_bool(tr.loc[rep, 'accepted']).sum())
+    v2_cols = ('return_observed', 'has_quaternion_abs_stream', 'has_orientation_abs_stream', 'has_magnetometer_stream')
+    has_return = tr['return_observed'].notna() if 'return_observed' in tr.columns else pd.Series(False, index=tr.index)
+    v2_present = bool(has_return.any()) or any(_bool(tr[c]).any() for c in v2_cols[1:] if c in tr.columns) or (
+        'touch_radius_max' in tr.columns and tr['touch_radius_max'].notna().any())
+    summary['schema 1.2 trial fields present'] = v2_present
+    if not v2_present:
+        return
+    plat = tr['platform'].astype(object).fillna('unknown')
+    rows = []
+    for p, g in tr.groupby(plat):
+        hr = g['return_observed'].notna()
+        ro = g.loc[hr, 'return_observed'].astype('boolean').fillna(False).astype(bool)
+        starts = pd.to_numeric(g['n_touch_starts'], errors='coerce').fillna(0) > 0
+        rows.append({
+            'platform': p, 'trials': int(len(g)),
+            'return_recorded_trials': int(hr.sum()),
+            'return_observed_rate': float(ro.mean()) if len(ro) else math.nan,
+            'return_delay_ms_median': float(pd.to_numeric(g['return_delay_ms'], errors='coerce').median()),
+            'return_duration_ms_median': float(pd.to_numeric(g['return_duration_ms'], errors='coerce').median()),
+            'post_end_ms_median': float(pd.to_numeric(g['post_end_ms'], errors='coerce').median()),
+            'quaternion_abs_rate': float(_bool(g['has_quaternion_abs_stream']).mean()),
+            'orientation_abs_rate': float(_bool(g['has_orientation_abs_stream']).mean()),
+            'magnetometer_rate': float(_bool(g['has_magnetometer_stream']).mean()),
+            'trials_with_screen_events': int((pd.to_numeric(g['n_screen_events'], errors='coerce').fillna(0) > 0).sum()),
+            'touch_radius_rate': float(g.loc[starts, 'touch_radius_max'].notna().mean()) if starts.any() else math.nan,
+            'touch_force_positive_rate': float((pd.to_numeric(g.loc[starts, 'touch_force_max'], errors='coerce') > 0).mean())
+            if starts.any() else math.nan,
+        })
+    tables['schema_1_2_fields'] = pd.DataFrame(rows).set_index('platform')
 
 
 def _gravity_check(ds: Dataset, trials: pd.DataFrame, n: int) -> tuple[pd.DataFrame | None, list[str]]:

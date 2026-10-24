@@ -3,16 +3,18 @@
 Usage (from analysis/, with the venv active):
     python scripts/train_baseline.py data/synthetic
     python scripts/train_baseline.py data/real/2026-11-20 --simulated exclude --augment-mirror --out reports/base_pilot
+    python scripts/train_baseline.py data/real --simulated exclude --augment-screen-away
     python scripts/train_baseline.py data/synthetic --models yaw_rule,logreg,my_pkg.my_mod:make_model
 
-Pipeline: load + validate + deduplicate -> norm_v1 -> analysis set (exclusion rules T1-T7) -> features of
-every trial and of its left/right mirror image -> for each CV scheme (development StratifiedGroupKFold,
-LOSO, leave-one-orientation-out, leave-one-platform-out) and each model: out-of-fold p(right), metrics
-with participant-bootstrap 95 % CIs, mirror consistency; subgroup error table of the development scheme;
-a label-permutation leakage control. Writes to --out (default analysis/reports/baseline_<data name>/):
-report.md, metrics.csv, subgroups.csv, mirror_consistency.csv, oof_<scheme>.csv, participant_accuracy.csv,
-exclusions.csv, features.csv and PNG figures. CSV text cells that a spreadsheet would run as a formula are
-written with a leading single quote (``report.write_csv``).
+Pipeline: load + validate + deduplicate -> norm_v2 -> analysis set (exclusion rules T1-T7, optional S3) ->
+features of every trial and of its left/right mirror image (and, with --augment-screen-away, of the
+screen-flipped *_toward trials) -> for each CV scheme (development StratifiedGroupKFold on handedness x
+platform, LOSO, leave-one-orientation-out, leave-one-platform-out) and each model: out-of-fold p(right),
+metrics with participant-bootstrap 95 % CIs, mirror consistency; subgroup error table of the development
+scheme; a label-permutation leakage control. Writes to --out (default analysis/reports/baseline_<data
+name>/): report.md, metrics.csv, subgroups.csv, mirror_consistency.csv, oof_<scheme>.csv,
+participant_accuracy.csv, exclusions.csv, features.csv and PNG figures. CSV text cells that a spreadsheet
+would run as a formula are written with a leading single quote (``report.write_csv``).
 """
 from __future__ import annotations
 
@@ -32,8 +34,9 @@ import pandas as pd  # noqa: E402
 
 from motionlab import NORM_VERSION, __version__, load_dataset  # noqa: E402
 from motionlab.augment import quantize_trial  # noqa: E402
+from motionlab.conventions import SCREEN_FLIP_ORIENTATION  # noqa: E402
 from motionlab.evaluate import (  # noqa: E402
-    SCHEMES, CVResult, analysis_set, evaluate_models, modeling_table, participant_accuracy,
+    DEFAULT_STRATA, SCHEMES, CVResult, analysis_set, evaluate_models, modeling_table, participant_accuracy,
     shuffle_labels_within, subgroup_table, summary_table,
 )
 from motionlab.features import extract_features, feature_groups  # noqa: E402
@@ -80,13 +83,20 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument('--seed', type=int, default=0)
     ap.add_argument('--n-boot', type=int, default=1000, help='participant-bootstrap resamples for the CIs (0 = none)')
     ap.add_argument('--augment-mirror', action='store_true', help='add the mirror image of every TRAINING trial (labels flipped)')
+    ap.add_argument('--augment-screen-away', action='store_true',
+                    help='add the screen-flipped copy (180 deg about the device y axis: *_toward -> *_away, same hand) '
+                         'of every *_toward TRAINING trial; test trials stay real (never report screen-away '
+                         'accuracy from synthetic trials)')
     ap.add_argument('--quantize', choices=['none', 'ios', 'all'], default='none',
                     help="Chrome-style 0.1 quantisation of iOS (or all) trials before the features (ablation A3)")
     ap.add_argument('--segment', choices=['auto', 'offline', 'stored', 'online'], default='auto',
                     help='segment source: auto = offline_v1 with the stored online_v1 as fallback')
     ap.add_argument('--simulated', choices=['include', 'exclude', 'only'], default='include',
                     help='simulated trials (real-data analyses: exclude)')
-    ap.add_argument('--require-calibration', action='store_true', help='drop sessions without a calibration (rule S3)')
+    ap.add_argument('--require-sign-support', '--require-calibration', dest='require_calibration', action='store_true',
+                    help='rule S3 "gravity sign supported": drop sessions whose gravity sign nothing supports (no '
+                         'calibrated sign, engine prior or confident trial vote). --require-calibration is the '
+                         'protocol 1.0.0 name (it required a calibration object; every v2 session has an implicit one)')
     ap.add_argument('--no-permutation-check', action='store_true', help='skip the label-permutation leakage control')
     ap.add_argument('--no-plots', action='store_true')
     ap.add_argument('--quiet', action='store_true')
@@ -125,6 +135,16 @@ def main(argv: list[str] | None = None) -> int:
     X, meta = modeling_table(F, ds.trials)
     Xm = Fm.reindex(X.index)
     say(f'modelling table: {len(X)} trials, {meta["participant_id"].nunique()} participants')
+    Xf = None
+    n_flippable = 0
+    if args.augment_screen_away:
+        # *_toward trials only: their flipped copy is a *_away grip (free / flat / *_away trials are left out)
+        toward = [o for o in SCREEN_FLIP_ORIENTATION if o.endswith('_toward')]
+        flip_ids = list(meta.loc[meta['orientation'].isin(toward), 'trial_id'])
+        n_flippable = len(flip_ids)
+        say(f'features of {n_flippable} screen-flipped training candidates ...')
+        Ff = extract_features(ds, flip_ids, transform=transform, segment=args.segment, screen_flip=True)
+        Xf = Ff.reindex(X.index)
     if meta['participant_id'].nunique() < 2 or meta['y_right'].nunique() < 2:
         print('need >= 2 participants and both hands for subject-wise CV', file=sys.stderr)
         return 1
@@ -144,7 +164,8 @@ def main(argv: list[str] | None = None) -> int:
             continue
         say(f'CV {scheme} ...')
         results[scheme] = evaluate_models(factories, X, meta, scheme=scheme, n_splits=args.n_splits, X_mirror=Xm,
-                                          augment_mirror=args.augment_mirror, n_boot=args.n_boot, seed=args.seed)
+                                          augment_mirror=args.augment_mirror, n_boot=args.n_boot, seed=args.seed,
+                                          X_screen_flip=Xf, augment_screen_flip=args.augment_screen_away)
     if not results:
         print(f'no CV scheme could run: {skipped}', file=sys.stderr)
         return 1
@@ -217,7 +238,11 @@ def main(argv: list[str] | None = None) -> int:
         'date': _dt.datetime.now().strftime('%Y-%m-%d %H:%M'), 'motionlab': __version__, 'normalisation': NORM_VERSION,
         'models': ', '.join(factories), 'schemes': ', '.join(results), 'subject folds': args.n_splits,
         'seed': args.seed, 'bootstrap resamples (participants)': args.n_boot,
-        'mirror augmentation of training folds': args.augment_mirror, 'quantisation': args.quantize,
+        'mirror augmentation of training folds': args.augment_mirror,
+        'screen-away augmentation of training folds': (f'yes ({n_flippable} *_toward trials can be flipped)'
+                                                       if args.augment_screen_away else 'no'),
+        'CV strata': ' x '.join(DEFAULT_STRATA),
+        'rule S3 (gravity sign supported)': args.require_calibration, 'quantisation': args.quantize,
         'segment source': args.segment, 'simulated trials': args.simulated,
         'participants': int(meta['participant_id'].nunique()), 'trials': int(len(meta)),
         'right-hand trials': int(meta['y_right'].sum()),
@@ -225,6 +250,12 @@ def main(argv: list[str] | None = None) -> int:
     }))
     if skipped:
         lines.append('Skipped schemes: ' + '; '.join(f'{k} ({v})' for k, v in skipped.items()) + '\n')
+    if args.augment_screen_away:
+        lines.append('> Screen-away augmentation: every `*_toward` TRAINING trial also enters its fold turned 180 deg '
+                     'about the device y axis (`*_away`, same hand label). The copies are synthetic: they keep the '
+                     'real movement (no screen-away wrist, fingers or contact) and only change the device-frame '
+                     'features. Test trials are always real; never report screen-away accuracy from synthetic '
+                     'trials.\n')
     lines.append('## Analysis set\n')
     lines.append('Attempts failing each exclusion rule, applied in order (docs/02 section 12). The modelling table '
                  'then keeps trials with usable features (`qc_ok`) and a supported gravity sign.\n')
@@ -237,6 +268,8 @@ def main(argv: list[str] | None = None) -> int:
         'gyro gravity vs browser gravity, median deg': qc['qc_gravity_vs_browser_deg'].median(),
         'segment source': ', '.join(f'{k} {v}' for k, v in qc['qc_segment_source'].value_counts().items()),
         'gravity sign source': ', '.join(f'{k} {v}' for k, v in qc['qc_gravity_sign_source'].value_counts().items()),
+        'rotationRate mapping source': ', '.join(f'{k} {v}' for k, v in qc['qc_rr_source'].value_counts().items()),
+        'gyro bias subtracted': ', '.join(f'{k} {v}' for k, v in qc['qc_gyro_bias_source'].value_counts().items()),
     }
     reasons = qc.loc[qc['qc_ok'] != 1, 'qc_reason'].value_counts()
     if len(reasons):
@@ -245,8 +278,9 @@ def main(argv: list[str] | None = None) -> int:
     lines.append('## Results\n')
     lines.append('Out-of-fold predictions of every test trial; every split is subject-disjoint (checked). '
                  'Brackets: 95 % participant-bootstrap CI. `stratified_group_kfold` (stratified on '
-                 'EHI class x platform) is the development estimate; `orientation` holds out one grip (mirror '
-                 'pairs together) for unseen people; `platform` trains on one platform and tests on the other.\n')
+                 'self-reported handedness x platform) is the development estimate; `orientation` holds out one '
+                 'grip (mirror pairs together) for unseen people; `platform` trains on one platform and tests on '
+                 'the other.\n')
     show = pd.DataFrame({
         'scheme': metrics['scheme'], 'model': metrics['model'], 'n': metrics['n'].astype(int),
         'participants': metrics['n_participants'].astype(int),

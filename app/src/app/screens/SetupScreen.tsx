@@ -1,18 +1,21 @@
 /**
- * Session setup: preset (with trial count and estimated minutes from the real plan), posture, a
- * custom builder for researchers, the safety note, then createSession() → the session screen.
+ * Session setup, for RESEARCHERS only (spec v2 §1): participants never see it; their profile's
+ * Continue starts config.default_preset. It opens after the profile when the app was loaded with
+ * ?setup=1 or the switch in Settings is on (state.setupRequested): preset (with trial count, bonus
+ * and estimated minutes from the real plan), posture, the custom builder (only grips that are
+ * collected: never *_away), the safety note, then createSession() → the session screen.
  * The safety note sits in the sticky footer above the start button, so it is on screen whatever the
- * phone size. Taps within TAP_GUARD_MS of the screen appearing are ignored: the calibration screen's
- * Continue sits where "Start recording" appears, and a double tap must not start a session.
+ * phone size. Taps within TAP_GUARD_MS of the screen appearing are ignored: the profile's Continue
+ * sits where "Start recording" appears, and a double tap must not start a session.
  */
 import { useMemo, useState } from 'preact/hooks';
-import { ALL_ORIENTATIONS, ODD_VARIANTS } from '../../core/constants';
+import { COLLECTED_ORIENTATIONS, ODD_VARIANTS } from '../../core/constants';
 import {
   buildPlan,
   DEFAULT_CUSTOM_SPEC,
   estimateMinutes,
+  isOptionalBlock,
   normalizeCustomSpec,
-  presetTrialCount,
   SPEEDS,
   START_POSITIONS,
 } from '../../core/protocol';
@@ -20,12 +23,13 @@ import type { CustomProtocolSpec, OrientationId, Posture, ProtocolPreset, Speed,
 import { useStrings } from '../../i18n';
 import { Button, Card, ChoiceGroup, Field, MultiChoice, Notice, NumberInput, Screen, Toggle } from '../../ui/components';
 import '../../ui/onboarding.css';
-import { getServices } from '../services';
 import { createSession } from '../sessionFlow';
+import { unlockInTap } from '../startFlow';
 import { createTapGuard } from '../state';
 import { getState, navigate, showToast, useAppState } from '../store';
 
-export const PRESETS: ProtocolPreset[] = ['quick', 'standard', 'full', 'custom'];
+/** Display order: the study session first. */
+export const PRESETS: ProtocolPreset[] = ['street', 'quick', 'standard', 'full', 'custom'];
 export const POSTURES: Posture[] = ['standing', 'sitting'];
 export const MIN_REPS = 1;
 export const MAX_REPS = 5;
@@ -33,16 +37,25 @@ export const MAX_REPS = 5;
 const PREVIEW_SEED = 1;
 
 export interface PlanPreview {
+  /** trials of the required blocks */
   trials: number;
+  /** trials of the optional bonus blocks (PlannedBlock.optional), offered at the checkpoint */
+  bonus: number;
+  /** estimateMinutes: the required blocks only */
   minutes: number;
 }
 
-/** Trial count and estimated duration of what the participant would get; null if the plan cannot be built. */
+/** Trial counts and estimated duration of what the participant would get; null if the plan cannot be built. */
 export function planPreview(preset: ProtocolPreset, posture: Posture, custom: CustomProtocolSpec | null): PlanPreview | null {
   try {
     const plan = buildPlan({ preset, seed: PREVIEW_SEED, posture, custom: preset === 'custom' ? custom : null });
-    const trials = preset === 'custom' ? plan.reduce((n, b) => n + b.trials.length, 0) : presetTrialCount(preset);
-    return { trials, minutes: estimateMinutes(plan) };
+    let trials = 0;
+    let bonus = 0;
+    for (const block of plan) {
+      if (isOptionalBlock(block)) bonus += block.trials.length;
+      else trials += block.trials.length;
+    }
+    return { trials, bonus, minutes: estimateMinutes(plan) };
   } catch (e) {
     console.warn('plan preview failed', e);
     return null;
@@ -100,24 +113,18 @@ export function SetupScreen() {
 
   const onStart = async () => {
     if (tap.tooSoon()) return; // the second tap of a double tap on the previous screen's button
-    // Inside the tap: keep the screen on and the audio unlocked for the whole session.
-    try {
-      const services = getServices();
-      void services.wakeLock.acquire();
-      void services.cues.unlock();
-    } catch (e) {
-      console.warn('wake lock / audio unavailable', e);
-    }
+    // Inside the tap: unlock the audio and keep the screen on for the whole session.
+    unlockInTap();
     if (starting || !valid) return;
     const now = getState();
     if (!now.participant) {
+      navigate('profile'); // first: navigate() clears the toast
       showToast(t.needProfile, 'warn');
-      navigate('profile');
       return;
     }
     if (!now.consentAcceptedAt) {
+      navigate('welcome'); // the consent is on the welcome screen
       showToast(t.needConsent, 'warn');
-      navigate('consent');
       return;
     }
     setStarting(true);
@@ -136,7 +143,7 @@ export function SetupScreen() {
   return (
     <Screen
       title={t.title}
-      onBack={() => navigate('calibration')}
+      onBack={() => navigate('profile')}
       testId="screen-setup"
       footer={
         <>
@@ -165,7 +172,7 @@ export function SetupScreen() {
               label: (
                 <span class="onb-preset">
                   <span class="onb-preset-name">{t.presets[p].label}</span>
-                  {pv && <span class="onb-preset-meta">{t.presetMeta(pv.trials, pv.minutes)}</span>}
+                  {pv && <span class="onb-preset-meta">{t.presetMeta(pv.trials, pv.minutes, pv.bonus)}</span>}
                 </span>
               ),
               hint: t.presets[p].desc,
@@ -195,7 +202,7 @@ export function SetupScreen() {
               <MultiChoice<OrientationId>
                 values={custom.orientations}
                 columns={1}
-                options={ALL_ORIENTATIONS.map((o) => ({ value: o, label: s.common.orientations[o].label }))}
+                options={COLLECTED_ORIENTATIONS.map((o) => ({ value: o, label: s.common.orientations[o].label }))}
                 onChange={(orientations) => setCustom((c) => ({ ...c, orientations }))}
                 testIdPrefix="opt-orient"
               />
@@ -248,7 +255,7 @@ export function SetupScreen() {
               {t.participant}: <bdi class="mono">{st.participant.participant_id}</bdi>
             </p>
           )}
-          {preview && <p data-testid="setup-estimate">{t.summary(preview.trials, preview.minutes)}</p>}
+          {preview && <p data-testid="setup-estimate">{t.summary(preview.trials, preview.minutes, preview.bonus)}</p>}
           <p class="small muted">{t.bothHands}</p>
         </div>
       </Card>

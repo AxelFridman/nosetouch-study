@@ -18,7 +18,7 @@ const { createSimulatedSource } = await load('src/sim/simulatedSource.ts');
 const { randomSimParticipant, defaultSimPlatform } = await load('src/sim/model.ts');
 const { makeRng } = await load('src/core/util.ts');
 const { resolveParams } = await load('src/core/protocol.ts');
-const { DEFAULT_SEGMENTATION_PARAMS } = await load('src/core/constants.ts');
+const { APP_VERSION, DEFAULT_SEGMENTATION_PARAMS } = await load('src/core/constants.ts');
 const { createTrialController } = await load('src/core/trialController.ts');
 const { runOnlineSegmentation } = await load('src/core/segmentation.ts');
 
@@ -63,7 +63,7 @@ for (let k = 0; k < plans.length; k++) {
       gravity_magnitude: 9.81, upright_check: 'ok', gyro_bias_dps: null, notes: [],
     },
     rng: makeRng(9000 + k),
-    appVersion: '0.1.0',
+    appVersion: APP_VERSION,
     simulated: true,
   });
   await ctrl.start();

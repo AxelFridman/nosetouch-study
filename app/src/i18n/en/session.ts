@@ -1,7 +1,10 @@
 // Strings for the session runner, the done screen and the researcher sandbox. OWNED BY the session UI
 // agent. Hebrew mirror with the same keys: ../he/session.ts. Protocol wording (hands, orientations,
 // speeds, start positions, variants, safety) lives in common.ts and is not repeated here.
-import type { ParticipantFlag, PhoneRotation, SensorError, TrialMessage } from '../../core/types';
+import type { Hand, OrientationId, ParticipantFlag, PhoneRotation, SensorError, Speed, TrialMessage } from '../../core/types';
+
+const HAND_CAPS = (hand: Hand) => (hand === 'left' ? 'LEFT' : 'RIGHT');
+const TIERS = ['Try it once', 'Part 1 of 3 · Basics', 'Part 2 of 3 · Sideways', 'Part 3 of 3 · Different movements', 'Bonus'];
 
 export const session = {
   trialOf: (i: number, n: number) => `Trial ${i} of ${n}`,
@@ -16,14 +19,28 @@ export const session = {
   simMismatch:
     'This session was started in a different sensor mode (simulation or real sensors). Every trial records which mode it used.',
 
-  exit: {
-    open: 'Pause',
-    title: 'Take a break?',
-    body: 'You can pause now and continue later from the start screen, or end the session here. Everything recorded so far is kept.',
-    pause: 'Pause, continue later',
-    end: 'End the session now',
-    cancel: 'Keep going',
-    paused: 'Session paused. You can continue later from the start screen.',
+  // The How-to card: the intro of the first (choice) block. Its Start button runs the free trial.
+  howTo: {
+    title: 'How to do it',
+    anyPart: 'Any part of the phone may touch your nose.',
+    steps: [
+      'Hold the phone in front of you, arm straight, screen facing you.',
+      'At the beep, bring it to touch your nose.',
+      'Hold still until the double beep, then stretch your arm out again — the next one starts by itself.',
+    ],
+    safety: 'Touch gently and hold the phone firmly.',
+    sitting: 'I’m sitting',
+    try: 'Try it once — your way',
+    gestureAria: 'Animation: the arm is stretched out, the phone comes in and touches the nose, then the arm stretches out again.',
+    angledAria: 'Animation: the phone arrives tilted and touches the nose with its top edge.',
+  },
+
+  // Asked right after the free trial of the choice block.
+  hand: {
+    question: 'Which hand did you use?',
+    left: 'Left hand',
+    right: 'Right hand',
+    unsure: 'Not sure / something went wrong',
   },
 
   intro: {
@@ -31,9 +48,22 @@ export const session = {
     newHand: 'Switch hands!',
     odd: 'In this block every movement is a little different and unusual. Read each instruction before you tap Ready.',
     free: 'In this block, hold the phone in whatever way feels natural to you.',
+    choice: 'Try it once, your way: use whichever hand and grip feel natural. Afterwards we ask which hand you used.',
     start: 'Start',
+    /** the block-start button names the hand (tap it with the free hand) */
+    startIn: (hand: Hand) => `Start — phone in ${HAND_CAPS(hand)} hand`,
+    phoneIn: (hand: Hand) => `Phone in your ${HAND_CAPS(hand)} hand`,
+    keepIn: (hand: Hand) => `Keep the phone in your ${HAND_CAPS(hand)} hand`,
+    /** tier label of a street block: 0 choice, 1 basics, 2 sideways, 3 variety, 4 bonus */
+    tier: (tier: number) => TIERS[tier] ?? `Part ${tier}`,
+    basicsDone: 'Basics done — great! The rest adds variety. You can stop any time.',
+    speedsVary: 'Speeds change — the screen tells you each time.',
+    variesList: (items: string) => `Each movement is a little different: ${items}. The screen tells you which one.`,
+    redo: 'Once more: the last movement is done again.',
+    gestureAria: (hand: string, grip: string) => `Animation: ${hand}, ${grip}, the phone comes to the nose and goes back.`,
   },
 
+  // Researcher review mode (settings: review every trial): the Ready screen before each trial.
   ready: {
     phone: 'Phone',
     speed: 'Speed',
@@ -55,29 +85,101 @@ export const session = {
       inApp:
         'The phone did not allow access to its motion sensors. The browser inside this app cannot ask again: please open the link in Safari and start again there.',
       android:
-        'The phone did not allow access to its motion sensors. Tap the icon to the left of the address bar › Permissions (or Site settings) › Motion sensors › Allow, then tap Ready again.',
+        'The phone did not allow access to its motion sensors. Tap the icon to the left of the address bar › Permissions (or Site settings) › Motion sensors › Allow, then try again.',
       other:
-        'The phone did not allow access to its motion sensors. Allow motion sensors for this site in the browser settings, then tap Ready again.',
+        'The phone did not allow access to its motion sensors. Allow motion sensors for this site in the browser settings, then try again.',
     },
   },
 
   live: {
     starting: 'Starting the sensors…',
     messages: {
-      hold_still: 'Hold still',
+      hold_still: 'Arm straight — hold still',
       too_early: 'Too early! Wait for the beep',
       go: 'GO!',
       moving: 'Touch your nose',
-      hold_at_nose: 'Hold it there…',
+      hold_at_nose: 'Hold…',
       done: 'Done!',
       no_movement: 'No movement detected',
       too_long: 'That took too long',
       sensor_stalled: 'The motion sensors stopped',
+      return_arm: 'Arm out again',
+      wrong_grip: 'Hold the phone like the picture',
     } as Record<TrialMessage, string>,
+    /** the status line of the live panel, by phase (see SessionScreen.statusKey) */
+    status: {
+      starting: 'Starting the sensors…',
+      waiting: 'Arm straight — hold still',
+      foreperiod: 'Get ready…',
+      go: 'GO!',
+      moving: 'Touch your nose',
+      at_nose: 'Hold…',
+      returning: 'Arm out again',
+      wrong_grip: 'Hold the phone like the picture',
+      too_early: 'Too early! Wait for the beep',
+      sensor_stalled: 'The motion sensors stopped',
+      no_movement: 'No movement detected',
+      too_long: 'That took too long',
+      done: 'Done!',
+    },
+    /** the huge speed word of the live panel */
+    speedWords: { natural: 'NORMAL', fast: 'FAST', slow: 'SLOW' } as Record<Speed, string>,
+    /** the hand word of the choice trial */
+    anyHand: 'YOUR CHOICE',
+    minutesLeft: (n: number) => (n <= 0 ? 'almost done' : n === 1 ? 'about 1 min left' : `about ${n} min left`),
     waitBeep: 'Arm straight, keep still and wait for the beep',
-    stop: 'Hold to stop',
-    stopAria: 'Press and hold for about one second to stop this trial',
+    pause: 'Hold to pause',
+    pauseAria: 'Press and hold for about one second to pause',
     sim: 'SIM',
+  },
+
+  // The pause sheet: a long press on the live panel's pause control, the system back button, the app
+  // going to the background, stalled sensors, a long wait without GO, two failures in a row.
+  pause: {
+    open: 'Pause',
+    title: 'Paused',
+    reasons: {
+      paused: 'Take your time. Everything you did so far is saved.',
+      hidden: 'The app went to the background, so the movement in progress was stopped.',
+      stalled: 'The motion sensors stopped sending data. Hold the phone still for a moment, then tap Continue.',
+      idle: 'Nothing happened for a while. Stretch your arm out, hold still and wait for the beep.',
+      failed_twice: 'That did not work twice in a row. Read the instruction on the screen again, then tap Continue.',
+      save_failed: 'The last movement could not be saved on the phone. Tap Continue to try again.',
+      error: 'Something went wrong while recording. Tap Continue to try again.',
+    },
+    continue: 'Continue',
+    redo: 'Redo last movement',
+    wrongHand: 'Last one was the wrong hand',
+    finish: 'Finish now',
+    later: 'Continue later',
+    laterToast: 'Session paused. You can continue later from the start screen.',
+    kept: 'Everything you recorded is kept, also if you finish now.',
+  },
+
+  // After the main part (tier 3), before the optional bonus blocks.
+  checkpoint: {
+    title: 'Main part done — thank you!',
+    body: (n: number) => (n === 1 ? 'You recorded 1 movement.' : `You recorded ${n} movements.`),
+    bonusHint: 'If you have a little more time, the bonus adds a few more movements. Both are fine.',
+    finish: 'Finish',
+    bonus: (minutes: number) => (minutes <= 1 ? 'Bonus: about 1 more minute' : `Bonus: about ${minutes} more minutes`),
+  },
+
+  // Speech (only where the platform allows it: never outside a tap on iOS; silent on computers).
+  speech: {
+    speeds: { natural: 'Normal', fast: 'Fast', slow: 'Slow' } as Record<Speed, string>,
+    grips: {
+      upright_toward: 'Upright, screen facing you',
+      upright_away: 'Upright, screen facing away',
+      top_left_toward: 'Sideways, top of the phone to your left',
+      top_right_toward: 'Sideways, top of the phone to your right',
+      upside_down_toward: 'Upside down, screen facing you',
+      upside_down_away: 'Upside down, screen facing away',
+      top_left_away: 'Sideways, top to your left, screen facing away',
+      top_right_away: 'Sideways, top to your right, screen facing away',
+      flat_up: 'Flat, screen up',
+      free: 'Any way you like',
+    } as Record<OrientationId, string>,
   },
 
   review: {
@@ -139,13 +241,19 @@ export const session = {
     title: 'Thank you!',
     completed: 'You finished the session. Thank you for helping our research!',
     abandoned: 'The session ended early. Thank you: everything you recorded is still useful.',
+    endedEarly: 'You finished early. Thank you: everything you recorded is kept and useful.',
     noSession: 'Thank you for taking part!',
+    thanksName: (name: string) => `Thank you, ${name}!`,
+    movements: (n: number) => (n === 1 ? '1 movement recorded' : `${n} movements recorded`),
     summary: 'Your session',
     accepted: 'Movements recorded',
     attempts: 'Attempts (including redos)',
     duration: 'Time',
     upload: 'Sending your data',
     allSent: 'All your data has been sent to the researchers.',
+    uploadedAll: 'All data uploaded ✓',
+    uploadingLeft: (k: number) => `Uploading… please keep this page open a moment (${k} left)`,
+    offline: 'You are offline. Your data is saved on this phone and is sent the next time the app is open and online.',
     pending: (n: number) => (n === 1 ? '1 item is waiting to be sent.' : `${n} items are waiting to be sent.`),
     failed: (n: number) =>
       n === 1
@@ -166,6 +274,8 @@ export const session = {
       cancelled: 'Sharing was cancelled.',
     },
     exportFailed: 'The data file could not be created.',
+    code: (id: string) => `Your code: ${id} (to delete your data later)`,
+    nextPerson: 'Next person',
     home: 'Home',
   },
 

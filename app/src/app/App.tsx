@@ -8,11 +8,10 @@ import { Toast } from '../ui/components';
 import { getServices, initServices } from './services';
 import { loadSettings, persistSettings, type ScreenId } from './state';
 import { installHistory, navigate, setState, useAppState } from './store';
+import { setupRequestedIn } from './startFlow';
 import { WelcomeScreen } from './screens/WelcomeScreen';
-import { ConsentScreen } from './screens/ConsentScreen';
 import { ProfileScreen } from './screens/ProfileScreen';
 import { SensorCheckScreen } from './screens/SensorCheckScreen';
-import { CalibrationScreen } from './screens/CalibrationScreen';
 import { SetupScreen } from './screens/SetupScreen';
 import { SessionScreen } from './screens/SessionScreen';
 import { DoneScreen } from './screens/DoneScreen';
@@ -35,10 +34,8 @@ function LoadingScreen() {
 const SCREENS: Record<ScreenId, FunctionComponent> = {
   loading: LoadingScreen,
   welcome: WelcomeScreen,
-  consent: ConsentScreen,
   profile: ProfileScreen,
   sensors: SensorCheckScreen,
-  calibration: CalibrationScreen,
   setup: SetupScreen,
   session: SessionScreen,
   done: DoneScreen,
@@ -87,6 +84,8 @@ function refreshConfigWhenOnline(): void {
  * URL parameters (all optional):
  *   ?lang=en|he   UI language (remembered)
  *   ?sim=1        use the built-in sensor simulator for this run only (never remembered)
+ *   ?setup=1      researchers: the profile's Continue opens the session setup (presets, custom
+ *                 sessions) instead of starting the study's default session (never remembered)
  */
 async function boot(): Promise<void> {
   const { config, source } = await fetchStudyConfig();
@@ -98,7 +97,7 @@ async function boot(): Promise<void> {
   persistSettings(settings);
   if (params.get('sim') === '1') settings.simulate = true;
   applyDocumentLanguage(settings.language);
-  setState({ config, settings });
+  setState({ config, settings, setupRequested: setupRequestedIn(location.search) });
 
   const services = await initServices();
   const [device, outbox] = await Promise.all([getDeviceInfo(), services.store.outboxCounts()]);

@@ -1,9 +1,11 @@
 import { readFileSync } from 'node:fs';
 import { runInNewContext } from 'node:vm';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { DEFAULT_SETTINGS, loadSettings, persistSettings } from '../src/app/state';
 import {
   CONFIG_CACHE_KEY,
   CONFIG_TIMEOUT_MS,
+  PRESETS,
   effectiveUpload,
   fetchStudyConfig,
   isValidEndpoint,
@@ -14,10 +16,10 @@ import {
   sanitizeStudyConfig,
   type LoadedConfig,
 } from '../src/core/config';
-import { DEFAULT_STUDY_CONFIG } from '../src/core/constants';
+import { CONSENT_VERSION_DEFAULT, DEFAULT_STUDY_CONFIG } from '../src/core/constants';
 import type { StudyConfig } from '../src/core/types';
 import { makeProfile, makeSession } from './helpers/dataFixtures';
-import { expectValid } from './helpers/schema';
+import { expectValid, recordsSchema } from './helpers/schema';
 
 const okJson = (body: unknown) => vi.fn(async () => new Response(JSON.stringify(body), { status: 200 }));
 
@@ -91,6 +93,55 @@ describe('sanitizeStudyConfig', () => {
   it('the shipped public/config.json is valid as is', () => {
     const raw = JSON.parse(readFileSync(new URL('../public/config.json', import.meta.url), 'utf8'));
     expect(sanitizeStudyConfig(raw)).toEqual(raw);
+  });
+
+  it('the shipped public/config.json is the v2 study setup: street preset, v2 consent, names uploaded', () => {
+    const raw = JSON.parse(readFileSync(new URL('../public/config.json', import.meta.url), 'utf8'));
+    expect(raw).toMatchObject({ default_preset: 'street', consent_version: CONSENT_VERSION_DEFAULT, upload_nickname: true });
+    expect(CONSENT_VERSION_DEFAULT).toBe('2026-10-v2');
+    expect(DEFAULT_STUDY_CONFIG.default_preset).toBe('street');
+    expect(DEFAULT_STUDY_CONFIG.consent_version).toBe(CONSENT_VERSION_DEFAULT);
+  });
+
+  it('accepts every protocol preset of the schema (street included) and nothing else', () => {
+    expect([...PRESETS].sort()).toEqual([...recordsSchema.$defs.ProtocolPreset.enum].sort());
+    for (const preset of PRESETS) expect(sanitizeStudyConfig({ default_preset: preset }).default_preset).toBe(preset);
+    expect(sanitizeStudyConfig({ default_preset: 'Street' }).default_preset).toBe('street'); // falls back to the default
+  });
+});
+
+describe('LocalSettings.review_each_trial (researcher setting)', () => {
+  const KEY = 'nosetouch.settings.v1';
+
+  function withStorage(init: Record<string, string>, run: (map: Map<string, string>) => void): void {
+    const storage = memoryStorage(init);
+    vi.stubGlobal('localStorage', storage);
+    try {
+      run(storage.map);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  }
+
+  it('defaults to false (hands-free flow), also for settings saved before v0.2.0', () => {
+    expect(DEFAULT_SETTINGS.review_each_trial).toBe(false);
+    withStorage({}, () => expect(loadSettings('en').review_each_trial).toBe(false));
+    withStorage({ [KEY]: JSON.stringify({ language: 'he', audio: false }) }, () => {
+      const s = loadSettings('en');
+      expect(s.review_each_trial).toBe(false);
+      expect(s.language).toBe('he');
+    });
+  });
+
+  it('is saved and loaded; anything but true reads as false', () => {
+    withStorage({}, (map) => {
+      persistSettings({ ...DEFAULT_SETTINGS, review_each_trial: true });
+      expect(JSON.parse(map.get(KEY) ?? '{}').review_each_trial).toBe(true);
+      expect(loadSettings('en').review_each_trial).toBe(true);
+    });
+    for (const junk of ['true', 1, null, {}]) {
+      withStorage({ [KEY]: JSON.stringify({ review_each_trial: junk }) }, () => expect(loadSettings('en').review_each_trial).toBe(false));
+    }
   });
 });
 
@@ -311,7 +362,8 @@ const INDEX_HTML = '<!doctype html><script type="module" src="./assets/index-abc
  * response's Vary are equal on both requests.
  */
 function loadServiceWorker(files: Record<string, string>, opts: { vary?: string } = {}) {
-  const net = { offline: false, failing: new Set<string>() };
+  /** every network request the worker made: URL (no query) and the Request's cache mode */
+  const net = { offline: false, failing: new Set<string>(), requests: [] as { url: string; cache: string }[] };
   const listeners: Record<string, (e: unknown) => void> = {};
   type Entry = { req: Request; res: Response };
   const stores = new Map<string, Map<string, Entry>>();
@@ -343,6 +395,7 @@ function loadServiceWorker(files: Record<string, string>, opts: { vary?: string 
   const headers: Record<string, string> = opts.vary ? { Vary: opts.vary } : {};
   const fetchImpl = async (input: RequestInfo | URL) => {
     const url = keyOf(input);
+    net.requests.push({ url, cache: input instanceof Request ? input.cache : 'default' });
     if (net.offline || net.failing.has(url)) throw new TypeError('Failed to fetch');
     const path = url.split('?')[0];
     return path in files
@@ -372,18 +425,39 @@ function loadServiceWorker(files: Record<string, string>, opts: { vary?: string 
     listeners.install({ waitUntil: (p: Promise<unknown>) => (done = p) });
     await done;
   };
-  const get = async (url: string, requestHeaders: Record<string, string> = {}): Promise<Response> => {
+  const activate = async () => {
+    let done: Promise<unknown> = Promise.resolve();
+    listeners.activate({ waitUntil: (p: Promise<unknown>) => (done = p) });
+    await done;
+  };
+  /** background work of the fetch handler (event.waitUntil), e.g. storing a fresh index.html */
+  const background: Promise<unknown>[] = [];
+  const dispatch = (request: Request): Promise<Response> => {
     let answer: Promise<Response> | undefined;
     listeners.fetch({
-      request: new Request(url, { headers: requestHeaders }),
+      request,
       respondWith: (p: Promise<Response>) => (answer = p),
-      waitUntil: (p: Promise<unknown>) => void p.catch(() => undefined),
+      waitUntil: (p: Promise<unknown>) => void background.push(p.catch(() => undefined)),
     });
-    if (!answer) throw new Error(`the worker did not answer ${url}`);
+    if (!answer) throw new Error(`the worker did not answer ${request.url}`);
     return answer;
   };
+  const get = (url: string, requestHeaders: Record<string, string> = {}): Promise<Response> =>
+    dispatch(new Request(url, { headers: requestHeaders }));
+  /** a page navigation (Node cannot build mode 'navigate' requests, so the mode is set on the instance) */
+  const navigate = (url: string): Promise<Response> =>
+    dispatch(Object.defineProperty(new Request(url), 'mode', { value: 'navigate' }));
+  const settle = async () => {
+    while (background.length) await background.shift();
+  };
   const cached = () => new Set([...stores.values()].flatMap((m) => [...m.keys()]));
-  return { net, install, get, cached };
+  const cacheNames = () => [...stores.keys()];
+  /** a cache left by an older worker (another version or another copy of the app on the origin) */
+  const seed = async (name: string, url: string, body: string) => {
+    const cache = await caches.open(name);
+    await cache.put(url, new Response(body));
+  };
+  return { net, install, activate, get, navigate, settle, cached, cacheNames, seed };
 }
 
 const SITE: Record<string, string> = {
@@ -437,6 +511,53 @@ describe('service worker: config.json is part of the offline shell', () => {
   });
 });
 
+describe('service worker: a new deploy is picked up at the next start (app 0.2.0)', () => {
+  it('navigations revalidate the HTTP cache (cache: no-cache), so a 10-minute max-age cannot serve the old page', async () => {
+    const sw = loadServiceWorker({ ...SITE });
+    await sw.install();
+    sw.net.requests.length = 0;
+    const res = await sw.navigate(`${SCOPE}?sim=1&setup=1`);
+    expect(await res.text()).toBe(INDEX_HTML);
+    expect(sw.net.requests).toEqual([{ url: `${SCOPE}?sim=1&setup=1`, cache: 'no-cache' }]);
+  });
+
+  it('the fresh index.html replaces the cached one (with its new assets), so even an offline start runs the deploy', async () => {
+    const site = { ...SITE };
+    const sw = loadServiceWorker(site);
+    await sw.install();
+    const deployed = '<!doctype html><script type="module" src="./assets/index-v2new.js"></script>';
+    site[SCOPE] = deployed;
+    site[`${SCOPE}index.html`] = deployed;
+    site[`${SCOPE}assets/index-v2new.js`] = 'console.log(2)';
+    expect(await (await sw.navigate(SCOPE)).text()).toBe(deployed);
+    await sw.settle();
+    expect(sw.cached()).toContain(`${SCOPE}assets/index-v2new.js`);
+    sw.net.offline = true;
+    expect(await (await sw.navigate(SCOPE)).text()).toBe(deployed);
+    expect(await (await sw.get(`${SCOPE}assets/index-v2new.js`)).text()).toBe('console.log(2)');
+  });
+
+  it('offline, a navigation gets the cached shell', async () => {
+    const sw = loadServiceWorker(SITE);
+    await sw.install();
+    sw.net.offline = true;
+    expect(await (await sw.navigate(`${SCOPE}?lang=he`)).text()).toBe(INDEX_HTML);
+  });
+
+  it('activating the v2 worker deletes the v1 shell of this copy of the app, and nothing else', async () => {
+    const sw = loadServiceWorker(SITE);
+    const otherCopy = 'https://lab.github.io/other-study/';
+    await sw.seed(`nosetouch-v1:${SCOPE}`, `${SCOPE}index.html`, '<!doctype html>v0.1 calibration flow');
+    await sw.seed(`nosetouch-v1:${otherCopy}`, `${otherCopy}index.html`, 'another app on the same origin');
+    await sw.seed('someone-else', `${SCOPE}x`, 'not ours');
+    await sw.install();
+    await sw.activate();
+    expect(sw.cacheNames().sort()).toEqual([`nosetouch-v1:${otherCopy}`, `nosetouch-v2:${SCOPE}`, 'someone-else'].sort());
+    sw.net.offline = true;
+    expect(await (await sw.navigate(SCOPE)).text()).toBe(INDEX_HTML); // never the v0.1 page
+  });
+});
+
 describe('effectiveUpload', () => {
   const cfg = sanitizeStudyConfig({
     upload: { mode: 'apps_script', endpoint: 'https://script.google.com/macros/s/AKfy/exec', study_key: 'study-key' },
@@ -482,10 +603,17 @@ describe('redaction', () => {
 
   it('redactSession redacts the participant snapshot and keeps the record schema-valid', () => {
     const session = makeSession();
-    const redacted = redactSession(session, DEFAULT_STUDY_CONFIG);
+    const redacted = redactSession(session, { ...DEFAULT_STUDY_CONFIG, upload_nickname: false });
     expect(redacted.participant.nickname).toBeNull();
     expect(session.participant.nickname).toBe('Dana');
     expect({ ...redacted, participant: session.participant }).toEqual(session);
     expectValid('SessionRecord', redacted);
+  });
+
+  it('the built-in config uploads names like public/config.json (spec v2: names are uploaded)', () => {
+    expect(DEFAULT_STUDY_CONFIG.upload_nickname).toBe(true);
+    expect(redactSession(makeSession(), DEFAULT_STUDY_CONFIG).participant.nickname).toBe('Dana');
+    // ...but it uploads nothing until the deployed config names an endpoint
+    expect(DEFAULT_STUDY_CONFIG.upload.mode).toBe('none');
   });
 });

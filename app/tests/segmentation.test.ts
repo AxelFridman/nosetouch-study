@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { DEFAULT_SEGMENTATION_PARAMS } from '../src/core/constants';
 import {
+  MotionSignals,
   OnlineSegmenter,
   runOnlineSegmentation,
   type RelMotionSample,
@@ -121,6 +122,48 @@ describe('online_v1 signals (spec 1)', () => {
     expect(none.live.acc).toBe(0);
 
     expect(new OnlineSegmenter(P()).result().acc_source).toBe('none'); // before any sample
+  });
+
+  it('MotionSignals gives the segmenter\'s smoothed values sample by sample, and keeps going after the end', () => {
+    const scenarios: SegScenario[] = [
+      { seed: 3, durationMs: 5000, moves: [{ startMs: 1200, durMs: 900, distM: 0.45, angleDeg: 60 }] },
+      { seed: 4, durationMs: 5000, acc: 'null', moves: [{ startMs: 1200, durMs: 900, distM: 0.45, angleDeg: 60 }] }, // highpass
+      { seed: 5, durationMs: 5000, rr: 'intermittent', jitterMs: 4, dropProb: 0.1, moves: [{ startMs: 1500, durMs: 700, distM: 0.4, angleDeg: 50 }] },
+      { seed: 6, durationMs: 2000, acc: 'null', accg: 'null' }, // acc_source 'none'
+    ];
+    for (const sc of scenarios) {
+      const samples = synthSamples(sc);
+      const params = P();
+      const seg = new OnlineSegmenter(params);
+      const sig = new MotionSignals(params);
+      let goT: number | null = null;
+      let afterEnd = 0;
+      for (const s of samples) {
+        const ended = seg.state === 'ended' || seg.state === 'failed';
+        const events = seg.push(s);
+        const v = sig.push(s);
+        expect(v).toEqual({ gyro: sig.gyro, acc: sig.acc });
+        if (!ended) {
+          expect(sig.gyro).toBe(seg.live.gyro);
+          expect(sig.acc).toBe(seg.live.acc);
+        } else {
+          afterEnd++;
+        }
+        if (events.some((e) => e.type === 'still') && goT === null) {
+          goT = s.t + 500;
+        }
+        if (goT !== null && seg.state === 'still' && s.t >= goT) seg.markGo(s.t);
+      }
+      if (sc.moves) {
+        expect(seg.result().end_index, `seed ${sc.seed}`).not.toBeNull();
+        expect(afterEnd, `seed ${sc.seed}`).toBeGreaterThan(30);
+        expect(sig.gyro).not.toBe(seg.live.gyro); // the segmenter's live values froze at the end
+      }
+    }
+    // a non-finite t changes nothing
+    const sig = new MotionSignals(P());
+    sig.push(S(0, 10, 1));
+    expect(sig.push({ ...S(1, 50, 5), t: Number.NaN })).toEqual({ gyro: 10, acc: 1 });
   });
 });
 
@@ -420,8 +463,12 @@ describe('online_v1 on synthetic minimum-jerk movements (60 Hz, noise + tremor)'
       const a = runSynth({}, segParamsForSpeed(speed), 25, T);
       log(`T=${T} ${speed}`, a);
       expect(a.failures).toEqual([]);
+      // Protocol 2.0.0: on a slow ramp the looser still thresholds (20 / 0.5) stop the back-dating
+      // later and the slow onset floors are higher (25 / 0.55), so slow onsets come ~280 ms later than
+      // with 1.0.0 (median 567 vs 283 ms here; reported in app/scripts/out/segmentation_eval.md).
+      const onsetBound = speed === 'slow' ? 0.25 * T + 60 : 0.2 * T + 60;
       for (const x of a.onsetErr) expect(x).toBeGreaterThanOrEqual(0);
-      for (const x of a.onsetErr) expect(x).toBeLessThanOrEqual(0.2 * T + 60);
+      for (const x of a.onsetErr) expect(x).toBeLessThanOrEqual(onsetBound);
       for (const x of a.endErr) expect(Math.abs(x)).toBeLessThanOrEqual(0.12 * T + 80);
     });
   }

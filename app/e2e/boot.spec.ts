@@ -3,7 +3,7 @@
  * message is in the participant's language, and the browser's own (English) message stays
  * left-to-right inside it, so a Hebrew sentence keeps its punctuation in place.
  */
-import { expect, test } from '@playwright/test';
+import { expect, test } from './fixtures';
 import { en } from '../src/i18n/en';
 import { he } from '../src/i18n/he';
 

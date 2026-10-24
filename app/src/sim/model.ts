@@ -13,7 +13,9 @@
  *  upside_down_away = [(1,0,0),(0,−1,0),(0,0,−1)], top_left_away = [(0,−1,0),(−1,0,0),(0,0,−1)],
  *  top_right_away = [(0,1,0),(1,0,0),(0,0,−1)], flat_up = [(1,0,0),(0,0,−1),(0,1,0)];
  *  'free' = a random one of the above (uniform; the LEFT hand takes the mirror of the drawn one so
- *  that left/right stay exact mirror images). Plus a small random per-trial grip tilt (≤ 10°),
+ *  that left/right stay exact mirror images) — except in street's 'choice' trial, where the
+ *  participant picks their own hand and the natural upright grip (performedCondition, applied by
+ *  the simulated source). Plus a small random per-trial grip tilt (≤ 10°),
  *  applied in the body frame: R_grip = exp([τ]×)·R_BD(o).
  *  Mirror property: M·R_BD(o)·S = R_BD(mirror(o)) with M = S = diag(−1,1,1) — tests must check it.
  *
@@ -36,11 +38,17 @@
  *  positions; y and z of axial vectors such as the grip tilt), and the draws happen in a fixed
  *  order whatever the hand/variant, so equal rng streams give exactly mirrored movements.
  *  Speeds: natural T ≈ style.duration_natural_s, fast ≈ 0.55·natural (but ≥ 0.4 s, a physiological
- *  floor for a ~0.6 m reach), slow ≈ 2.6·natural; then ±12% per trial (× nondominant_jitter).
+ *  floor for a ~0.6 m reach), slow ≈ 2.0·natural (the Android pilot's clean trials: slow onset-to-contact
+ *  1.95–2.55 s vs natural 0.97–1.21 s; 2.6 gave slow peaks well below the pilot's ≥ 50 deg/s and missed
+ *  ~2 % of slow onsets under protocol 2.0.0's slow floors); then ±12% per trial (× nondominant_jitter).
  *  Variants modify the plan: curved (arc ×3), pause (σ holds at 0.5 for 0.8 s: two half-way
  *  minimum-jerk pieces with a still plateau between), twist (roll ×3, yaw_transient ×2),
  *  elbow_high (pitch −25°, arc ×1.5 upward), bent_start (L ×0.8), lean_in (p1 z −0.08, T ×0.9),
- *  chin (p1 y −0.07), forehead (p1 y +0.06), jerky (3 stop-go minimum-jerk steps, 90–200 ms stops).
+ *  chin (p1 y −0.07), forehead (p1 y +0.06), jerky (3 stop-go minimum-jerk steps, 90–200 ms stops),
+ *  tilted_touch (the top edge touches the nose: an extra rotation about the DEVICE x axis,
+ *  R_BD(u) = R_motion(u)·R_grip·Rx(θ·u²), so the top edge tips towards the face as the phone arrives;
+ *  θ = PlanOptions.tiltedTouchDeg, default 35°; a device-x rotation is its own mirror image, so the
+ *  same θ for both hands keeps the mirror property).
  *
  * Signals at time t (all exact, then noise is added by the source):
  *  a_B = d²p/dt² (analytic), specific force f_B = a_B + (0, g, 0)
@@ -61,6 +69,7 @@ import type {
   HandednessSelf,
   OrientationId,
   ParticipantProfile,
+  PhoneHand,
   Sex,
   TrialCondition,
   Vec3,
@@ -90,6 +99,11 @@ export interface SimParticipant {
   arm_length_m: number;
   shoulder_half_width_m: number;
   style: SimStyle;
+  /**
+   * The hand that usually holds the phone (profile.phone_hand). Used where the participant chooses
+   * the hand: street's 'choice' trial (performedCondition). Absent or 'both' → the dominant hand.
+   */
+  phone_hand?: PhoneHand;
 }
 
 export interface SimPlatform {
@@ -118,6 +132,12 @@ export interface SimPlatform {
    * noise: false ignores it (exact tests).
    */
   quantize?: boolean;
+  /**
+   * Chrome Android's magnetometer-fused, heading-referenced streams (schema 1.2): an
+   * AbsoluteOrientationSensor quaternion next to every relative one (needs `quaternion`) and a
+   * 'deviceorientationabsolute' event next to every deviceorientation event. Undefined → false.
+   */
+  absolute_orientation?: boolean;
 }
 
 /** Kinematic state at one instant: body-frame position/velocity/acceleration and R_BD. */
@@ -285,12 +305,20 @@ function rotZ(rad: number): Mat3 {
 
 // ───────────────────────────── movement plan ─────────────────────────────
 
-const SPEED_FACTOR = { natural: 1, fast: 0.55, slow: 2.6 } as const;
+const SPEED_FACTOR = { natural: 1, fast: 0.55, slow: 2.0 } as const;
 const FAST_FLOOR_S = 0.4;
 const PAUSE_S = 0.8;
 const MAX_TILT_DEG = 10;
+/** tilted_touch: default end tilt about the device x axis (the instruction asks for ~30–40°). */
+export const TILTED_TOUCH_DEFAULT_DEG = 35;
 
-export function planMovement(p: SimParticipant, c: TrialCondition, rng: () => number): MovementPlan {
+/** Plan parameters drawn outside planMovement's own random stream (so its draws never shift). */
+export interface PlanOptions {
+  /** tilted_touch: end tilt about the device x axis, deg (default TILTED_TOUCH_DEFAULT_DEG) */
+  tiltedTouchDeg?: number;
+}
+
+export function planMovement(p: SimParticipant, c: TrialCondition, rng: () => number, planOpts: PlanOptions = {}): MovementPlan {
   const st = p.style;
   const h: 1 | -1 = c.hand === 'right' ? 1 : -1;
   const nondominant = c.hand !== p.dominant;
@@ -401,6 +429,10 @@ export function planMovement(p: SimParticipant, c: TrialCondition, rng: () => nu
   const duration = last.t0 + last.dur;
 
   const delta: Vec3 = [p1[0] - p0[0], p1[1] - p0[1], p1[2] - p0[2]];
+  const tiltTouchRad =
+    c.variant === 'tilted_touch'
+      ? (Number.isFinite(planOpts.tiltedTouchDeg) ? (planOpts.tiltedTouchDeg as number) : TILTED_TOUCH_DEFAULT_DEG) * DEG
+      : 0;
 
   const path = (u: number, du: number, ddu: number): PoseState => {
     const sinU = Math.sin(Math.PI * u);
@@ -417,7 +449,9 @@ export function planMovement(p: SimParticipant, c: TrialCondition, rng: () => nu
     }
     const yaw = (yawNet * u + yawTr * sinU) * DEG;
     const rMotion = mMul(mMul(rotY(h * yaw), rotX(pitch * u * DEG)), rotZ(h * roll * u * DEG));
-    return { p: pos, v: vel, a: acc, R: mMul(rMotion, grip) };
+    const R = mMul(rMotion, grip);
+    // tilted_touch: device-frame rotation about x (right-multiplied), growing as u² towards the nose
+    return { p: pos, v: vel, a: acc, R: tiltTouchRad === 0 ? R : mMul(R, rotX(tiltTouchRad * u * u)) };
   };
 
   // contact transient: largest (3 m/s²) for fast movements, ∝ (speed)²
@@ -498,7 +532,7 @@ export function randomSimParticipant(rng: () => number, overrides?: Partial<SimP
   const handedness: HandednessSelf = o.handedness ?? (uHand < 0.88 ? 'right' : uHand < 0.98 ? 'left' : 'ambidextrous');
   const dominant: Hand = o.dominant ?? (handedness === 'ambidextrous' ? (uCoin < 0.5 ? 'right' : 'left') : handedness);
   const femaleScale = sex === 'female' ? 0.97 : 1;
-  return {
+  const out: SimParticipant = {
     participant_id: o.participant_id ?? id,
     sex,
     age_years: age,
@@ -509,13 +543,31 @@ export function randomSimParticipant(rng: () => number, overrides?: Partial<SimP
     shoulder_half_width_m: o.shoulder_half_width_m ?? (0.105 * femaleScale * height * (1 + 0.05 * clamp(zShoulder, -2.5, 2.5))) / 100,
     style: o.style ?? style,
   };
+  if (o.phone_hand !== undefined) out.phone_hand = o.phone_hand; // no draw: the stream stays as it was
+  return out;
+}
+
+/** The hand a simulated participant picks when the choice is theirs: the usual phone hand, else the dominant one. */
+export function simChoiceHand(p: SimParticipant): Hand {
+  return p.phone_hand === 'left' || p.phone_hand === 'right' ? p.phone_hand : p.dominant;
+}
+
+/**
+ * The condition a simulated participant actually performs for a planned one. Only street's 'choice'
+ * trial (condition.hand_source 'reported') differs from the plan: its hand is a placeholder, so the
+ * participant uses their own (simChoiceHand), and its 'free' grip is the natural one of the How-to
+ * card — upright, screen toward them. Every other condition is returned unchanged (the same object).
+ */
+export function performedCondition(p: SimParticipant, c: TrialCondition): TrialCondition {
+  if (c.hand_source !== 'reported') return c;
+  return { ...c, hand: simChoiceHand(p), orientation: c.orientation === 'free' ? 'upright_toward' : c.orientation };
 }
 
 /**
  * Deterministic simulated participant for the in-app simulation mode: dominance from the profile's
- * handedness (ambidextrous → seeded coin flip), height → arm length (≈ 0.36 × height), sex/age copied;
- * style drawn from a mulberry32 stream seeded with `seed` (simRng = util.makeRng's algorithm).
- * profile null → a random right-hander. Missing age/height are drawn.
+ * handedness (ambidextrous → seeded coin flip), height → arm length (≈ 0.36 × height), sex/age and
+ * the usual phone hand copied; style drawn from a mulberry32 stream seeded with `seed` (simRng =
+ * util.makeRng's algorithm). profile null → a random right-hander. Missing age/height are drawn.
  */
 export function simParticipantFromProfile(profile: ParticipantProfile | null, seed: number): SimParticipant {
   const rng = simRng(seed);
@@ -524,6 +576,7 @@ export function simParticipantFromProfile(profile: ParticipantProfile | null, se
     participant_id: profile.participant_id,
     sex: profile.sex,
     handedness: profile.handedness_self,
+    phone_hand: profile.phone_hand,
   };
   if (profile.age_years !== null) overrides.age_years = profile.age_years;
   if (profile.height_cm !== null) overrides.height_cm = profile.height_cm;
@@ -533,8 +586,9 @@ export function simParticipantFromProfile(profile: ParticipantProfile | null, se
 /**
  * Plausible platform parameters. Both platforms deliver devicemotion at 60 Hz (Chrome's pump and
  * WebKit's CoreMotion updates); Android has noisier timing and sensors and exposes the Generic
- * Sensor RelativeOrientationSensor (quaternion), iOS Safari does not. Android (Chrome) values are
- * quantised like Chromium's; iOS values are full doubles.
+ * Sensor RelativeOrientationSensor (quaternion) plus the absolute (magnetometer-fused) orientation
+ * streams, iOS Safari does not. Android (Chrome) values are quantised like Chromium's; iOS values are
+ * full doubles.
  */
 export function defaultSimPlatform(name: 'ios' | 'android', rng: () => number): SimPlatform {
   const ios = name === 'ios';
@@ -555,5 +609,6 @@ export function defaultSimPlatform(name: 'ios' | 'android', rng: () => number): 
     gyro_bias_dps: [bias[0] * biasSd, bias[1] * biasSd, bias[2] * biasSd],
     heading_deg: heading,
     quantize: !ios, // no extra draw: platforms from the same rng stay identical
+    absolute_orientation: !ios, // Chrome Android; Safari has neither stream (no extra draw either)
   };
 }

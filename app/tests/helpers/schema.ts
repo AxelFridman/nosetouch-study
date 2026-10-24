@@ -2,26 +2,12 @@
  * Validates records against schema/records.schema.json (the single source of truth shared with the
  * Python analysis kit and the Apps Script backend). Use in tests:
  *   expectValid('TrialRecord', record)
+ * The validator itself is in schemaValidator.ts (no Vitest import, so the e2e journeys reuse it).
  */
-import { readFileSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
-import { Ajv2020 } from 'ajv/dist/2020.js';
 import { expect } from 'vitest';
+import { validate, type SchemaDef } from './schemaValidator';
 
-const schemaPath = fileURLToPath(new URL('../../../schema/records.schema.json', import.meta.url));
-export const recordsSchema = JSON.parse(readFileSync(schemaPath, 'utf8'));
-
-const ajv = new Ajv2020({ allErrors: true, strict: false });
-ajv.addSchema(recordsSchema);
-
-export type SchemaDef = 'SessionRecord' | 'TrialRecord' | 'ParticipantProfile' | 'UploadEnvelope' | 'ExportBundle' | 'CalibrationResult' | 'PlannedBlock';
-
-export function validate(def: SchemaDef, value: unknown): string[] {
-  const fn = ajv.getSchema(`${recordsSchema.$id}#/$defs/${def}`);
-  if (!fn) throw new Error(`schema def ${def} not found`);
-  if (fn(value)) return [];
-  return (fn.errors ?? []).map((e) => `${e.instancePath || '(root)'} ${e.message} ${JSON.stringify(e.params)}`);
-}
+export { recordsSchema, validate, type SchemaDef } from './schemaValidator';
 
 export function expectValid(def: SchemaDef, value: unknown): void {
   const errors = validate(def, value);

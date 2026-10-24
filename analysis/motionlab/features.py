@@ -1,12 +1,14 @@
 """Per-trial features over the detected movement segment, and sequence tensors for deep models.
 
-Pipeline of :func:`prepare_trial` (docs/05 section 2): norm_v1 normalisation (session gravity sign,
-rotationRate mapping and units, ``conventions.Normalization``) -> optional drop of duplicated samples ->
-uniform resampling -> zero-phase low-pass -> segment (offline_v1, fallback to the app's online_v1) ->
-gyro bias -> gravity_v1: the rest-window gravity propagated with the gyroscope forward from the onset
+Pipeline of :func:`prepare_trial` (docs/05 section 2): norm_v2 normalisation (session gravity sign,
+rotationRate mapping and units, ``conventions.Normalization``) -> optional left/right mirror and screen
+flip of the normalised vectors -> optional drop of duplicated samples -> uniform resampling -> zero-phase
+low-pass -> segment (offline_v1, fallback to the app's online_v1) -> gyro bias (only a trusted calibration
+bias, norm_v2) -> gravity_v1: the rest-window gravity propagated with the gyroscope forward from the onset
 and backward from the end, blended in time (``preprocess.gyro_gravity``) -> linear acceleration
 a = f - g and the unit 'up' vector u = g / |g|. The browser's own gravity (accg - acc) is only compared
-with it (``qc_gravity_vs_browser_*``).
+with it (``qc_gravity_vs_browser_*``). :func:`rate_closures` runs the same gravity propagation under every
+candidate rotationRate mapping (the session-level check of ``conventions.infer_rate_mapping``).
 
 Feature groups (see :func:`feature_groups`):
   basic      timing and magnitude peaks: duration, reaction time, peak |w| and |a|, time-to-peak, total
@@ -47,7 +49,11 @@ import pandas as pd
 from scipy.integrate import cumulative_trapezoid
 from scipy.signal import find_peaks
 
-from .conventions import GYRO_BIAS_MAX_DPS, NORM_VERSION, Normalization, mirror_device_vectors, normalize_motion
+from .conventions import (
+    GYRO_BIAS_MAX_DPS, NORM_VERSION, RAD2DEG as _RAD2DEG, RATE_CANDIDATES, Normalization, RateMapping,
+    calibration_gyro_bias, flip_device_vectors, mirror_device_vectors, normalize_motion, rate_candidate_key,
+    rotation_rate_to_device,
+)
 from .io import streams_from_record
 from .preprocess import (
     angle_deg, estimate_gravity, fill_gaps_linear, gyro_gravity, integrate_gyro, lowpass, matrix_to_rotvec,
@@ -86,8 +92,9 @@ ZUPT_FEATURES = ('inv_disp_vert_m', 'inv_disp_horiz_m', 'inv_path_length_m', 'in
 QC = [
     'qc_ok', 'qc_reason', 'qc_nan_frac', 'qc_gyro_missing_steps', 'qc_segment_source', 'qc_gravity_method',
     'qc_closure_deg', 'qc_gravity_vs_browser_deg', 'qc_gravity_vs_browser_max_deg', 'qc_rest_pre_n',
-    'qc_rest_post_n', 'qc_gravity_sign', 'qc_gravity_sign_source', 'qc_rr_mapping', 'qc_axis_verified',
-    'qc_repeats_dropped', 'qc_mirrored', 'qc_norm_version',
+    'qc_rest_post_n', 'qc_gravity_sign', 'qc_gravity_sign_source', 'qc_rr_mapping', 'qc_rr_source',
+    'qc_axis_verified', 'qc_gyro_bias_source', 'qc_repeats_dropped', 'qc_mirrored', 'qc_screen_flipped',
+    'qc_norm_version',
 ]
 
 SEQUENCE_CHANNELS: dict[str, list[str]] = {
@@ -117,7 +124,7 @@ class PreparedTrial:
     t: grid (ms since t0); f: specific force (accg, W3C sign) (n,3); acc: linear acceleration f - g (n,3)
     m/s^2; gyro: angular velocity (n,3) deg/s (bias-corrected); g: gravity estimate (n,3) (gyro-propagated
     when the segment is known, else the browser's); up: g / |g|; g_browser: accg - acc (QC only);
-    i0..i1: segment on the grid (inclusive).
+    i0..i1: segment on the grid (inclusive). gyro_bias_source: 'calibration', 'pre_go' or 'none'.
     """
 
     trial_id: str | None
@@ -149,6 +156,8 @@ class PreparedTrial:
     repeats_dropped: int = 0
     mirrored: bool = False
     norm: Normalization = field(default_factory=Normalization)
+    screen_flipped: bool = False
+    gyro_bias_source: str = 'none'
 
 
 def _as_norm(norm: Normalization | None, gravity_sign: int | None) -> Normalization:
@@ -175,6 +184,7 @@ def prepare_trial(
     browser_gravity_hz: float = 1.0,
     rest_ms: float = 300.0,
     mirror: bool = False,
+    screen_flip: bool = False,
     remove_gyro_bias: str | bool = 'auto',
     drop_repeats: bool = True,
 ) -> PreparedTrial:
@@ -186,9 +196,14 @@ def prepare_trial(
     ``bounds`` = precomputed (onset_ms, end_ms, source) skips the segmentation.
     mirror: left/right mirror of the normalised signals (acc -> S acc, w -> -S w) - exact for any
     rotationRate mapping, unlike a raw-field mirror.
-    remove_gyro_bias: 'auto' = the calibration bias when the session has a trusted one
-    (``conventions.calibration_gyro_bias``: still flat window, below 3 deg/s), else the mean rate of the
-    400 ms before GO when it is below 3 deg/s (``GYRO_BIAS_MAX_DPS``); 'calibration', 'pre_go', or False.
+    screen_flip: the same movement with the phone turned 180 deg about its y axis (screen toward <-> away):
+    acc, accg and w -> F·v with F = diag(-1, 1, -1) (``conventions.flip_device_vectors``). F is a proper
+    rotation, so basic, invariant and chiral features do not change; only the device-frame ones do. It
+    commutes with ``mirror``. A synthetic grip, never a substitute for real screen-away data.
+    remove_gyro_bias: 'auto' (= True, 'calibration') = the calibration bias when the session has a trusted
+    one (``conventions.calibration_gyro_bias``: still flat window, below 3 deg/s), else NOTHING (norm_v2:
+    an in-hand pre-GO mean is tremor, not bias); 'pre_go' = the mean rate of the 400 ms before GO when it
+    is below 3 deg/s (``GYRO_BIAS_MAX_DPS``; the norm_v1 fallback, for ablations); False / 'none' = nothing.
     drop_repeats: drop duplicated motion snapshots before resampling (``preprocess.repeated_sample_mask``).
     Every step is linear per component or rotation-covariant, so a fixed grip rotation of the input
     rotates every vector here and leaves the segment unchanged; mirroring flips every pseudoscalar.
@@ -199,9 +214,17 @@ def prepare_trial(
     tid = record.get('trial_id')
     go = (record.get('timing') or {}).get('go_ms')
     acc, accg, gyro, t = sig.acc, sig.accg, sig.gyro, sig.t
-    if mirror:
-        acc, gyro = mirror_device_vectors(acc, gyro)
-        accg, _ = mirror_device_vectors(accg, None)
+
+    def transform(a: np.ndarray | None, w: np.ndarray | None) -> tuple[Any, Any]:
+        """mirror and / or screen flip of normalised device vectors (they commute)."""
+        if mirror:
+            a, w = mirror_device_vectors(a, w)
+        if screen_flip:
+            a, w = flip_device_vectors(a, w)
+        return a, w
+
+    acc, gyro = transform(acc, gyro)
+    accg, _ = transform(accg, None)
     n_rep = 0
     if drop_repeats and t.size > 1:
         rep = repeated_sample_mask(s.acc, s.accg, s.rr, engine=nm.engine)
@@ -213,7 +236,8 @@ def prepare_trial(
     def empty(reason: str) -> PreparedTrial:
         z = np.zeros((0, 3))
         return PreparedTrial(tid, fs_hz, np.zeros(0), z, z, z, None, None, None, None, go, 'none', 'none', nm.sign,
-                             ok=False, reason=reason, repeats_dropped=n_rep, mirrored=mirror, norm=nm)
+                             ok=False, reason=reason, repeats_dropped=n_rep, mirrored=mirror, norm=nm,
+                             screen_flipped=screen_flip)
 
     if t.size < 5:
         return empty('too_few_samples')
@@ -227,11 +251,14 @@ def prepare_trial(
 
     # gyro bias (deg/s, device frame): subtract before integrating (1 deg/s integrates to 1 deg per second)
     bias = np.zeros(3)
+    bias_src = 'none'
     mode = 'none' if remove_gyro_bias is False else ('auto' if remove_gyro_bias is True else str(remove_gyro_bias))
+    if mode not in ('auto', 'calibration', 'pre_go', 'none'):
+        raise ValueError(f"remove_gyro_bias must be 'auto', 'calibration', 'pre_go' or False, got {remove_gyro_bias!r}")
     if mode in ('auto', 'calibration') and nm.gyro_bias is not None:
-        b = np.asarray(nm.gyro_bias, dtype=float)
-        bias = mirror_device_vectors(None, b)[1] if mirror else b
-    elif mode in ('auto', 'pre_go') and go is not None:
+        bias = transform(None, np.asarray(nm.gyro_bias, dtype=float))[1]
+        bias_src = 'calibration'
+    elif mode == 'pre_go' and go is not None:
         w = (tu >= float(go) - 400.0) & (tu <= float(go))
         if onset is not None:
             w &= tu < onset
@@ -240,12 +267,12 @@ def prepare_trial(
         if len(W) >= 5:
             b = W.mean(axis=0)  # mean, not median: the mean is rotation-covariant
             if np.linalg.norm(b) < GYRO_BIAS_MAX_DPS:
-                bias = b
+                bias, bias_src = b, 'pre_go'
     gyro = gyro - bias
 
     base = PreparedTrial(tid, fs_hz, tu, acc_s.copy(), gyro, unit_rows(g_browser), None, None, onset, end, go, src,
                          'browser', nm.sign, bias, f=f, g=g_browser, g_browser=g_browser, repeats_dropped=n_rep,
-                         mirrored=mirror, norm=nm)
+                         mirrored=mirror, norm=nm, screen_flipped=screen_flip, gyro_bias_source=bias_src)
     base.acc = f - g_browser
     if onset is None or end is None:
         base.ok, base.reason = False, f'no_segment ({src})'
@@ -264,9 +291,7 @@ def prepare_trial(
     bg = (seg.get('baseline') or {}).get('gravity')
     fallback = None
     if bg is not None:
-        fallback = np.asarray(bg, dtype=float) * nm.sign
-        if mirror:
-            fallback = mirror_device_vectors(fallback, None)[0]
+        fallback = transform(np.asarray([np.nan if v is None else v for v in bg], dtype=float) * nm.sign, None)[0]
     f_fill = fill_gaps_linear(tu, f)
     gg = gyro_gravity(tu, f_fill, gyro, i0, i1, still_dps=_still_threshold(record), rest_ms=rest_ms,
                       magnitude=nm.gravity_magnitude, g_pre_fallback=fallback)
@@ -282,6 +307,79 @@ def prepare_trial(
     if ang.size:
         base.browser_angle_mean_deg, base.browser_angle_max_deg = float(ang.mean()), float(ang.max())
     return base
+
+
+def rate_closures(
+    record: Mapping[str, Any],
+    *,
+    calibration: Mapping[str, Any] | None = None,
+    engine: str | None = None,
+    bounds: tuple[float | None, float | None, str] | None = None,
+    fs_hz: float = 100.0,
+    smooth_hz: float = 15.0,
+    rest_ms: float = 300.0,
+    min_rotation_deg: float = 30.0,
+    candidates: Iterable[tuple[str, str]] = RATE_CANDIDATES,
+) -> dict[str, float] | None:
+    """Gyro-gravity closure (deg) of one trial under every candidate rotationRate mapping.
+
+    The pipeline of :func:`prepare_trial` (repeats dropped, 100 Hz grid, zero-phase low-pass, segment
+    'auto', gravity_v1 rest windows of ``rest_ms``) with the raw rotationRate read under each (verdict, units)
+    of ``candidates``: closure = angle between the rest gravity before the movement, propagated through it
+    with that gyro, and the rest gravity at the nose. The right mapping closes to the sensor noise; a wrong
+    one keeps an error of the path rotation (pilot session medians: W3C 1.3 deg, legacy 4.0, inverted 5.8-7.0,
+    rad/s ~90). The accelerometer sign does not matter (both rests flip together), and the rest samples
+    are the same for every candidate (the still threshold scales with the units; a permutation or a sign
+    keeps |w|). calibration: the session calibration; its gyro bias is subtracted (mapped per candidate)
+    only when trusted (``conventions.calibration_gyro_bias``), never a hand-held pre-GO mean.
+    Returns {'verdict/units': closure_deg} or None when the trial cannot tell the mappings apart: no
+    segment, no rest window on either side, or less than ``min_rotation_deg`` of path rotation (read in
+    the units that close best for this trial: units are decisive per trial, the axis mapping is not).
+    """
+    s = streams_from_record(record)
+    t, accg, rr = s.t, s.accg, s.rr
+    if t.size > 1:
+        rep = repeated_sample_mask(s.acc, s.accg, s.rr, engine=engine)
+        if rep.any():
+            t, accg, rr = t[~rep], accg[~rep], rr[~rep]
+    if t.size < 5:
+        return None
+    tu, U = resample_uniform(t, np.column_stack([accg, rr]), fs_hz, 100.0)
+    if tu.size < 5:
+        return None
+    U = lowpass(U, fs_hz, smooth_hz)
+    onset, end, _ = bounds if bounds is not None else segment_bounds_ms(record, 'auto')
+    if onset is None or end is None:
+        return None
+    sel = (tu >= onset - 2.0 * rest_ms) & (tu <= end + 2.0 * rest_ms)
+    tc = tu[sel]
+    f = fill_gaps_linear(tc, U[sel, 0:3])
+    raw = U[sel, 3:6]
+    inside = np.flatnonzero((tc >= onset) & (tc <= end))
+    if inside.size < 4:
+        return None
+    i0, i1 = int(inside[0]), int(inside[-1])
+    mag = np.linalg.norm(raw[i0:i1 + 1], axis=1)
+    path_raw = float(trapezoid(np.where(np.isfinite(mag), mag, 0.0), tc[i0:i1 + 1] / 1000.0))
+    still = _still_threshold(record)
+    out: dict[str, float] = {}
+    for verdict, units in candidates:
+        w = rotation_rate_to_device(raw, verdict, units)
+        b = calibration_gyro_bias(calibration, RateMapping(verdict, units, True)) if calibration else None
+        if b is not None:
+            w = w - np.asarray(b, dtype=float)
+        scale = _RAD2DEG if units == 'rad_per_s' else 1.0
+        gg = gyro_gravity(tc, f, w, i0, i1, still_dps=still * scale, rest_ms=rest_ms)
+        ok = gg.method == 'fwd_bwd' and gg.pre_n > 0 and math.isfinite(gg.closure_deg)
+        out[rate_candidate_key(verdict, units)] = gg.closure_deg if ok else float('nan')
+    finite = {k: v for k, v in out.items() if math.isfinite(v)}
+    if not finite:
+        return None
+    best_units = min(finite, key=finite.get).split('/')[1]
+    path = path_raw * (_RAD2DEG if best_units == 'rad_per_s' else 1.0)
+    if not path >= min_rotation_deg:
+        return None
+    return out
 
 
 def _nan_features(reason: str, pt: PreparedTrial | None = None) -> dict[str, Any]:
@@ -302,8 +400,10 @@ def _qc(pt: PreparedTrial | None, *, ok: int, reason: str, nan_frac: float) -> d
         'qc_gravity_vs_browser_max_deg': pt.browser_angle_max_deg if pt else float('nan'),
         'qc_rest_pre_n': pt.rest_pre_n if pt else 0, 'qc_rest_post_n': pt.rest_post_n if pt else 0,
         'qc_gravity_sign': nm.sign, 'qc_gravity_sign_source': nm.gravity.source,
-        'qc_rr_mapping': nm.rates.verdict, 'qc_axis_verified': int(nm.rates.verified),
+        'qc_rr_mapping': nm.rates.verdict, 'qc_rr_source': nm.rates.source, 'qc_axis_verified': int(nm.rates.verified),
+        'qc_gyro_bias_source': pt.gyro_bias_source if pt else 'none',
         'qc_repeats_dropped': pt.repeats_dropped if pt else 0, 'qc_mirrored': int(pt.mirrored) if pt else 0,
+        'qc_screen_flipped': int(pt.screen_flipped) if pt else 0,
         'qc_norm_version': nm.version or NORM_VERSION,
     }
 
@@ -525,9 +625,10 @@ def extract_features(
     mirror: False -> features of the trials; True -> features of their left/right mirror images (for
     mirror augmentation and the mirror-consistency check); 'both' -> (features, mirrored features), with
     the segmentation computed once per trial. ``transform`` is applied to each raw record first (e.g. a
-    grip rotation or quantisation). For a Dataset the session's norm_v1 normalisation is used; for plain
+    grip rotation or quantisation). For a Dataset the session's norm_v2 normalisation is used; for plain
     records pass ``normalizations`` {session_id: Normalization} or ``gravity_signs`` {session_id: sign}
-    (default +1, W3C rates).
+    (default +1, W3C rates). Other keyword arguments go to :func:`prepare_trial`, e.g. ``screen_flip=True``
+    for the features of the screen-flipped trials (screen-away augmentation, ``qc_screen_flipped`` = 1).
     """
     rows: dict[str, dict[str, Any]] = {}
     rows_m: dict[str, dict[str, Any]] = {}

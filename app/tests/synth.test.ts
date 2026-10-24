@@ -17,26 +17,41 @@ vi.mock('../src/app/services', () => ({
   },
 }));
 
-import { reconcileProgress, trialSeed } from '../src/app/sessionFlow';
-import { GRAVITY } from '../src/core/constants';
-import { flattenPlan, normalizeCustomSpec } from '../src/core/protocol';
-import type { MotionSample, OrientationSample, QuaternionSample, TrialRecord } from '../src/core/types';
+import {
+  AUTO_ACCEPT_NOTE as APP_AUTO_ACCEPT_NOTE,
+  AUTO_REJECT_ORIENTATION_NOTE as APP_AUTO_REJECT_ORIENTATION_NOTE,
+  autoDecision,
+  endStatusOf,
+  reconcileProgress,
+  trialSeed,
+  withReportedHand,
+} from '../src/app/sessionFlow';
+import { implicitCalibration, withUprightHold } from '../src/core/calibration';
+import { GRAVITY, PROTOCOL_VERSION, SCHEMA_VERSION } from '../src/core/constants';
+import { flattenPlan, isOptionalBlock, normalizeCustomSpec } from '../src/core/protocol';
+import { returnMissed } from '../src/core/trialController';
+import type { CalibrationResult, MotionSample, OrientationSample, QuaternionSample, TrialRecord } from '../src/core/types';
 import { makeRng, scoreEhi } from '../src/core/util';
 import {
+  AUTO_ACCEPT_NOTE,
+  AUTO_REJECT_ORIENTATION_NOTE,
   appTrialSeed,
+  autoDecisionLikeApp,
   generateDataset,
   planDatasetDesign,
   resolveDatasetOptions,
   seededUuid,
   summarizeSession,
+  withReportedHandLikeApp,
   type SyntheticDataset,
 } from '../src/sim/dataset';
-import { IOS_GRAVITY_SIGN, defaultSimPlatform, simRng } from '../src/sim/model';
+import { IOS_GRAVITY_SIGN, defaultSimPlatform, simChoiceHand, simRng } from '../src/sim/model';
 import { CHROMIUM_ROUNDING, roundQuaternionLikeChromium, roundToMultiple } from '../src/sim/simulatedSource';
 import { condition, offlineSource, setup } from './helpers/simHarness';
 import { expectEqualColumnLengths, expectValid } from './helpers/schema';
 
-const SMALL = { participants: 2, preset: 'quick', seed: 2026, failureRate: 0.2 } as const;
+/** The protocol 1.0.0-style flow, still available to researchers: tap review, guided calibration, full profile. */
+const SMALL = { participants: 2, preset: 'quick', seed: 2026, failureRate: 0.2, reviewMode: 'tap', calibration: 'guided', profile: 'full' } as const;
 
 /** |v − k·step| for the nearest integer k (0 when v is on the grid). */
 function offGrid(v: number, step: number): number {
@@ -189,14 +204,14 @@ describe('generateDataset: participant design', () => {
 
 // ───────────────────────────── records ─────────────────────────────
 
-describe('generateDataset: 2 participants, quick preset', () => {
+describe('generateDataset: 2 participants, quick preset, the v1 flow (tap review, guided calibration, full profile)', () => {
   it('every session and trial record is schema-valid, simulated, and every stream has equal column lengths', () => {
     expect(ds.sessions).toHaveLength(2);
     for (const s of ds.sessions) {
       expectValid('SessionRecord', s.session);
       expect(s.session.simulated).toBe(true);
       expect(s.session.study_code).toBe('synthetic-v1');
-      expect(s.trials.length).toBeGreaterThanOrEqual(24);
+      expect(s.trials.length).toBeGreaterThanOrEqual(flattenPlan(s.session.protocol.plan).length); // every planned trial
       for (const t of s.trials) {
         expectValid('TrialRecord', t);
         expect(t.simulated).toBe(true);
@@ -354,14 +369,23 @@ describe('generateDataset: 2 participants, quick preset', () => {
 describe('generateDataset: options', () => {
   it('custom preset: the stored spec is the normalised one and describes the plan; iosGravitySign +1 is honoured', async () => {
     const custom = {
-      orientations: ['upright_away', 'upright_away', 'flat_up'],
+      orientations: ['upside_down_toward', 'upside_down_toward', 'flat_up'],
       speeds: [],
       start_positions: ['center'],
       reps: 1,
       odd_variants: [],
       include_free: false,
     } as unknown as Parameters<typeof normalizeCustomSpec>[0];
-    const d = await generateDataset({ participants: 1, preset: 'custom', custom, seed: 5, failureRate: 0, iosGravitySign: 1 });
+    const d = await generateDataset({
+      participants: 1,
+      preset: 'custom',
+      custom,
+      seed: 5,
+      failureRate: 0,
+      iosGravitySign: 1,
+      reviewMode: 'tap',
+      calibration: 'guided',
+    });
     const s = d.sessions[0];
     expectValid('SessionRecord', s.session);
     expect(s.session.protocol.custom).toEqual(normalizeCustomSpec(custom));
@@ -371,5 +395,273 @@ describe('generateDataset: options', () => {
     expect(s.session.calibration!.gravity_sign).toBe(1);
     expect(s.session.calibration!.flat!.accg_mean[2]).toBeGreaterThan(9.5);
     for (const t of s.trials) expectValid('TrialRecord', t);
+  });
+});
+
+// ───────────────────────────── street: the v2 defaults ─────────────────────────────
+
+describe('generateDataset: street, the v2 defaults (hands-free auto review, implicit calibration, short profile)', () => {
+  const OPTS = { participants: 4, seed: 99, failureRate: 0.12, swayRate: 0.1, lateReturnRate: 0.12 } as const;
+  let st: SyntheticDataset;
+  beforeAll(async () => {
+    st = await generateDataset(OPTS);
+  });
+
+  it('the copies of the app rules agree with app/sessionFlow (notes, autoDecision, withReportedHand)', () => {
+    expect([AUTO_ACCEPT_NOTE, AUTO_REJECT_ORIENTATION_NOTE]).toEqual([APP_AUTO_ACCEPT_NOTE, APP_AUTO_REJECT_ORIENTATION_NOTE]);
+    for (const t of st.sessions.flatMap((s) => s.trials).slice(0, 40)) {
+      const raw: TrialRecord = { ...t, condition: { ...t.condition }, outcome: { ...t.outcome, accepted: false, note: null } };
+      for (const status of ['complete', 'no_movement'] as const) {
+        for (const match of [true, false, null]) {
+          const r = { ...raw, outcome: { ...raw.outcome, status }, detected: { ...raw.detected, orientation_match: match } };
+          expect(autoDecisionLikeApp(r)).toEqual(autoDecision(r));
+          expect(withReportedHandLikeApp(r, 'left')).toEqual(withReportedHand(r, 'left'));
+        }
+      }
+    }
+  });
+
+  it('defaults: street, auto review, implicit calibration and the short profile with the name uploaded', () => {
+    expect(st.options).toMatchObject({
+      preset: 'street',
+      reviewMode: 'auto',
+      calibration: 'implicit',
+      profile: 'short',
+      bonusFraction: 0.5,
+      endEarlyFraction: 0,
+    });
+    for (const s of st.sessions) {
+      expectValid('SessionRecord', s.session);
+      expect(s.session.schema_version).toBe(SCHEMA_VERSION);
+      expect(s.session.protocol).toMatchObject({ preset: 'street', protocol_version: PROTOCOL_VERSION, n_planned_trials: 39 });
+      expect(s.session.settings.review_mode).toBe('auto');
+      const p = s.session.participant;
+      expect(p.nickname).toBe(`Synthetic participant ${s.design.index + 1}`);
+      expect(p).toMatchObject({ ehi_sf: null, ehi_lq: null, ehi_class: null, phone_model: null, phone_case: null, arm_issue: false });
+      expect(p.handedness_self).toBe(s.design.dominant);
+      expect(s.sim.participant.phone_hand).toBe(p.phone_hand);
+    }
+  });
+
+  it('every trial record is schema 1.2.0-valid and carries the v2 fields', () => {
+    for (const s of st.sessions) {
+      const android = s.design.platform === 'android';
+      for (const t of s.trials) {
+        expectValid('TrialRecord', t);
+        expect(t.schema_version).toBe(SCHEMA_VERSION);
+        expect(t.timing.return_onset_ms).not.toBeUndefined();
+        expect(t.timing.return_end_ms).not.toBeUndefined();
+        expect(['instructed', 'reported']).toContain(t.condition.hand_source);
+        expect(t.segmentation.params.return_cap_ms).toBe(3000);
+        expect(t.quality.n_quaternion_abs).toBe(t.streams.quaternion_abs?.t.length ?? 0);
+        expect(t.quality.n_orientation_abs).toBe(t.streams.orientation_abs?.t.length ?? 0);
+        expect(t.streams.screen_events).toEqual([]); // the simulated page never rotates
+        expect(t.streams.magnetometer).toBeNull(); // not exposed without a browser flag
+        // Chrome-like: the absolute orientation streams; Safari-like: none
+        expect(t.streams.quaternion_abs === null).toBe(!android);
+        expect(t.streams.orientation_abs === null).toBe(!android);
+        for (const stream of [t.streams.motion, t.streams.orientation, t.streams.quaternion, t.streams.quaternion_abs, t.streams.orientation_abs]) {
+          expectEqualColumnLengths(stream as unknown as Record<string, unknown>);
+        }
+      }
+    }
+  });
+
+  it('plan and progress: 29 required trials, the 10 bonus ones only after the checkpoint; reconcileProgress finds nothing to repair', () => {
+    for (const s of st.sessions) {
+      const plan = s.session.protocol.plan;
+      expect(plan[0].kind).toBe('choice');
+      const flat = flattenPlan(plan);
+      expect(flat.filter((p) => !isOptionalBlock(plan[p.block_index]))).toHaveLength(29);
+      const accepted = s.trials.filter((t) => t.outcome.accepted);
+      expect(new Set(accepted.map((t) => t.trial_index)).size).toBe(accepted.length); // each planned trial once
+      expect(accepted.length).toBe(s.bonus ? 39 : 29);
+      expect(s.session.status).toBe('completed');
+      expect(endStatusOf(s.session)).toBe('completed');
+      expect(s.session.progress).toEqual({ next_trial_index: accepted.length, n_attempts: s.trials.length, n_accepted: accepted.length });
+      expect(reconcileProgress(s.session, s.trials)).toBe(s.session);
+      const order = s.trials.map((t) => t.trial_index);
+      expect([...order].sort((a, b) => a - b)).toEqual(order); // recorded in plan order
+      expect(s.attempts.map((a) => a.trial_id)).toEqual(s.trials.map((t) => t.trial_id));
+      expect(new Set(s.trials.map((t) => t.trial_id)).size).toBe(s.trials.length);
+    }
+    expect(st.sessions.map((s) => s.bonus)).toContain(true);
+    expect(st.sessions.map((s) => s.bonus)).toContain(false);
+  });
+
+  it('auto review (= sessionFlow.autoDecision): complete trials accepted unless the grip mismatched; failures re-run with the next attempt number', () => {
+    const all = st.sessions.flatMap((s) => s.trials);
+    for (const t of all) {
+      if (t.condition.hand_source === 'reported') continue; // the choice trial: see below
+      expect(t).toEqual(autoDecision(t)); // nothing is left to decide
+      if (t.outcome.status === 'complete') {
+        expect(t.outcome.note).toBe(t.detected.orientation_match === false ? AUTO_REJECT_ORIENTATION_NOTE : AUTO_ACCEPT_NOTE);
+      } else {
+        expect(t.outcome.accepted).toBe(false);
+      }
+    }
+    expect(all.filter((t) => t.outcome.status === 'no_movement').length).toBeGreaterThan(0);
+    for (const s of st.sessions) {
+      s.trials.forEach((t, k) => {
+        const next = s.trials[k + 1];
+        if (t.outcome.accepted) {
+          if (next) expect(next.trial_index).toBeGreaterThan(t.trial_index);
+        } else {
+          expect(next).toBeDefined(); // a failed trial is never the last record of a completed session
+          expect([next.trial_index, next.attempt]).toEqual([t.trial_index, t.attempt + 1]);
+        }
+      });
+    }
+  });
+
+  it('the choice trial: performed with the usual phone hand of the participant, saved with that hand reported (= sessionFlow.withReportedHand)', () => {
+    for (const s of st.sessions) {
+      const own = simChoiceHand(s.sim.participant);
+      const placeholder = s.session.protocol.plan[0].hand;
+      const choice = s.trials.filter((t) => t.block_index === 0);
+      expect(choice.length).toBeGreaterThanOrEqual(1);
+      for (const t of choice) {
+        expect(s.attempts[s.trials.indexOf(t)].hand).toBe(own);
+        expect(t.condition).toMatchObject({ orientation: 'free', hand_source: 'reported' });
+        if (t.outcome.status !== 'complete') continue;
+        expect(t.condition.hand).toBe(own);
+        expect(t.outcome).toEqual({ status: 'complete', accepted: true, participant_flag: null, note: null });
+        expect(withReportedHand({ ...t, condition: { ...t.condition, hand: placeholder } }, own)).toEqual(t);
+      }
+      for (const t of s.trials.filter((x) => x.block_index > 0)) {
+        expect(t.condition.hand_source).toBe('instructed');
+        expect(t.condition.hand).toBe(s.session.protocol.plan[t.block_index].hand);
+        expect(s.attempts[s.trials.indexOf(t)].hand).toBe(t.condition.hand);
+      }
+    }
+  });
+
+  it('implicit calibration (implicit_v1): filled from the first complete, still upright trial, with the gravity sign of the platform', () => {
+    for (const s of st.sessions) {
+      const cal = s.session.calibration as CalibrationResult;
+      expectValid('CalibrationResult', cal);
+      expect(cal).toMatchObject({ method: 'implicit_v1', flat: null, gyro_bias_dps: null, axis_check: null, upright_check: 'ok', notes: [] });
+      expect(cal.performed_at).toBe(s.session.started_at);
+      expect(cal.upright?.still).toBe(true);
+      expect(cal.gravity_sign).toBe(s.design.platform === 'ios' ? -1 : 1);
+      expect(cal.gravity_magnitude as number).toBeCloseTo(GRAVITY, 0);
+      // exactly what the app keeps from the saved trials (sessionFlow.saveAttempt → withUprightHold)
+      const replay = s.trials.reduce<CalibrationResult | null>((c, t) => withUprightHold(c, t, null), implicitCalibration(s.session.started_at));
+      expect(replay).toEqual(cal);
+    }
+  });
+
+  it('hands-free chaining: a ready cue only after a tap; awaitReturn exactly after a complete attempt whose return was not seen', () => {
+    let chained = 0;
+    let awaited = 0;
+    for (const s of st.sessions) {
+      s.trials.forEach((t, k) => {
+        const a = s.attempts[k];
+        expect(t.streams.cues.some((c) => c.kind === 'ready')).toBe(a.flags.readyCue);
+        expect(a.flags.gripGate).toBe(true);
+        const prev = k > 0 ? s.trials[k - 1] : null;
+        if (!a.flags.readyCue) {
+          chained++;
+          expect(prev?.block_index).toBe(t.block_index); // chained only within a block
+        }
+        expect(a.flags.awaitReturn).toBe(!a.flags.readyCue && prev !== null && returnMissed(prev));
+        expect(a.start_at_nose).toBe(a.flags.awaitReturn);
+        if (a.flags.awaitReturn) {
+          awaited++;
+          // the participant started at the nose; GO only once the arm was out and still again
+          expect(t.outcome.status).toBe('complete');
+          expect(t.timing.still_ms as number).toBeGreaterThan((a.truth.initial_return_t as number) - a.t0 + 800 - 1);
+        }
+      });
+    }
+    expect(chained).toBeGreaterThan(st.sessions.length * 20);
+    expect(awaited).toBeGreaterThan(0);
+  });
+
+  it('the return of the arm is recorded: seen in every ordinary complete trial; a participant lingering past return_cap_ms leaves it null', () => {
+    let seen = 0;
+    let late = 0;
+    for (const s of st.sessions) {
+      s.trials.forEach((t, k) => {
+        const a = s.attempts[k];
+        const tm = t.timing;
+        if (t.outcome.status !== 'complete') {
+          expect(tm.return_onset_ms).toBeNull();
+          expect(tm.return_end_ms).toBeNull();
+          return;
+        }
+        const det = tm.end_detected_ms as number;
+        if (a.late_return) {
+          late++;
+          expect(tm.return_onset_ms).toBeNull();
+          expect(tm.stop_ms - det).toBeGreaterThanOrEqual(3000);
+          expect(tm.stop_ms - det).toBeLessThan(3000 + 50);
+          return;
+        }
+        seen++;
+        const trueReturn = (a.truth.return_t as number) - a.t0;
+        expect(trueReturn - det).toBeGreaterThanOrEqual(250 - 1);
+        expect(tm.return_onset_ms as number).toBeGreaterThan(trueReturn);
+        expect(tm.return_onset_ms as number).toBeLessThan(trueReturn + 400);
+        expect(tm.return_end_ms as number).toBeGreaterThan(tm.return_onset_ms as number);
+        expect(tm.return_end_ms as number).toBeLessThan((a.truth.return_end_t as number) - a.t0 + 300);
+        const hold = t.segmentation.params.still_hold_ms;
+        expect(tm.stop_ms - (tm.return_end_ms as number)).toBeGreaterThanOrEqual(hold);
+        expect(tm.stop_ms - (tm.return_end_ms as number)).toBeLessThan(hold + 150); // + a sampling gap (drops)
+      });
+    }
+    expect(seen).toBeGreaterThan(100);
+    expect(late).toBeGreaterThan(0);
+  });
+
+  it('before GO (the false-start policy): an anticipatory twitch is a counted false start, a posture sway is silent', () => {
+    let sways = 0;
+    let twitches = 0;
+    for (const s of st.sessions) {
+      s.trials.forEach((t, k) => {
+        const a = s.attempts[k];
+        const go = t.timing.go_ms ?? Number.POSITIVE_INFINITY;
+        const earlyErrors = t.streams.cues.filter((c) => c.kind === 'error' && c.t < go).length;
+        if (a.behavior === 'sway' && a.truth.sway_t != null) {
+          sways++;
+          expect(t.timing.false_starts).toBe(0);
+          expect(earlyErrors).toBe(0);
+        }
+        if (a.behavior === 'false_start' && a.truth.false_start_t != null) {
+          twitches++;
+          expect(t.timing.false_starts).toBeGreaterThanOrEqual(1);
+          expect(earlyErrors).toBe(t.timing.false_starts);
+        }
+      });
+    }
+    expect(sways).toBeGreaterThan(0);
+    expect(twitches).toBeGreaterThan(0);
+  });
+
+  it('a visit lasts about 4 minutes from the first trial to Finish (about 5 with the bonus)', () => {
+    for (const s of st.sessions) {
+      const m = summarizeSession(s).minutes;
+      expect(m).toBeGreaterThan(s.bonus ? 4 : 3);
+      expect(m).toBeLessThan(s.bonus ? 7 : 5.5);
+    }
+  });
+
+  it('street options: no bonus, the whole bonus, and Finish now before the main part is done (ended_early)', async () => {
+    const one = { participants: 1, seed: 5, failureRate: 0, swayRate: 0, lateReturnRate: 0 } as const;
+    const none = (await generateDataset({ ...one, bonusFraction: 0 })).sessions[0];
+    expect(none.bonus).toBe(false);
+    expect(none.session.status).toBe('completed');
+    expect(Math.max(...none.trials.map((t) => t.trial_index))).toBe(28);
+    const all = (await generateDataset({ ...one, bonusFraction: 1 })).sessions[0];
+    expect(all.bonus).toBe(true);
+    expect(all.session.progress).toMatchObject({ n_accepted: 39, next_trial_index: 39 });
+    expect(all.session.status).toBe('completed');
+    const early = (await generateDataset({ ...one, endEarlyFraction: 1 })).sessions[0];
+    expectValid('SessionRecord', early.session);
+    expect(early.session.status).toBe('ended_early');
+    expect(endStatusOf(early.session)).toBe('ended_early');
+    expect(early.session.progress.n_accepted).toBeGreaterThan(1);
+    expect(early.session.progress.n_accepted).toBeLessThan(29);
+    expect(reconcileProgress(early.session, early.trials)).toBe(early.session);
   });
 });

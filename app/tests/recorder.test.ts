@@ -14,6 +14,8 @@ import { expectEqualColumnLengths, validate, type SchemaDef } from './helpers/sc
 import { allNumbersFinite } from './helpers/segFixtures';
 
 const T0 = 123456.789;
+/** schema 1.2 contact details of a touch recorded without them */
+const NO_DETAILS = { radius_x: null, radius_y: null, force: null, rotation_angle: null, x_norm: null, y_norm: null };
 
 function motion(t: number, over: Partial<MotionSample> = {}): MotionSample {
   return {
@@ -121,9 +123,9 @@ describe('StreamRecorder', () => {
     expect(s.motion.rr_alpha[1]).toBeNull();
     expect(s.motion.rr_gamma[2]).toBeNull();
     expect(s.motion.interval_raw).toBe(16);
-    expect(s.orientation).toMatchObject({ t: [5], alpha: [null], beta: [null], gamma: [3], compass: [null], absolute: null });
+    expect(s.orientation).toMatchObject({ t: [5], alpha: [null], beta: [null], gamma: [3], compass: [null], compass_accuracy: [null], absolute: null });
     expect(s.quaternion).toMatchObject({ t: [7], sensor: 'AbsoluteOrientationSensor', frequency_hz: 0 });
-    expect(s.touches).toEqual([{ t: 8, type: 'start', n: 0, x: null, y: null }]);
+    expect(s.touches).toEqual([{ t: 8, type: 'start', n: 0, x: null, y: null, ...NO_DETAILS }]);
     expect(s.cues).toEqual([{ t: 9, kind: 'go' }]);
     for (const [def, v] of [
       ['MotionStream', s.motion],
@@ -168,6 +170,8 @@ describe('StreamRecorder', () => {
     const empty = r.build();
     expect(empty.orientation).toBeNull();
     expect(empty.quaternion).toBeNull();
+    // schema 1.2: the optional streams are always written (null without a sample, [] without a change)
+    expect(empty).toMatchObject({ orientation_abs: null, quaternion_abs: null, magnetometer: null, screen_events: [] });
     expect(empty.motion.t).toEqual([]);
     expect(empty.motion.interval_raw).toBeNull();
     expect(streamErrors('MotionStream', empty.motion)).toEqual([]);
@@ -178,7 +182,7 @@ describe('StreamRecorder', () => {
     r.addOrientation({ t: 4, ts: 4, alpha: 1, beta: 2, gamma: 3, absolute: null, compass: null });
     r.addOrientation({ t: 5, ts: 5, alpha: 1, beta: 2, gamma: 3, absolute: false, compass: null });
     const a = r.build();
-    expect(a.touches).toEqual([{ t: 2.56, type: 'end', n: 2, x: 10.12, y: 20.99 }]);
+    expect(a.touches).toEqual([{ t: 2.56, type: 'end', n: 2, x: 10.12, y: 20.99, ...NO_DETAILS }]);
     expect(a.orientation?.absolute).toBe(false); // first non-null value
     a.motion.t.push(99);
     a.touches[0].t = -1;
@@ -190,6 +194,82 @@ describe('StreamRecorder', () => {
     expect(r.lastTime).toBe(5);
     expect(r.rel(10.004)).toBe(10);
     expect(r.rel(Number.NaN)).toBeNull();
+  });
+});
+
+describe('StreamRecorder: schema 1.2 streams and touch details', () => {
+  it('records orientation_abs, quaternion_abs, magnetometer and screen events (rounded, schema-valid, separate from the relative streams)', () => {
+    const r = new StreamRecorder(T0);
+    r.addOrientationAbs({ t: T0 + 5.556, ts: 100.5, alpha: 12.34567, beta: 80.0004, gamma: -3.5, absolute: true, compass: null });
+    r.addOrientationAbs({ t: T0 + 21.5, ts: 116.75, alpha: null, beta: 1, gamma: 2, absolute: true, compass: null, compass_accuracy: 12.5 });
+    r.addOrientationAbs({ t: Number.NaN, ts: 1, alpha: 1, beta: 1, gamma: 1, absolute: true, compass: null }); // skipped
+    // labelled absolute whatever the sample claims; a non-finite component skips the sample
+    r.addQuaternionAbs({ t: T0 + 7.1234, q: [0.1234567, 0, 0.5, 0.8], sensor: 'RelativeOrientationSensor' }, 60);
+    r.addQuaternionAbs({ t: T0 + 8, q: [0, Number.NaN, 0, 1], sensor: 'AbsoluteOrientationSensor' }, 60);
+    r.addMagnetometer({ t: T0 + 9.999, x: 20.12345, y: null, z: Number.NaN }, 60);
+    r.addMagnetometer({ t: Number.NaN, x: 1, y: 2, z: 3 }, 60); // skipped
+    r.addScreen({ t: T0 + 30, type: 'landscape-primary', angle: 90 });
+    r.addScreen({ t: T0 + 40, type: 7 as unknown as string, angle: Number.NaN });
+    r.addScreen({ t: Number.POSITIVE_INFINITY, type: 'portrait-primary', angle: 0 }); // skipped
+    const s = r.build();
+    expect(s.orientation_abs).toEqual({
+      t: [5.56, 21.5],
+      ts: [0, 16.25],
+      alpha: [12.346, null],
+      beta: [80, 1],
+      gamma: [-3.5, 2],
+      compass: [null, null],
+      absolute: true,
+      ts_first_raw: 100.5,
+      compass_accuracy: [null, 12.5],
+    });
+    expect(s.orientation).toBeNull();
+    expect(s.quaternion_abs).toEqual({ t: [7.12], x: [0.123457], y: [0], z: [0.5], w: [0.8], sensor: 'AbsoluteOrientationSensor', frequency_hz: 60 });
+    expect(s.quaternion).toBeNull();
+    expect(s.magnetometer).toEqual({ t: [10], x: [20.123], y: [null], z: [null], frequency_hz: 60 });
+    expect(s.screen_events).toEqual([
+      { t: 30, type: 'landscape-primary', angle: 90 },
+      { t: 40, type: null, angle: null },
+    ]);
+    expect(r.lastTime).toBe(40);
+    expect(allNumbersFinite(s)).toEqual([]);
+    for (const [def, v] of [
+      ['OrientationStream', s.orientation_abs],
+      ['QuaternionStream', s.quaternion_abs],
+      ['MagnetometerStream', s.magnetometer],
+      ...(s.screen_events ?? []).map((e) => ['ScreenEvent', e] as const),
+    ] as const) {
+      expect(streamErrors(def, v), def).toEqual([]);
+    }
+    expect(computeQuality(s, false, [])).toMatchObject({ n_orientation: 0, n_quaternion: 0, n_orientation_abs: 2, n_quaternion_abs: 1 });
+    // build() returns copies
+    s.screen_events?.push({ t: 1, type: null, angle: null });
+    s.magnetometer?.x.push(1);
+    expect(r.build().screen_events).toHaveLength(2);
+    expect(r.build().magnetometer?.x).toEqual([20.123]);
+  });
+
+  it('touch contact details: rounded; x_norm / y_norm clamped to [0, 1]; missing or non-finite → null', () => {
+    const r = new StreamRecorder(0);
+    r.addTouch(1, 'start', 1, 100.556, 200, {
+      radius_x: 12.3456,
+      radius_y: 0,
+      force: 0.123456,
+      rotation_angle: 45.12345,
+      x_norm: 0.123456,
+      y_norm: 0.98766,
+    });
+    r.addTouch(2, 'end', 0, null, null, { x_norm: 1.5, y_norm: -0.2, force: Number.NaN }); // partial, out of range
+    r.addTouch(3, 'cancel', 1, 1, 1, null);
+    r.addTouch(4, 'start', 1, 5, 6, { radius_x: Number.POSITIVE_INFINITY, x_norm: 1, y_norm: 0 });
+    const touches = r.build().touches;
+    expect(touches).toEqual([
+      { t: 1, type: 'start', n: 1, x: 100.56, y: 200, radius_x: 12.35, radius_y: 0, force: 0.1235, rotation_angle: 45.123, x_norm: 0.1235, y_norm: 0.9877 },
+      { t: 2, type: 'end', n: 0, x: null, y: null, ...NO_DETAILS, x_norm: 1, y_norm: 0 },
+      { t: 3, type: 'cancel', n: 1, x: 1, y: 1, ...NO_DETAILS },
+      { t: 4, type: 'start', n: 1, x: 5, y: 6, ...NO_DETAILS, x_norm: 1, y_norm: 0 },
+    ]);
+    for (const t of touches) expect(streamErrors('TouchRecord', t)).toEqual([]);
   });
 });
 
@@ -246,6 +326,8 @@ describe('computeQuality', () => {
       rotation_available: true,
       hidden_during: true,
       warnings: ['x', 'y'],
+      n_quaternion_abs: 0,
+      n_orientation_abs: 0,
     });
   });
 

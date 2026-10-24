@@ -22,7 +22,7 @@ ANALYSIS_DIR = Path(__file__).resolve().parents[1]
 if str(ANALYSIS_DIR) not in sys.path:
     sys.path.insert(0, str(ANALYSIS_DIR))
 
-from motionlab import __version__, load_dataset  # noqa: E402
+from motionlab import NORM_VERSION, __version__, load_dataset  # noqa: E402
 from motionlab.qa import qa_summary  # noqa: E402
 from motionlab.report import report_dir, write_csv  # noqa: E402
 
@@ -48,6 +48,10 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument('--simulated', choices=['include', 'exclude', 'only'], default='include',
                     help='simulated trials: include (default), exclude (real data only) or only')
     ap.add_argument('--validate', choices=['fast', 'full', 'none'], default='fast', help='schema validation mode')
+    ap.add_argument('--rate-mapping', choices=['always', 'auto', 'calibration'], default='always',
+                    help='rotationRate mapping closure check of the trials: always (default; a cross-check where a '
+                         'calibration axis_check exists, which still wins), auto (only sessions without a definite '
+                         'axis_check, as load_dataset does by default) or calibration (never)')
     ap.add_argument('--no-online-check', action='store_true', help='skip re-running online_v1 against the stored indices')
     ap.add_argument('--no-offline', action='store_true', help='skip offline_v1')
     ap.add_argument('--sample', type=int, default=200, help='trials sampled for the slower consistency / gravity checks')
@@ -56,7 +60,7 @@ def main(argv: list[str] | None = None) -> int:
     args = ap.parse_args(argv)
 
     validate = False if args.validate == 'none' else args.validate
-    ds = load_dataset(args.data, validate=validate, simulated=args.simulated)
+    ds = load_dataset(args.data, validate=validate, simulated=args.simulated, rate_mapping=args.rate_mapping)
     out = Path(args.out) if args.out else report_dir(f'qa_{_name_of(args.data)}')
     out.mkdir(parents=True, exist_ok=True)
     rep = qa_summary(ds, check_online=not args.no_online_check, offline=not args.no_offline,
@@ -72,7 +76,8 @@ def main(argv: list[str] | None = None) -> int:
                    'online_v1 movement duration by speed': 'durations.png'}
     title = f'Dataset QA: {", ".join(args.data)}'
     md = rep.to_markdown(title=title, figures=figures)
-    md += f'\n---\nmotionlab {__version__}; simulated={args.simulated}; validation={args.validate}.\n'
+    md += (f'\n---\nmotionlab {__version__} ({NORM_VERSION}); simulated={args.simulated}; validation={args.validate}; '
+           f'rate mapping check={args.rate_mapping}.\n')
     (out / 'qa_report.md').write_text(md, encoding='utf-8')
     tdir = out / 'tables'
     tdir.mkdir(exist_ok=True)

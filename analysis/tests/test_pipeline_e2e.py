@@ -73,6 +73,42 @@ def test_train_baseline_ablation_options(data, tmp_path):
     assert m.loc['yaw_rule', 'accuracy'] > 0.9
 
 
+def test_qa_report_on_protocol_2_data(street_tree, tmp_path):
+    """Street visits (implicit calibration): the closure check names the mapping, the engine + vote consensus
+    the sign; the protocol 2.0.0 tables are written."""
+    out = tmp_path / 'qa_street'
+    assert _script('qa_report').main([str(street_tree), '--out', str(out), '--quiet', '--sample', '10', '--no-plots']) == 0
+    summary = json.loads((out / 'summary.json').read_text(encoding='utf-8'))
+    assert summary['calibration methods'] == 'implicit_v1 4' and summary['gravity sign sources'] == 'engine_vote 4'
+    assert summary['rotationRate mapping sources'] == 'closure w3c/deg_per_s 4'
+    assert summary['sessions with unverified rotationRate mapping'] == 0
+    assert summary['online_v1 port == stored (all trials)'] == 1.0
+    for t in ('normalisation', 'schema_1_2_fields', 'sessions_by_status'):
+        assert (out / 'tables' / f'{t}.csv').exists(), t
+    md = (out / 'qa_report.md').read_text(encoding='utf-8')
+    assert '## Normalisation' in md and '## Schema 1 2 fields' in md and 'norm_v2' in md
+
+
+def test_train_baseline_screen_away_augmentation(data, street_tree, tmp_path):
+    out = tmp_path / 'away'
+    rc = _script('train_baseline').main([*data, str(street_tree), '--out', str(out), '--quiet', '--n-boot', '0',
+                                         '--n-splits', '3', '--schemes', 'group_kfold', '--models', 'yaw_rule,hgb',
+                                         '--augment-screen-away', '--require-sign-support', '--no-plots',
+                                         '--no-permutation-check'])
+    assert rc == 0
+    m = pd.read_csv(out / 'metrics.csv').set_index('model')
+    assert m.loc['yaw_rule', 'accuracy'] > 0.9 and m.loc['hgb', 'n'] == m.loc['yaw_rule', 'n']
+    md = (out / 'report.md').read_text(encoding='utf-8')
+    assert 'Screen-away augmentation' in md and 'never report screen-away accuracy' in md
+    assert 'handedness x platform' in md or 'self-reported handedness x platform' in md
+    exc = pd.read_csv(out / 'exclusions.csv')
+    assert 'S3 gravity sign supported' in set(exc['rule'])
+    oof = pd.read_csv(out / 'oof_group_kfold.csv')
+    assert len(oof) and not oof['trial_id'].astype(str).str.endswith('-away').any()  # test trials are always real
+    feats = pd.read_csv(out / 'features.csv')
+    assert 'qc_screen_flipped' in feats.columns and (feats['qc_screen_flipped'] == 0).all()
+
+
 def test_plot_trial(data, tiny_dataset, tmp_path, capsys):
     tid = tiny_dataset.trials[0]['trial_id']
     mod = _script('plot_trial')

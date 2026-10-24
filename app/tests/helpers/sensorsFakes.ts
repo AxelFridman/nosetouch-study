@@ -132,6 +132,51 @@ export function fakeOrientationSensorClass(opts: { throwOnConstruct?: boolean } 
   return { Sensor: FakeSensor, instances };
 }
 
+/** Magnetometer fake (Generic Sensor API, µT readings in x / y / z); same controls as above. */
+export function fakeMagnetometerClass(opts: { throwOnConstruct?: boolean; throwOnStart?: boolean } = {}) {
+  const instances: FakeMagnetometer[] = [];
+  class FakeMagnetometer extends TrackingTarget {
+    x: number | null = null;
+    y: number | null = null;
+    z: number | null = null;
+    started = 0;
+    stopped = 0;
+    constructor(readonly options: { frequency?: number; referenceFrame?: string }) {
+      super();
+      if (opts.throwOnConstruct) throw new DOMException('blocked by permissions policy', 'SecurityError');
+      instances.push(this);
+    }
+    start(): void {
+      this.started++;
+      if (opts.throwOnStart) throw new DOMException('not allowed', 'NotAllowedError');
+    }
+    stop(): void {
+      this.stopped++;
+    }
+    emitReading(x: number | null, y: number | null, z: number | null): void {
+      this.x = x;
+      this.y = y;
+      this.z = z;
+      this.dispatchEvent(new Event('reading'));
+    }
+    emitError(): void {
+      this.dispatchEvent(new Event('error'));
+    }
+  }
+  return { Sensor: FakeMagnetometer, instances };
+}
+
+/** screen.orientation fake: rotate() changes type / angle and fires 'change'. */
+export class FakeScreenOrientation extends TrackingTarget {
+  type = 'portrait-primary';
+  angle = 0;
+  rotate(type: string, angle: number): void {
+    this.type = type;
+    this.angle = angle;
+    this.dispatchEvent(new Event('change'));
+  }
+}
+
 export function fakePermissionsApi(states: Record<string, string | 'throw'>) {
   return {
     query: vi.fn((d: { name: string }) => {

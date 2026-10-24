@@ -27,8 +27,25 @@
  *   available and opts.quaternion !== false, a RelativeOrientationSensor at opts.frequencyHz (default
  *   60)). Converts each event into MotionSample/OrientationSample with t = performance.now() taken
  *   at the top of the handler, ts = event.timeStamp. Null-safe: any missing field becomes null
- *   (a vector with any missing/non-finite component becomes null as a whole).
- *   stop() removes every listener and stops the Generic Sensor. Calling start twice is an error
+ *   (a vector with any missing/non-finite component becomes null as a whole). iOS: the orientation
+ *   sample carries webkitCompassHeading (compass) and webkitCompassAccuracy (compass_accuracy).
+ *   Schema 1.2 extra streams, each best effort and only when the listener implements its callback
+ *   (so measureRates never starts them) and opts does not switch it off:
+ *     · AbsoluteOrientationSensor (magnetometer-fused, Earth-referenced) → onQuaternionAbs, when the
+ *       constructor exists and no Permissions API query of accelerometer / gyroscope / magnetometer
+ *       says 'denied' (unlike the relative sensor, an unanswered query does not rule it out);
+ *     · 'deviceorientationabsolute' events (Chrome; feature-detected with 'ondeviceorientationabsolute'
+ *       in window) → onOrientationAbs;
+ *     · Magnetometer (µT; exposed only behind a flag in today's browsers; feature-detected, never
+ *       prompted, same permission rule as the absolute sensor) → onMagnetometer;
+ *     · screen orientation 'change' events (screen.orientation, else window 'orientationchange')
+ *       → onScreen with getScreenOrientation() after the change.
+ *   An optional stream that fails never stops the others and never raises onError: the source calls
+ *   listener.onWarning?.(code) (see SensorWarningListener in trialController.ts) with
+ *   'quaternion_unavailable', 'abs_orientation_unavailable' / 'abs_orientation_denied',
+ *   'magnetometer_unavailable' / 'magnetometer_denied' (construction or start() threw, or an 'error'
+ *   event); the trial controller writes these at most once per session.
+ *   stop() removes every listener and stops every Generic Sensor. Calling start twice is an error
  *   (synchronous throw; a source is single-use, also after stop()).
  *   If no devicemotion event arrives within 1500 ms after start, listener.onError({code:'no_events'}).
  *   Only events carrying data count (desktop Chrome fires all-null events when it has no sensor),
@@ -36,7 +53,9 @@
  *   start() reports 'insecure_context' / 'not_supported' through onError on a later task (never
  *   synchronously inside start) and still attaches its listeners. Quaternion sensor errors only stop
  *   the quaternion stream (it is optional; a missing gyroscope must not abort trials).
- *   start() resolves once the optional quaternion sensor has been set up or ruled out.
+ *   start() resolves once the optional Generic Sensors have been set up or ruled out.
+ * - readTouch(): clientX/clientY of a DOM Touch plus its schema 1.2 contact details (radius, force,
+ *   rotation, viewport-normalised position) for TrialController.addTouch.
  * - measureRates(): runs a source for durationMs and summarizes rates (own rateSummary helper: hz =
  *   (n−1)/(t_last−t_first)·1000, median/p95 of the sample spacing). Stops the source from inside the
  *   listener once durationMs of source time has elapsed, so offline simulated sources work too.
@@ -61,6 +80,7 @@ import type {
   SensorListener,
   SensorSource,
   SourceClock,
+  TouchDetails,
   Vec3,
 } from './types';
 
@@ -90,26 +110,42 @@ interface LooseNavigator {
 
 interface GenericSensorLike extends EventTarget {
   readonly quaternion?: ArrayLike<number> | null;
+  /** Magnetometer readings (µT) */
+  readonly x?: number | null;
+  readonly y?: number | null;
+  readonly z?: number | null;
   start(): void;
   stop(): void;
 }
 
 type GenericSensorCtor = new (options: { frequency: number; referenceFrame: 'device' | 'screen' }) => GenericSensorLike;
 
+/** screen.orientation (an EventTarget in every engine that has it). */
+interface ScreenOrientationLike {
+  type?: unknown;
+  angle?: unknown;
+  addEventListener?: EventTarget['addEventListener'];
+  removeEventListener?: EventTarget['removeEventListener'];
+}
+
 interface BrowserGlobals {
   window?: EventTarget;
   document?: { visibilityState?: string; hidden?: boolean };
   navigator?: LooseNavigator;
-  screen?: { width?: number; height?: number; orientation?: { type?: unknown; angle?: unknown } | null };
+  screen?: { width?: number; height?: number; orientation?: ScreenOrientationLike | null };
   location?: { protocol?: string; hostname?: string };
   isSecureContext?: boolean;
   devicePixelRatio?: number;
+  innerWidth?: number;
+  innerHeight?: number;
   /** deprecated window.orientation (iOS < 16.4 has no screen.orientation) */
   orientation?: unknown;
   matchMedia?: (query: string) => { matches: boolean };
   DeviceMotionEvent?: unknown;
   DeviceOrientationEvent?: unknown;
   RelativeOrientationSensor?: unknown;
+  AbsoluteOrientationSensor?: unknown;
+  Magnetometer?: unknown;
   File?: unknown;
   performance?: { now(): number; timeOrigin?: number };
 }
@@ -258,15 +294,62 @@ async function genericSensorsGranted(nav: LooseNavigator | undefined): Promise<b
   }
 }
 
+/**
+ * true when a Permissions API query says 'denied' for any of `names` (each query on its own: a
+ * rejected, unanswered (500 ms) or missing query is not a denial).
+ */
+async function anyPermissionDenied(nav: LooseNavigator | undefined, names: readonly string[]): Promise<boolean> {
+  const perms = nav?.permissions;
+  if (!perms || typeof perms.query !== 'function') return false;
+  const one = (name: string): Promise<boolean> => {
+    let p: Promise<boolean>;
+    try {
+      p = Promise.resolve(perms.query!({ name })).then(
+        (s) => s?.state === 'denied',
+        () => false,
+      );
+    } catch {
+      return Promise.resolve(false);
+    }
+    return withTimeout(p, 500, false);
+  };
+  const results = await Promise.all(names.map(one));
+  return results.some((d) => d);
+}
+
 // ───────────────────────────── browser sensor source ─────────────────────────────
 
 export interface BrowserSourceOptions {
+  /** RelativeOrientationSensor → onQuaternion (default true) */
   quaternion?: boolean;
+  /** AbsoluteOrientationSensor → onQuaternionAbs (default true; needs listener.onQuaternionAbs) */
+  absoluteQuaternion?: boolean;
+  /** 'deviceorientationabsolute' → onOrientationAbs (default true; needs listener.onOrientationAbs) */
+  orientationAbs?: boolean;
+  /** Magnetometer → onMagnetometer (default true; needs listener.onMagnetometer) */
+  magnetometer?: boolean;
+  /** screen orientation changes → onScreen (default true; needs listener.onScreen) */
+  screenEvents?: boolean;
+  /** requested rate of every Generic Sensor (default 60) */
   frequencyHz?: number;
 }
 
 /** Milliseconds without a data-carrying devicemotion event before onError('no_events'). */
 export const NO_EVENTS_TIMEOUT_MS = 1500;
+
+/** Permission names the AbsoluteOrientationSensor needs (Generic Sensor API). */
+const ABSOLUTE_SENSOR_PERMISSIONS = ['accelerometer', 'gyroscope', 'magnetometer'] as const;
+
+/** listener.onWarning, which SensorListener (types.ts) does not declare; see trialController.SensorWarningListener. */
+function warnListener(listener: SensorListener, code: string): void {
+  const fn = (listener as SensorListener & { onWarning?: unknown }).onWarning;
+  if (typeof fn !== 'function') return;
+  try {
+    (fn as (code: string) => void).call(listener, code);
+  } catch {
+    // a warning must never break the source
+  }
+}
 
 function readVec3(v: unknown): Vec3 | null {
   if (v === null || typeof v !== 'object') return null;
@@ -288,6 +371,10 @@ function readEuler(v: unknown): Euler | null {
 
 export function createBrowserSensorSource(opts?: BrowserSourceOptions): SensorSource {
   const wantQuaternion = opts?.quaternion !== false;
+  const wantAbsQuaternion = opts?.absoluteQuaternion !== false;
+  const wantOrientationAbs = opts?.orientationAbs !== false;
+  const wantMagnetometer = opts?.magnetometer !== false;
+  const wantScreen = opts?.screenEvents !== false;
   const requestedHz = opts?.frequencyHz;
   const frequencyHz = typeof requestedHz === 'number' && Number.isFinite(requestedHz) && requestedHz > 0 ? requestedHz : 60;
   const clock: SourceClock = {
@@ -378,17 +465,7 @@ export function createBrowserSensorSource(opts?: BrowserSourceOptions): SensorSo
     const onOrientation = (ev: Event): void => {
       const t = perfNow();
       if (phase !== 'running') return;
-      const e = ev as Partial<DeviceOrientationEvent> & { webkitCompassHeading?: unknown };
-      const sample: OrientationSample = {
-        t,
-        ts: finiteOrNull(ev.timeStamp),
-        alpha: finiteOrNull(e.alpha),
-        beta: finiteOrNull(e.beta),
-        gamma: finiteOrNull(e.gamma),
-        absolute: typeof e.absolute === 'boolean' ? e.absolute : null,
-        compass: finiteOrNull(e.webkitCompassHeading),
-      };
-      listener.onOrientation(sample);
+      listener.onOrientation(orientationSample(ev, t));
     };
 
     target.addEventListener('devicemotion', onMotion);
@@ -398,59 +475,235 @@ export function createBrowserSensorSource(opts?: BrowserSourceOptions): SensorSo
       target.removeEventListener('deviceorientation', onOrientation);
     });
 
-    const SensorCtor = g.RelativeOrientationSensor;
-    if (!wantQuaternion || typeof SensorCtor !== 'function') return Promise.resolve();
-    return genericSensorsGranted(g.navigator)
-      .then((granted) => {
-        if (granted && phase === 'running') startQuaternion(SensorCtor as GenericSensorCtor, listener);
-      })
-      .catch(() => undefined);
+    // ── schema 1.2: absolute device orientation events (Chrome) ──
+    if (wantOrientationAbs && typeof listener.onOrientationAbs === 'function' && 'ondeviceorientationabsolute' in target) {
+      const onOrientationAbs = (ev: Event): void => {
+        const t = perfNow();
+        if (phase !== 'running') return;
+        listener.onOrientationAbs?.(orientationSample(ev, t));
+      };
+      target.addEventListener('deviceorientationabsolute', onOrientationAbs);
+      cleanups.push(() => target.removeEventListener('deviceorientationabsolute', onOrientationAbs));
+    }
+
+    // ── schema 1.2: screen orientation changes ──
+    if (wantScreen && typeof listener.onScreen === 'function') attachScreenEvents(target, listener);
+
+    // ── Generic Sensors (each optional, set up in parallel; start() resolves when all are decided) ──
+    const pending: Promise<void>[] = [];
+    const nav = g.navigator;
+    const RelCtor = g.RelativeOrientationSensor;
+    if (wantQuaternion && typeof RelCtor === 'function') {
+      pending.push(
+        genericSensorsGranted(nav).then((granted) => {
+          if (!granted || phase !== 'running') return;
+          startGenericSensor(
+            RelCtor as GenericSensorCtor,
+            (sensor, t) => {
+              const q = readQuaternion(sensor);
+              if (q) listener.onQuaternion?.({ t, q, sensor: 'RelativeOrientationSensor' });
+            },
+            // NotReadableError (no gyroscope), NotAllowedError...: the quaternion is optional, so an
+            // error only ends this stream; devicemotion keeps going and no onError is raised.
+            () => warnListener(listener, 'quaternion_unavailable'),
+          );
+        }),
+      );
+    }
+    const AbsCtor = g.AbsoluteOrientationSensor;
+    if (wantAbsQuaternion && typeof AbsCtor === 'function' && typeof listener.onQuaternionAbs === 'function') {
+      pending.push(
+        anyPermissionDenied(nav, ABSOLUTE_SENSOR_PERMISSIONS).then((denied) => {
+          if (phase !== 'running') return;
+          if (denied) {
+            warnListener(listener, 'abs_orientation_denied');
+            return;
+          }
+          startGenericSensor(
+            AbsCtor as GenericSensorCtor,
+            (sensor, t) => {
+              const q = readQuaternion(sensor);
+              if (q) listener.onQuaternionAbs?.({ t, q, sensor: 'AbsoluteOrientationSensor' });
+            },
+            () => warnListener(listener, 'abs_orientation_unavailable'),
+          );
+        }),
+      );
+    }
+    const MagCtor = g.Magnetometer;
+    if (wantMagnetometer && typeof MagCtor === 'function' && typeof listener.onMagnetometer === 'function') {
+      pending.push(
+        anyPermissionDenied(nav, ['magnetometer']).then((denied) => {
+          if (phase !== 'running') return;
+          if (denied) {
+            warnListener(listener, 'magnetometer_denied');
+            return;
+          }
+          startGenericSensor(
+            MagCtor as GenericSensorCtor,
+            (sensor, t) => {
+              const x = finiteOrNull(sensor.x);
+              const y = finiteOrNull(sensor.y);
+              const z = finiteOrNull(sensor.z);
+              if (x === null && y === null && z === null) return; // no reading yet
+              listener.onMagnetometer?.({ t, x, y, z });
+            },
+            () => warnListener(listener, 'magnetometer_unavailable'),
+          );
+        }),
+      );
+    }
+    if (pending.length === 0) return Promise.resolve();
+    return Promise.all(pending.map((p) => p.catch(() => undefined))).then(() => undefined);
   }
 
-  function startQuaternion(SensorCtor: GenericSensorCtor, listener: SensorListener): void {
+  /** screen.orientation 'change' (else the legacy window 'orientationchange') → onScreen. */
+  function attachScreenEvents(target: EventTarget, listener: SensorListener): void {
+    const onChange = (): void => {
+      const t = perfNow();
+      if (phase !== 'running') return;
+      const s = getScreenOrientation();
+      listener.onScreen?.({ t, type: s.type, angle: s.angle });
+    };
+    try {
+      const so = G().screen?.orientation;
+      if (so && typeof so.addEventListener === 'function' && typeof so.removeEventListener === 'function') {
+        so.addEventListener('change', onChange);
+        cleanups.push(() => so.removeEventListener?.('change', onChange));
+        return;
+      }
+    } catch {
+      // fall back to the window event below
+    }
+    if ('onorientationchange' in target) {
+      target.addEventListener('orientationchange', onChange);
+      cleanups.push(() => target.removeEventListener('orientationchange', onChange));
+    }
+  }
+
+  /**
+   * Starts one Generic Sensor at frequencyHz in the device frame. `onFail` runs once if it cannot
+   * run: the constructor or start() throws (SecurityError from a permissions policy, ...) or the
+   * sensor fires 'error' (NotReadableError: no such hardware, NotAllowedError, ...). Readings are
+   * delivered with t = performance.now() taken first thing in the handler; stop() stops the sensor.
+   */
+  function startGenericSensor(
+    SensorCtor: GenericSensorCtor,
+    onReading: (sensor: GenericSensorLike, t: number) => void,
+    onFail: () => void,
+  ): void {
     let sensor: GenericSensorLike;
     try {
       sensor = new SensorCtor({ frequency: frequencyHz, referenceFrame: 'device' });
     } catch {
-      return; // SecurityError (permissions policy), ReferenceError, ...: no quaternion stream
+      onFail();
+      return;
     }
     let active = true;
-    const onReading = (): void => {
+    const reading = (): void => {
       const t = perfNow();
       if (!active || phase !== 'running') return;
-      const q = sensor.quaternion;
-      if (!q || q.length !== 4) return;
-      const x = q[0];
-      const y = q[1];
-      const z = q[2];
-      const w = q[3];
-      if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z) || !Number.isFinite(w)) return;
-      listener.onQuaternion?.({ t, q: [x, y, z, w], sensor: 'RelativeOrientationSensor' });
+      onReading(sensor, t);
     };
-    const stopQuaternion = (): void => {
+    const stopSensor = (): void => {
       if (!active) return;
       active = false;
-      sensor.removeEventListener('reading', onReading);
-      sensor.removeEventListener('error', stopQuaternion);
+      sensor.removeEventListener('reading', reading);
+      sensor.removeEventListener('error', failed);
       try {
         sensor.stop();
       } catch {
         // already stopped
       }
     };
-    sensor.addEventListener('reading', onReading);
-    // NotReadableError (no gyroscope), NotAllowedError...: the quaternion is optional, so an
-    // error only ends this stream; devicemotion keeps going and no onError is raised.
-    sensor.addEventListener('error', stopQuaternion);
-    cleanups.push(stopQuaternion);
+    function failed(): void {
+      if (!active) return;
+      stopSensor();
+      onFail();
+    }
+    sensor.addEventListener('reading', reading);
+    sensor.addEventListener('error', failed);
+    cleanups.push(stopSensor);
     try {
       sensor.start();
     } catch {
-      stopQuaternion();
+      failed();
     }
   }
 
   return { kind: 'browser', clock, start, stop };
+}
+
+/** A deviceorientation(absolute) event as an OrientationSample (iOS: webkitCompassHeading / Accuracy). */
+function orientationSample(ev: Event, t: number): OrientationSample {
+  const e = ev as Partial<DeviceOrientationEvent> & { webkitCompassHeading?: unknown; webkitCompassAccuracy?: unknown };
+  return {
+    t,
+    ts: finiteOrNull(ev.timeStamp),
+    alpha: finiteOrNull(e.alpha),
+    beta: finiteOrNull(e.beta),
+    gamma: finiteOrNull(e.gamma),
+    absolute: typeof e.absolute === 'boolean' ? e.absolute : null,
+    compass: finiteOrNull(e.webkitCompassHeading),
+    compass_accuracy: finiteOrNull(e.webkitCompassAccuracy),
+  };
+}
+
+/** sensor.quaternion as [x, y, z, w], or null when absent or not finite. */
+function readQuaternion(sensor: GenericSensorLike): [number, number, number, number] | null {
+  const q = sensor.quaternion;
+  if (!q || q.length !== 4) return null;
+  const x = q[0];
+  const y = q[1];
+  const z = q[2];
+  const w = q[3];
+  if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z) || !Number.isFinite(w)) return null;
+  return [x, y, z, w];
+}
+
+// ───────────────────────────── touches ─────────────────────────────
+
+export interface TouchReading {
+  x: number | null;
+  y: number | null;
+  details: TouchDetails;
+}
+
+/**
+ * clientX / clientY of a DOM Touch (or anything shaped like one) and its schema 1.2 contact details:
+ * radiusX / radiusY (CSS px), force (0..1), rotationAngle (deg) and the position normalised by the
+ * viewport (`viewport`, default window.innerWidth / innerHeight; clamped to [0, 1], null without a
+ * positive size). Missing, non-numeric or non-finite fields become null; never throws. Typical use:
+ *   const r = readTouch(e.changedTouches[0] ?? e.touches[0]);
+ *   controller.addTouch(type, e.touches.length, r.x, r.y, undefined, r.details);
+ */
+export function readTouch(touch: unknown, viewport?: { width: number; height: number } | null): TouchReading {
+  const none: TouchDetails = { radius_x: null, radius_y: null, force: null, rotation_angle: null, x_norm: null, y_norm: null };
+  try {
+    if (touch === null || typeof touch !== 'object') return { x: null, y: null, details: none };
+    const o = touch as { clientX?: unknown; clientY?: unknown; radiusX?: unknown; radiusY?: unknown; force?: unknown; rotationAngle?: unknown };
+    const x = finiteOrNull(o.clientX);
+    const y = finiteOrNull(o.clientY);
+    const g = G();
+    const w = finiteOrNull(viewport ? viewport.width : g.innerWidth);
+    const h = finiteOrNull(viewport ? viewport.height : g.innerHeight);
+    const norm = (v: number | null, size: number | null): number | null =>
+      v === null || size === null || !(size > 0) ? null : Math.min(1, Math.max(0, v / size));
+    return {
+      x,
+      y,
+      details: {
+        radius_x: finiteOrNull(o.radiusX),
+        radius_y: finiteOrNull(o.radiusY),
+        force: finiteOrNull(o.force),
+        rotation_angle: finiteOrNull(o.rotationAngle),
+        x_norm: norm(x, w),
+        y_norm: norm(y, h),
+      },
+    };
+  } catch {
+    return { x: null, y: null, details: none };
+  }
 }
 
 // ───────────────────────────── rate measurement ─────────────────────────────

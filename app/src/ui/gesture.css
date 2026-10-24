@@ -1,0 +1,371 @@
+/*
+ * GestureAnimation (ui/GestureAnimation.tsx). Static styles only: the @keyframes are generated per
+ * gesture by the component. Colours come from the app tokens (styles.css; hand and phone colours from
+ * session.css when it is loaded) with same-valued fallbacks per theme, so the drawing also works on
+ * screens that do not import session.css. Physical layout on purpose: the wrapper is dir="ltr" and the
+ * drawing never mirrors on right-to-left pages (the hand's side is a physical side).
+ */
+.gx {
+  --gx-stage: var(--surface-2, #eef1f7);
+  --gx-ink: #0f172a; /* outlines and lines */
+  --gx-muted: var(--muted, #586179);
+  --gx-skin: #ffffff;
+  --gx-nose: #f5e2d4; /* your own nose (POV): a tint distinct from the hand */
+  --gx-shirt: #cdd6e8;
+  --gx-burst: #e08600;
+  --gx-burst-halo: #0f172a;
+  --gx-trail: var(--muted, #586179);
+  --gx-arrow: var(--primary, #2f5bea);
+  --gx-vignette: rgba(15, 23, 42, 0.1);
+  --gx-fb-left: #6d28d9;
+  --gx-fb-right: #c2410c;
+  --gx-fb-any: #0e7490;
+  --gx-sph: #1e293b; /* the phone seen from the side */
+  --gx-sph-edge: transparent;
+  --gx-fb-frame: #1e293b;
+  --gx-fb-screen: #e6eeff;
+  --gx-fb-screen-ink: #2f5bea;
+  --gx-fb-back: #475569;
+  --gx-fb-back-2: #334155;
+  --gx-fb-camera: #0f172a;
+  --gx-fb-lens: #94a3b8;
+  --gx-sleeve: var(--muted, #586179);
+  --gx-phone: var(--pf-frame, var(--gx-fb-frame));
+  --gx-screen: var(--pf-screen, var(--gx-fb-screen));
+  --gx-screen-ink: var(--pf-screen-ink, var(--gx-fb-screen-ink));
+  --gx-back: var(--pf-back, var(--gx-fb-back));
+  --gx-back-2: var(--pf-back-2, var(--gx-fb-back-2));
+  --gx-camera: var(--pf-camera, var(--gx-fb-camera));
+  --gx-lens: var(--pf-lens, var(--gx-fb-lens));
+  display: block;
+  width: 100%;
+  max-width: 520px;
+  margin-left: auto;
+  margin-right: auto;
+}
+.gx.gx-hand-left {
+  --gx-sleeve: var(--hand-left, var(--gx-fb-left));
+}
+.gx.gx-hand-right {
+  --gx-sleeve: var(--hand-right, var(--gx-fb-right));
+}
+/* participant's choice: a colour that is neither hand's */
+.gx.gx-hand-any {
+  --gx-sleeve: var(--phase-done, var(--gx-fb-any));
+}
+
+/* dark: line art in negative (dark fills, light outlines), so every outline shows on the dark stage */
+@media (prefers-color-scheme: dark) {
+  .gx {
+    --gx-skin: #2b3757;
+    --gx-ink: #e3e9f5;
+    --gx-nose: #4a3d55;
+    --gx-shirt: #3c4a70;
+    --gx-burst: #fbbf24;
+    --gx-burst-halo: #0b1020;
+    --gx-vignette: rgba(0, 0, 0, 0.28);
+    --gx-sph: #0b1020;
+    --gx-sph-edge: #aab6cf;
+    --gx-fb-left: #b99cff;
+    --gx-fb-right: #ffa66b;
+    --gx-fb-any: #4fc3d9;
+    --gx-fb-frame: #94a3b8;
+    --gx-fb-screen: #dbe6ff;
+    --gx-fb-screen-ink: #3355d6;
+    --gx-fb-back-2: #3b4a63;
+    --gx-fb-camera: #0b1020;
+    --gx-fb-lens: #8090ab;
+    /* the back of the phone, lighter than PhoneFigure's so it stands out on the dark stage */
+    --gx-back: #64748f;
+    --gx-back-2: #4a5874;
+  }
+}
+
+/* ── layout ─────────────────────────────────────────────────── */
+/* side by side at every width (never stacked); the flex-grow ratio = the panels' aspect ratios
+   (190:160 vs 1:1), so both panels are equally tall */
+.gx-live {
+  display: flex;
+  flex-wrap: nowrap;
+  gap: 10px;
+  justify-content: center;
+  align-items: flex-start;
+}
+.gx-panel {
+  position: relative;
+  background: var(--gx-stage);
+  border-radius: 14px;
+  overflow: hidden;
+}
+.gx-live .gx-panel-side {
+  flex: 190 1 0;
+  min-width: 0;
+}
+.gx-live .gx-panel-pov {
+  flex: 160 1 0;
+  min-width: 0;
+}
+/* one view alone: not wider than it needs */
+.gx-view-side .gx-live .gx-panel-side {
+  max-width: 400px;
+}
+.gx-view-pov .gx-live .gx-panel-pov {
+  max-width: 340px;
+}
+.gx-ratio {
+  position: relative;
+  width: 100%;
+  height: 0;
+}
+.gx-ratio-side {
+  padding-top: 84.2105%; /* 160 / 190 */
+}
+.gx-ratio-pov {
+  padding-top: 100%;
+}
+.gx-ratio > svg {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+}
+/* the POV is "through your eyes": a soft vignette */
+.gx-panel-pov::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  pointer-events: none;
+  border-radius: inherit;
+  background: radial-gradient(ellipse at 50% 46%, transparent 58%, var(--gx-vignette) 100%);
+}
+
+.gx-compact {
+  max-width: 320px;
+}
+.gx-compact .gx-live {
+  gap: 6px;
+}
+.gx-compact .gx-panel {
+  border-radius: 10px;
+}
+
+/* ── animation ──────────────────────────────────────────────── */
+.gx-svg {
+  display: block;
+  overflow: hidden;
+}
+.gx-anim {
+  transform-box: view-box;
+  transform-origin: 0 0;
+}
+.gx.gx-still .gx-anim {
+  animation: none !important;
+}
+
+/* reduced motion: still frames instead of the animation */
+.gx-frames {
+  display: none;
+  flex-direction: column;
+  gap: 8px;
+}
+.gx-frow {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+/* one still frame: the drawing, its step number under it (never on the drawing) */
+.gx-frow .gx-frame {
+  flex: 1 1 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+}
+.gx-frow .gx-frame > .gx-panel {
+  width: 100%;
+}
+.gx-farrow {
+  flex: none;
+  width: 14px;
+  height: 14px;
+  /* centred on the drawings, not on drawing + number (16 px + 3 px gap) */
+  margin-bottom: 19px;
+  fill: none;
+  stroke: var(--gx-muted);
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.gx-fnum {
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 999px;
+  background: var(--text, #0f172a);
+  color: var(--bg, #f5f7fb);
+  font: 700 10px/16px var(--font, system-ui, sans-serif);
+  text-align: center;
+}
+@media (prefers-reduced-motion: reduce) {
+  .gx-live {
+    display: none;
+  }
+  .gx-frames {
+    display: flex;
+  }
+}
+
+/* ── drawing ────────────────────────────────────────────────── */
+.gx-skin {
+  fill: var(--gx-skin);
+  stroke: var(--gx-ink);
+  stroke-width: 1.5;
+  stroke-linejoin: round;
+}
+.gx-shirt {
+  fill: var(--gx-shirt);
+  stroke: var(--gx-ink);
+  stroke-width: 1.5;
+  stroke-linejoin: round;
+}
+.gx-sleeve {
+  fill: var(--gx-sleeve);
+  stroke: var(--gx-ink);
+  stroke-width: 1.5;
+  stroke-linejoin: round;
+}
+.gx-pov-stroke {
+  stroke-width: 2.6;
+}
+.gx-line {
+  fill: none;
+  stroke: var(--gx-ink);
+  stroke-width: 1.4;
+  stroke-linecap: round;
+}
+.gx-thin {
+  stroke-width: 1.1;
+}
+.gx-eye {
+  fill: var(--gx-ink);
+}
+
+/* phone seen from the side: dark in both themes (outlined on the dark stage) */
+.gx-sph {
+  fill: var(--gx-sph);
+  stroke: var(--gx-sph-edge);
+  stroke-width: 0.9;
+}
+
+/* phone in the POV: PhoneFigure's colours and "top" arrow */
+.gx-ph {
+  fill: var(--gx-phone);
+}
+.gx-ph-screen {
+  fill: var(--gx-screen);
+}
+.gx-ph-content {
+  fill: var(--gx-screen-ink);
+  opacity: 0.3;
+}
+.gx-ph-notch {
+  stroke: var(--gx-phone);
+}
+.gx-ph-back {
+  fill: var(--gx-back);
+  stroke: var(--gx-phone);
+  stroke-width: 2.5;
+}
+.gx-ph-camera {
+  fill: var(--gx-camera);
+}
+.gx-ph-lens {
+  fill: var(--gx-lens);
+  stroke: var(--gx-camera);
+  stroke-width: 1.5;
+}
+.gx-ph-flash {
+  fill: #fde68a;
+}
+.gx-ph-logo {
+  fill: var(--gx-back-2);
+}
+.gx-ph-q {
+  fill: var(--gx-screen-ink);
+  font: 800 60px var(--font, system-ui, sans-serif);
+}
+.gx-ph-arrow {
+  fill: var(--gx-arrow);
+  stroke: var(--gx-arrow);
+}
+
+/* the touch: amber with a dark halo, so it stands out on the light screen, the nose and the stage
+   (stroke widths are attributes set by the component: its geometry tests use the same numbers) */
+.gx-burst circle,
+.gx-burst line {
+  fill: none;
+  stroke-linecap: round;
+}
+.gx-burst-halo circle,
+.gx-burst-halo line,
+circle.gx-burst-halo {
+  stroke: var(--gx-burst-halo);
+}
+.gx-burst-ink circle,
+.gx-burst-ink line,
+circle.gx-burst-ink {
+  stroke: var(--gx-burst);
+}
+
+/* path of the phone: a muted dashed line with an arrow head (the blue arrow is the phone's "top") */
+.gx-trail {
+  fill: none;
+  stroke: var(--gx-trail);
+  stroke-width: 1.6;
+  stroke-dasharray: 2.6 3.2;
+  stroke-linecap: round;
+}
+.gx-trail-head {
+  fill: var(--gx-trail);
+}
+.gx-trail-g {
+  opacity: 0.9;
+}
+
+/* POV extras */
+.gx-nose path {
+  fill: var(--gx-nose);
+  stroke: var(--gx-ink);
+  stroke-width: 1.6;
+  stroke-linejoin: round;
+}
+.gx-nose .gx-nose-shade {
+  fill: none;
+  stroke-width: 1.1;
+  stroke-linecap: round;
+  opacity: 0.45;
+}
+.gx-eye-icon path {
+  fill: none;
+  stroke: var(--gx-muted);
+  stroke-width: 2;
+  stroke-linejoin: round;
+}
+.gx-eye-icon circle {
+  fill: var(--gx-muted);
+}
+/* participant's choice: an outlined, neutral "?" (it must not look like a help button) */
+.gx-q-badge circle {
+  fill: none;
+  stroke: var(--gx-muted);
+  stroke-width: 1.4;
+}
+.gx-q-badge text {
+  fill: var(--gx-muted);
+  font: 700 12px var(--font, system-ui, sans-serif);
+}

@@ -1,19 +1,31 @@
 /**
- * Welcome: what the study is, language switch, environment warnings (insecure context, no motion
- * sensors, in-app browser, simulation, pending uploads), start / continue as the known participant /
- * new participant, resume an unfinished session, and the menu.
+ * Welcome + consent (spec v2 §1, screen 1): language switch, a small illustration of the gesture, the
+ * four key facts of the participant information, the full information in a <details>, environment
+ * warnings (insecure context, no motion sensors, in-app browser, simulation, researcher mode, pending
+ * uploads), "Continue as {name}" + "New person" when a profile exists on this phone, resuming an
+ * unfinished session, and the menu. The consent checkbox and Start sit in the sticky footer.
+ *
+ * The Start tap (startFlow.startFromWelcome, order pinned by tests/startFlow.test.ts): requests the
+ * motion permission as its FIRST synchronous statement (WebKit only shows the prompt during the
+ * gesture), unlocks audio and takes the wake lock (iOS needs a gesture for both), records the consent
+ * time, starts the background sensor measurement (sensorCheck.ts) and opens the profile.
+ * NOTE for the PI: the wording is consent_version in public/config.json (2026-10-v2).
  */
+import type { ComponentChildren } from 'preact';
 import { useEffect, useState } from 'preact/hooks';
+import { localizedText } from '../../core/config';
 import { APP_VERSION } from '../../core/constants';
 import type { Language, SessionRecord } from '../../core/types';
 import { LANGUAGES, useStrings } from '../../i18n';
-import { Button, Card, ChoiceGroup, Field, Notice, Screen } from '../../ui/components';
+import { Button, Card, ChoiceGroup, Notice, Screen, Toggle } from '../../ui/components';
+import { GestureAnimation } from '../../ui/GestureAnimation';
 import '../../ui/onboarding.css';
+import { patchCapabilities, safeRequestPermission, setRepairNext } from '../sensorCheck';
 import { getServices } from '../services';
 import { resumeSession } from '../sessionFlow';
+import { forgetParticipant, startFromWelcome, unlockInTap } from '../startFlow';
 import type { ScreenId } from '../state';
 import { getState, navigate, setState, showToast, updateSettings, useAppState } from '../store';
-import { patchCapabilities, safeRequestPermission } from './SensorCheckScreen';
 import { uploadEnabled, uploadInEffect } from './SettingsScreen';
 
 /** in_app_browser ids reported by core/sensors → display names ('' = use the generic wording). */
@@ -48,6 +60,11 @@ export function formatWhen(iso: string, locale: string): string {
   }
 }
 
+/** mailto: only for something that looks like a single e-mail address (config is editable text). */
+export function mailHref(email: string): string | null {
+  return /^[^\s@<>"']+@[^\s@<>"']+\.[^\s@<>"']+$/.test(email) ? `mailto:${email}` : null;
+}
+
 const MENU: { screen: ScreenId; testId: string; key: 'menuData' | 'menuSettings' | 'menuSandbox' | 'menuAbout' }[] = [
   { screen: 'data', testId: 'btn-menu-data', key: 'menuData' },
   { screen: 'settings', testId: 'btn-menu-settings', key: 'menuSettings' },
@@ -59,10 +76,14 @@ export function WelcomeScreen() {
   const st = useAppState();
   const s = useStrings();
   const t = s.onboarding.welcome;
+  const c = s.onboarding.consent;
+  const cfg = st.config;
   const participant = st.participant;
   const pid = participant?.participant_id ?? null;
   const [resumable, setResumable] = useState<SessionRecord | null>(null);
   const [resuming, setResuming] = useState(false);
+  // consent is per app run: coming back from the profile keeps the box ticked
+  const [agreed, setAgreed] = useState(() => getState().consentAcceptedAt !== null);
 
   useEffect(() => {
     setResumable(null);
@@ -81,29 +102,26 @@ export function WelcomeScreen() {
     };
   }, [pid]);
 
-  const onStart = () => {
-    // Consent is per app run: a known participant who already agreed in this run goes on to check
-    // their profile; everyone else reads the consent first.
-    navigate(getState().consentAcceptedAt && getState().participant ? 'profile' : 'consent');
+  const onAgree = (v: boolean) => {
+    setAgreed(v);
+    if (!v) setState({ consentAcceptedAt: null }); // un-ticked: no consent until ticked again
   };
 
-  const onNewParticipant = () => {
-    // Someone else: they must consent themselves, and nothing of the previous person may carry over.
-    setState({ participant: null, calibration: null, consentAcceptedAt: null, session: null });
-    navigate('consent');
+  // Synchronous: its FIRST statement is the motion-permission request (WebKit shows the prompt only
+  // during the gesture), then audio + wake lock, consent time, background sensor check, profile.
+  // Never starts without consent (the button is disabled then anyway).
+  const onStart = () => void startFromWelcome(agreed);
+
+  const onNewPerson = () => {
+    forgetParticipant();
+    setAgreed(false);
   };
 
   const onResume = async () => {
     // FIRST statement, before any await: WebKit only shows the motion prompt during the gesture, and
     // the grant must be requested again after every page load. Audio and wake lock need a tap too.
     const permission = safeRequestPermission();
-    try {
-      const services = getServices();
-      void services.cues.unlock();
-      void services.wakeLock.acquire();
-    } catch (e) {
-      console.warn('audio / wake lock unavailable', e);
-    }
+    unlockInTap();
     if (!resumable || resuming) return;
     setResuming(true);
     try {
@@ -111,8 +129,9 @@ export function WelcomeScreen() {
       if (getState().settings.simulate) perm = 'granted';
       patchCapabilities({ permission_state: perm });
       if (perm === 'denied') {
+        setRepairNext('welcome'); // the repair screen's Continue comes back to this resume card
+        navigate('sensors'); // first: navigate() clears the toast
         showToast(t.resumeNeedsSensors, 'warn', 6000);
-        navigate('sensors');
         return;
       }
       const session = await resumeSession(resumable.session_id);
@@ -131,42 +150,64 @@ export function WelcomeScreen() {
 
   const caps = st.capabilities;
   const upload = uploadInEffect(st);
+  const uploads = uploadEnabled(upload);
   const pending = st.outbox.pending + st.outbox.failed;
   const inApp = inAppName(st.device?.in_app_browser);
   const locale = s.admin.locale;
+  const institution = localizedText(cfg.institution, st.settings.language);
+  const region = localizedText(cfg.region, st.settings.language);
+  const contactName = cfg.contact.name.trim();
+  const contactEmail = cfg.contact.email.trim();
+  const href = mailHref(contactEmail);
+  const askPermission = !!caps?.permission_api && caps.permission_state !== 'granted' && !st.settings.simulate;
+
+  const section = (title: string, body: ComponentChildren) => (
+    <section class="onb-section">
+      <h3>{title}</h3>
+      {body}
+    </section>
+  );
 
   return (
     <Screen
-      title={s.common.appName}
+      title={t.title}
       testId="screen-welcome"
       footer={
         <>
-          <Button testId="btn-start" size="lg" block onClick={onStart}>
-            {participant ? (
-              <span>
-                {t.continueAs} <bdi class="onb-nowrap">{participant.participant_id}</bdi>
-                {participant.nickname ? (
-                  <>
-                    {' '}
-                    (<bdi>{participant.nickname}</bdi>)
-                  </>
-                ) : null}
-              </span>
-            ) : (
-              t.start
-            )}
+          <div class="onb-agree">
+            <Toggle testId="chk-consent" checked={agreed} onChange={onAgree} label={t.agree(cfg.min_age, region)} />
+          </div>
+          {askPermission && agreed && <p class="small muted onb-footer-hint">{t.permissionNote}</p>}
+          <Button testId="btn-start" size="lg" block disabled={!agreed} onClick={onStart}>
+            {t.start}
           </Button>
-          {participant && (
-            <Button testId="btn-new-participant" variant="ghost" block onClick={onNewParticipant}>
-              {t.newParticipant}
-            </Button>
-          )}
         </>
       }
     >
+      <div class="onb-lang">
+        <ChoiceGroup<Language>
+          name="welcome-language"
+          value={st.settings.language}
+          options={LANGUAGES}
+          onChange={(language) => updateSettings({ language })}
+          testIdPrefix="opt-lang"
+          ariaLabel={t.language}
+        />
+      </div>
+
       <div class="onb-hero">
-        <img class="onb-hero-icon" src="./icons/icon.svg" alt="" width={72} height={72} />
-        <p class="onb-tagline">{t.tagline}</p>
+        <div class="onb-hero-gesture" data-testid="welcome-gesture">
+          <GestureAnimation
+            hand={null}
+            orientation="upright_toward"
+            speed="natural"
+            contact="any"
+            view="side"
+            compact
+            label={t.gestureLabel}
+          />
+        </div>
+        <p class="onb-tagline">{t.lead}</p>
       </div>
 
       {caps && !caps.secure_context && (
@@ -189,10 +230,31 @@ export function WelcomeScreen() {
           {t.warnSim}
         </Notice>
       )}
-      {pending > 0 && uploadEnabled(upload) && (
+      {st.setupRequested && (
+        <Notice kind="info" testId="warn-setup">
+          {t.warnSetup}
+        </Notice>
+      )}
+      {pending > 0 && uploads && (
         <Notice kind="info" testId="pending-uploads">
           {t.pendingUploads(pending)}
         </Notice>
+      )}
+
+      {participant && (
+        <Card tone="info" testId="returning-card">
+          <div class="stack-sm">
+            <p class="onb-returning-name">
+              {t.continueAs(participant.nickname?.trim() || participant.participant_id)}
+            </p>
+            <p class="small muted">
+              <bdi class="mono">{participant.participant_id}</bdi> · {t.continueHint}
+            </p>
+            <Button testId="btn-new-participant" variant="secondary" block onClick={onNewPerson}>
+              {t.newPerson}
+            </Button>
+          </div>
+        </Card>
       )}
 
       {resumable && (
@@ -209,27 +271,67 @@ export function WelcomeScreen() {
         </Card>
       )}
 
-      <Card title={t.aboutTitle}>
-        <p>{t.aboutBody}</p>
-        <h3 class="onb-subhead">{t.needsTitle}</h3>
-        <ul class="onb-checklist">
-          {t.needs.map((n) => (
-            <li key={n}>{n}</li>
-          ))}
+      <Card testId="consent-summary">
+        <ul class="onb-summary">
+          <li>{t.summaryDuration}</li>
+          <li>{t.summarySensors}</li>
+          <li>{t.summaryStored(uploads, cfg.upload_nickname)}</li>
+          <li>{t.summaryDelete}</li>
         </ul>
-        <p class="small muted onb-privacy">{t.privacy}</p>
+        {contactName || contactEmail ? (
+          <p class="small onb-contact" data-testid="consent-contact">
+            {c.contactIntro} <bdi>{contactName}</bdi>
+            {contactName && contactEmail ? ' · ' : ''}
+            {contactEmail &&
+              (href ? (
+                <a href={href} class="onb-ltr">
+                  {contactEmail}
+                </a>
+              ) : (
+                <bdi>{contactEmail}</bdi>
+              ))}
+          </p>
+        ) : (
+          <p class="small onb-contact" data-testid="consent-contact">
+            {c.contactNone}
+          </p>
+        )}
+        <details class="onb-details" data-testid="consent-details">
+          <summary>{t.fullInfo}</summary>
+          <div class="onb-consent">
+            {section(c.purposeTitle, <p>{c.purpose(institution)}</p>)}
+            {section(c.procedureTitle, <p>{c.procedure}</p>)}
+            {section(c.durationTitle, <p>{c.duration}</p>)}
+            {section(
+              c.risksTitle,
+              <ul>
+                {c.risks.map((r) => (
+                  <li key={r}>{r}</li>
+                ))}
+              </ul>,
+            )}
+            {section(c.voluntaryTitle, <p>{c.voluntary}</p>)}
+            {section(
+              c.collectedTitle,
+              <ul>
+                {c.collected.map((x) => (
+                  <li key={x}>{x}</li>
+                ))}
+              </ul>,
+            )}
+            {section(
+              c.notCollectedTitle,
+              <>
+                <p>{c.notCollected}</p>
+                <p>{cfg.upload_nickname && uploads ? c.nameUploaded : c.nameLocal}</p>
+              </>,
+            )}
+            {section(c.storageTitle, <p>{uploads ? c.storageUpload : c.storageLocal}</p>)}
+            {section(c.retentionTitle, <p>{c.retention(institution)}</p>)}
+            <p class="small muted">{c.version(cfg.consent_version)}</p>
+          </div>
+        </details>
       </Card>
-
-      <Field label={t.language}>
-        <ChoiceGroup<Language>
-          name="welcome-language"
-          value={st.settings.language}
-          options={LANGUAGES}
-          onChange={(language) => updateSettings({ language })}
-          testIdPrefix="opt-lang"
-          ariaLabel={t.language}
-        />
-      </Field>
 
       <nav class="onb-menu" aria-label={t.menuTitle}>
         {MENU.map((m) => (

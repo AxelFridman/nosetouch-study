@@ -3,9 +3,9 @@ import { defineConfig, devices } from '@playwright/test';
 // Smoke test of a DEPLOYED build (production bundle + service worker on real HTTPS hosting):
 //   npm run e2e:live                          (default: the GitHub Pages URL below)
 //   LIVE_URL=https://<host>/<path>/ npm run e2e:live
-// Runs the simulated-participant journey (?sim=1), so nothing touches real sensors or the backend
-// (the default config.json has uploads off; with uploads on, simulated records would be uploaded
-// and are marked simulated: true).
+// Runs the simulated-participant journeys of flow.spec.ts (?sim=1) and the boot check, so nothing
+// touches real sensors. With uploads switched on in the deployed config.json, the simulated records
+// ARE uploaded (marked simulated: true; the analysis drops them with rule S1).
 const LIVE_URL = process.env.LIVE_URL ?? 'https://axelfridman.github.io/nosetouch-study/';
 
 export default defineConfig({
@@ -21,7 +21,8 @@ export default defineConfig({
     trace: 'retain-on-failure',
     screenshot: 'only-on-failure',
     acceptDownloads: true,
-    // silent: see playwright.config.ts
+    actionTimeout: 15_000,
+    // silent: see playwright.config.ts and e2e/fixtures.ts
     launchOptions: { args: ['--mute-audio'] },
   },
   projects: [{ name: 'android-chromium', use: { ...devices['Pixel 7'] } }],

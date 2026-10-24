@@ -1,6 +1,6 @@
 /**
  * Synthetic dataset generation through the REAL recording pipeline. DOM-free: runs in Node
- * (scripts/synth.ts, scripts/evalSegmentation.ts, tests) as well as in a browser.
+ * (scripts/synth.ts, tests) as well as in a browser.
  *
  * Per simulated participant i (one session each):
  *  - design (planDatasetDesign): platform ios for even i, android for odd i; round(N·leftFraction)
@@ -10,26 +10,62 @@
  *  - SimParticipant from model.randomSimParticipant (age, height → arm length, movement style) and
  *    SimPlatform from defaultSimPlatform: ios → gravitySign opts.iosGravitySign (default
  *    IOS_GRAVITY_SIGN = −1), engine 'webkit', full-precision values; android → +1, 'blink',
- *    Chromium quantisation (platform.quantize).
- *  - ParticipantProfile with EHI-SF answers drawn consistent with the handedness and scored with
- *    util.scoreEhi; the session holds config.redactProfile's snapshot.
- *  - onboarding as the app runs it, on a virtual clock: sensor check = sensors.measureRates on a
- *    simulated source (2.5 s) → capabilities.measured; calibration = calibration.poseStats of a
- *    'static' flat_up window (lead 3 s, 2 s) and a 'no_move' upright_toward window (lead 2 s, 2 s)
- *    → buildCalibration with axis null (the simulator performs no tilt step; same note as the
- *    calibration screen in simulation mode).
- *  - plan = protocol.buildPlan (a custom spec goes through normalizeCustomSpec) → flattenPlan; every
- *    attempt runs createSimulatedSource (offline) → createTrialController with the options
- *    sessionFlow.buildTrialOptions builds (resolveParams of the session's base params, the session
+ *    Chromium quantisation (platform.quantize) and the absolute orientation streams.
+ *  - profile 'short' (default, the v2 "About you" form): full name in nickname (a synthetic one,
+ *    "Synthetic participant N"), age, sex, dominant hand, usual phone hand, height (left empty by
+ *    10%); ehi_* / phone_model / phone_case null, arm_issue false (the consent checkbox covers it).
+ *    'full' (the v1 form): EHI-SF answers drawn consistent with the handedness and scored with
+ *    util.scoreEhi, phone model / case, no name. The session holds config.redactProfile's snapshot
+ *    (names uploaded in the short form, as the study's config.json does).
+ *  - onboarding as the app runs it, on a virtual clock. calibration 'implicit' (default, v2): the
+ *    Start tap starts the sensor check in the background (sensors.measureRates on a simulated source,
+ *    2.5 s → capabilities.measured), the profile follows, the session stores
+ *    calibration.implicitCalibration(started_at) and every saved attempt goes through
+ *    calibration.withUprightHold (the first complete still upright trial fills it); calibration
+ *    'guided' (v1): sensor check, then calibration.poseStats of a 'static' flat_up window (lead 3 s,
+ *    2 s) and a 'no_move' upright_toward window (lead 2 s, 2 s) → buildCalibration with axis null
+ *    (the simulator performs no tilt step; same note as the calibration screen in simulation mode).
+ *    The trial controller gets calibration.detectionCalibration(session calibration, no engine
+ *    prior, started_at), as app/sessionFlow.calibrationForDetection does for a simulated session.
+ *  - plan = protocol.buildPlan (a custom spec goes through normalizeCustomSpec) → blocks in order;
+ *    every attempt runs createSimulatedSource (offline) → createTrialController with the options
+ *    sessionFlow.buildTrialOptions builds (resolveParams of the session's base params, the detection
  *    calibration, foreperiod rng makeRng(trialSeed(session seed, trial_index, attempt))) and a no-op
  *    CueSink.
- *  - attempts as SessionScreen + sessionFlow.saveAttempt handle them: status 'complete' → accepted
- *    (the simulated participant always taps Next) and the session moves on; any other status → saved
- *    as a failed attempt (accepted false) and the same planned trial runs again with attempt + 1.
- *    An attempt is performed with behaviour 'no_move' (→ no_movement) with probability
- *    failureRate/2, 'false_start' (anticipatory twitch before GO → false_starts ≥ 1, normally still
- *    complete) with failureRate/2, else 'normal'. After maxAttemptsPerTrial failed attempts of one
- *    planned trial the session ends there as 'abandoned' (does not happen with the defaults).
+ *  - reviewMode 'auto' (default; the v2 hands-free flow, settings.review_mode 'auto'):
+ *      · each block starts with a tap (block intro; the first block, street's 'choice' block, from
+ *        the How-to card) → its first attempt plays the 'ready' cue; every later attempt is CHAINED
+ *        (readyCue false), starting 30–150 ms after the previous one stopped;
+ *      · gripGate for every non-free trial once the detection calibration has a sign (as
+ *        buildTrialOptions); awaitReturn when the previous attempt was complete but its return
+ *        movement was not seen (trialController.returnMissed) — the simulated participant then starts
+ *        that attempt at the nose (SimSourceOptions.startAtNose) and brings the arm out first;
+ *      · decisions as app/sessionFlow.autoDecision: complete → accepted, note 'auto_accept', unless
+ *        orientation_match === false (not accepted, 'auto_reject:orientation', re-run at once);
+ *        no_movement / too_long / interrupted → not accepted, the reason shows 1.5 s and the trial
+ *        re-runs chained; the second failure in a row opens the pause sheet (Continue after 3–8 s,
+ *        then a 'ready' cue again); an attempt that never reached GO is discarded unsaved and runs
+ *        again (same attempt number) after the pause;
+ *      · street's choice trial: the participant uses their usual phone hand (profile phone_hand,
+ *        'both' → the dominant hand) and holds the phone upright, screen toward them (the simulated
+ *        source does this for every hand_source 'reported' condition: model.performedCondition);
+ *        after a complete attempt they answer the hand question (2–4 s) and the record becomes
+ *        sessionFlow.withReportedHand's: condition.hand = the reported hand, hand_source 'reported',
+ *        accepted, note null;
+ *      · street: after tier 3 the checkpoint (3–6 s); bonusFraction of the participants tap Bonus and
+ *        run the optional blocks, the others Finish; endEarlyFraction of them tap "Finish now" after a
+ *        random required block other than the first and the last → status 'ended_early'. Otherwise
+ *        'completed'.
+ *    reviewMode 'tap' (review_each_trial, the v1 flow): a Ready tap before every attempt (1–3 s), the
+ *    review after it (accepted when complete; 2–6 s), a 15–45 s break at each block change, no gates
+ *    and no awaitReturn; the optional blocks run unless the participant declines the bonus.
+ *  - an attempt is performed with behaviour 'no_move' (→ no_movement) with probability failureRate/2,
+ *    'false_start' (anticipatory twitch before GO → false_starts ≥ 1, normally still complete) with
+ *    failureRate/2, 'sway' (a posture shift before GO that restarts the hold silently) with
+ *    swayRate, else 'normal'; independently, with lateReturnRate the participant lingers at the nose
+ *    3.2–4.5 s after the end cue (past return_cap_ms: the return is not seen, the next trial awaits
+ *    it). After maxAttemptsPerTrial failed attempts of one planned trial the session ends there as
+ *    'abandoned' (does not happen with the defaults).
  *  - progress / status / timestamps follow the sessionFlow rules; simulated: true everywhere.
  * Deterministic for given options: every random choice comes from util.makeRng(mixSeed(seed, …))
  * streams (one per participant and purpose, one per attempt), ids are seeded UUIDs and every time
@@ -37,8 +73,14 @@
  *
  * IMPLEMENTED BY: simulation agent.
  */
-import { buildCalibration, poseStats } from '../core/calibration';
-import { redactProfile } from '../core/config';
+import {
+  buildCalibration,
+  detectionCalibration,
+  implicitCalibration,
+  poseStats,
+  withUprightHold,
+} from '../core/calibration';
+import { PRESETS as CONFIG_PRESETS, redactProfile } from '../core/config';
 import {
   APP_VERSION,
   DEFAULT_SEGMENTATION_PARAMS,
@@ -51,12 +93,13 @@ import {
   DEFAULT_CUSTOM_SPEC,
   estimateMinutes,
   flattenPlan,
+  isOptionalBlock,
   normalizeCustomSpec,
   resolveFirstHand,
   resolveParams,
 } from '../core/protocol';
 import { measureRates, parseUserAgent } from '../core/sensors';
-import { createTrialController } from '../core/trialController';
+import { createTrialController, returnMissed } from '../core/trialController';
 import type {
   CalibrationResult,
   CueSink,
@@ -69,10 +112,12 @@ import type {
   MotionSample,
   ParticipantProfile,
   PhoneHand,
+  PlannedBlock,
   PlannedTrial,
   Posture,
   ProtocolOptions,
   ProtocolPreset,
+  ReviewMode,
   SegmentationParams,
   SensorCapabilities,
   SensorSource,
@@ -92,10 +137,14 @@ export const SYNTH_STUDY_CODE = 'synthetic-v1';
 /** 2026-10-05T07:00:00Z: the first participant's page load (later participants: one day apart). */
 export const SYNTH_START_EPOCH_MS = Date.UTC(2026, 9, 5, 7, 0, 0);
 
+/** Outcome notes of the hands-free flow (copies of app/sessionFlow's constants; src/app is not DOM-free). */
+export const AUTO_ACCEPT_NOTE = 'auto_accept';
+export const AUTO_REJECT_ORIENTATION_NOTE = 'auto_reject:orientation';
+
 export interface DatasetOptions {
   /** simulated participants, one session each (default 12) */
   participants?: number;
-  preset?: ProtocolPreset; // default 'standard'
+  preset?: ProtocolPreset; // default DEFAULT_STUDY_CONFIG.default_preset ('street')
   /** spec for preset 'custom' (normalizeCustomSpec; default DEFAULT_CUSTOM_SPEC); ignored otherwise */
   custom?: CustomProtocolSpec | null;
   seed?: number; // uint32, default 42
@@ -103,6 +152,10 @@ export interface DatasetOptions {
   leftFraction?: number;
   /** probability that an attempt is a 'no_move' or a 'false_start' (half each); default 0.03 */
   failureRate?: number;
+  /** probability that an attempt has a silent posture sway before GO (default 0.05) */
+  swayRate?: number;
+  /** probability that the participant lingers at the nose past return_cap_ms (default 0.05) */
+  lateReturnRate?: number;
   studyCode?: string; // default SYNTH_STUDY_CODE
   /** gravitySign of the simulated iOS devices (default IOS_GRAVITY_SIGN) */
   iosGravitySign?: 1 | -1;
@@ -116,6 +169,16 @@ export interface DatasetOptions {
   language?: Language; // session.settings.language, default 'en'
   /** failed attempts of one planned trial after which the session is abandoned (default 8) */
   maxAttemptsPerTrial?: number;
+  /** 'auto' (default: the v2 hands-free flow) or 'tap' (review_each_trial: Ready + review taps) */
+  reviewMode?: ReviewMode;
+  /** 'implicit' (default: implicit_v1) or 'guided' (the v1 calibration screen) */
+  calibration?: 'implicit' | 'guided';
+  /** 'short' (default: the v2 profile) or 'full' (the v1 profile with EHI, phone model and case) */
+  profile?: 'short' | 'full';
+  /** share of participants who take the bonus (optional blocks) at the checkpoint (default 0.5) */
+  bonusFraction?: number;
+  /** share of participants who finish before every required block is done (default 0) */
+  endEarlyFraction?: number;
 }
 
 export interface ResolvedDatasetOptions {
@@ -125,6 +188,8 @@ export interface ResolvedDatasetOptions {
   seed: number;
   leftFraction: number;
   failureRate: number;
+  swayRate: number;
+  lateReturnRate: number;
   studyCode: string;
   iosGravitySign: 1 | -1;
   posture: Posture;
@@ -133,10 +198,15 @@ export interface ResolvedDatasetOptions {
   timezoneOffsetMin: number;
   language: Language;
   maxAttemptsPerTrial: number;
+  reviewMode: ReviewMode;
+  calibration: 'implicit' | 'guided';
+  profile: 'short' | 'full';
+  bonusFraction: number;
+  endEarlyFraction: number;
 }
 
 const STUDY_CODE_RE = /^[A-Za-z0-9_-]{1,64}$/; // schema $defs.Id
-const PRESETS: readonly ProtocolPreset[] = ['quick', 'standard', 'full', 'custom'];
+const PRESETS: readonly ProtocolPreset[] = CONFIG_PRESETS;
 
 function fraction(name: string, v: number, maxExclusive = false): number {
   if (!Number.isFinite(v) || v < 0 || v > 1 || (maxExclusive && v === 1)) {
@@ -145,13 +215,19 @@ function fraction(name: string, v: number, maxExclusive = false): number {
   return v;
 }
 
+function oneOf<T extends string>(name: string, v: T | undefined, allowed: readonly T[], fallback: T): T {
+  const out = v ?? fallback;
+  if (!allowed.includes(out)) throw new Error(`generateDataset: ${name} must be one of ${allowed.join(', ')}, got "${String(out)}"`);
+  return out;
+}
+
 /** Fills the defaults and rejects values that would produce invalid records. */
 export function resolveDatasetOptions(opts: DatasetOptions = {}): ResolvedDatasetOptions {
   const participants = opts.participants ?? 12;
   if (!Number.isInteger(participants) || participants < 1) {
     throw new Error(`generateDataset: participants must be a positive integer, got ${participants}`);
   }
-  const preset = opts.preset ?? 'standard';
+  const preset = opts.preset ?? DEFAULT_STUDY_CONFIG.default_preset;
   if (!PRESETS.includes(preset)) throw new Error(`generateDataset: unknown preset "${String(preset)}"`);
   const studyCode = opts.studyCode ?? SYNTH_STUDY_CODE;
   if (!STUDY_CODE_RE.test(studyCode)) throw new Error(`generateDataset: study code must match ${STUDY_CODE_RE}`);
@@ -165,6 +241,10 @@ export function resolveDatasetOptions(opts: DatasetOptions = {}): ResolvedDatase
   if (!Number.isFinite(startEpochMs)) throw new Error('generateDataset: startEpochMs must be finite');
   const timezoneOffsetMin = opts.timezoneOffsetMin ?? 0;
   if (!Number.isInteger(timezoneOffsetMin)) throw new Error('generateDataset: timezoneOffsetMin must be an integer');
+  const failureRate = fraction('failureRate', opts.failureRate ?? 0.03, true);
+  const swayRate = fraction('swayRate', opts.swayRate ?? 0.05);
+  // 1 would make every attempt fail and every session abandoned
+  if (failureRate + swayRate > 1) throw new Error('generateDataset: failureRate + swayRate must not exceed 1');
   return {
     participants,
     preset,
@@ -172,8 +252,9 @@ export function resolveDatasetOptions(opts: DatasetOptions = {}): ResolvedDatase
     custom: preset === 'custom' ? normalizeCustomSpec(opts.custom ?? DEFAULT_CUSTOM_SPEC) : null,
     seed: (opts.seed ?? 42) >>> 0,
     leftFraction: fraction('leftFraction', opts.leftFraction ?? 0.3),
-    // 1 would make every attempt fail and every session abandoned
-    failureRate: fraction('failureRate', opts.failureRate ?? 0.03, true),
+    failureRate,
+    swayRate,
+    lateReturnRate: fraction('lateReturnRate', opts.lateReturnRate ?? 0.05),
     studyCode,
     iosGravitySign,
     posture: opts.posture ?? 'standing',
@@ -182,6 +263,11 @@ export function resolveDatasetOptions(opts: DatasetOptions = {}): ResolvedDatase
     timezoneOffsetMin,
     language: opts.language ?? 'en',
     maxAttemptsPerTrial,
+    reviewMode: oneOf('reviewMode', opts.reviewMode, ['auto', 'tap'] as const, 'auto'),
+    calibration: oneOf('calibration', opts.calibration, ['implicit', 'guided'] as const, 'implicit'),
+    profile: oneOf('profile', opts.profile, ['short', 'full'] as const, 'short'),
+    bonusFraction: fraction('bonusFraction', opts.bonusFraction ?? 0.5),
+    endEarlyFraction: fraction('endEarlyFraction', opts.endEarlyFraction ?? 0),
   };
 }
 
@@ -197,6 +283,7 @@ const SALT = {
   clock: 0x434c4b31,
   calibration: 0x43414c31,
   attempt: 0x41545431,
+  flow: 0x464c5731,
 } as const;
 
 function seedOf(seed: number, ...parts: number[]): number {
@@ -215,6 +302,29 @@ export function appTrialSeed(sessionSeed: number, trialIndex: number, attempt: n
   h = Math.imul(h ^ (attempt * 0x27d4eb2f), 0xc2b2ae35);
   h ^= h >>> 16;
   return h >>> 0;
+}
+
+/**
+ * Copy of app/sessionFlow.autoDecision (tests/synth.test.ts checks they agree): a complete trial is
+ * accepted ('auto_accept') unless orientation_match === false ('auto_reject:orientation'); anything
+ * else is not accepted and keeps its note.
+ */
+export function autoDecisionLikeApp(record: TrialRecord): TrialRecord {
+  if (record.outcome.status !== 'complete') return { ...record, outcome: { ...record.outcome, accepted: false } };
+  const accepted = record.detected.orientation_match !== false;
+  return {
+    ...record,
+    outcome: { ...record.outcome, accepted, participant_flag: null, note: accepted ? AUTO_ACCEPT_NOTE : AUTO_REJECT_ORIENTATION_NOTE },
+  };
+}
+
+/** Copy of app/sessionFlow.withReportedHand for an answered hand question (not "unsure"). */
+export function withReportedHandLikeApp(record: TrialRecord, hand: Hand): TrialRecord {
+  return {
+    ...record,
+    condition: { ...record.condition, hand, hand_source: 'reported' },
+    outcome: { ...record.outcome, accepted: record.outcome.status === 'complete', participant_flag: null, note: null },
+  };
 }
 
 /** RFC 4122 v4 layout from a seeded rng (same shape as util.newId, but reproducible). */
@@ -376,7 +486,8 @@ function buildDevice(platform: 'ios' | 'android', rng: () => number, language: L
   };
 }
 
-function buildProfile(sim: SimParticipant, rng: () => number, phoneModel: string, createdAt: string): ParticipantProfile {
+/** The v1 profile form: EHI-SF, phone model and case, no name. */
+function buildFullProfile(sim: SimParticipant, rng: () => number, phoneModel: string, createdAt: string): ParticipantProfile {
   const table = sim.dominant === 'left' ? EHI_LEFT_HANDED : EHI_RIGHT_HANDED;
   const ehi: EhiShortForm = {
     writing: pickWeighted(rng, table.writing),
@@ -407,16 +518,42 @@ function buildProfile(sim: SimParticipant, rng: () => number, phoneModel: string
   };
 }
 
+/** The v2 "About you" form: name, age, sex, dominant hand, usual phone hand, optional height. */
+function buildShortProfile(sim: SimParticipant, rng: () => number, index: number, createdAt: string): ParticipantProfile {
+  const phoneHand = pickWeighted(rng, PHONE_HAND[sim.dominant]);
+  const heightGiven = rng() < 0.9; // optional in the form
+  return {
+    participant_id: sim.participant_id,
+    nickname: `Synthetic participant ${index + 1}`,
+    age_years: sim.age_years,
+    sex: sim.sex,
+    handedness_self: sim.handedness,
+    ehi_sf: null,
+    ehi_lq: null,
+    ehi_class: null,
+    phone_hand: phoneHand,
+    height_cm: heightGiven ? sim.height_cm : null,
+    arm_issue: false,
+    phone_model: null,
+    phone_case: null,
+    created_at: createdAt,
+    updated_at: createdAt,
+  };
+}
+
 // ───────────────────────────── recording helpers ─────────────────────────────
 
-/** Calibration screen windows (CalibrationScreen.STEP_TIMING) and the sensor check (MEASURE_MS). */
+/** Windows of the 'guided' calibration (the v1 calibration screen's STEP_TIMING; that screen was removed in 0.2.0) and the sensor check (MEASURE_MS). */
 const CAL_FLAT = { leadMs: 3000, durationMs: 2000 };
 const CAL_UPRIGHT = { leadMs: 2000, durationMs: 2000 };
 const SENSOR_CHECK_MS = 2500;
-/** CalibrationScreen adds this note in simulation mode (no tilt step → axis_check null). */
+/** The v1 calibration screen added this note in simulation mode (no tilt step → axis_check null). */
 const SIM_CALIBRATION_NOTE = 'simulated: tilt step not performed by the simulator';
+/** lateReturnRate: the return starts this long after the end cue (beyond return_cap_ms = 3000). */
+const LATE_RETURN_MIN_MS = 3200;
+const LATE_RETURN_MAX_MS = 4500;
 
-/** Offline counterpart of CalibrationScreen.recordWindow: motion samples of [lead, lead + duration] (source clock). */
+/** Offline counterpart of the v1 calibration screen's recordWindow: motion samples of [lead, lead + duration] (source clock). */
 async function recordWindow(source: SensorSource, leadMs: number, durationMs: number): Promise<MotionSample[]> {
   const samples: MotionSample[] = [];
   const from = source.clock.now() + leadMs;
@@ -441,12 +578,26 @@ function holdCondition(hand: Hand, orientation: TrialCondition['orientation'], p
 
 // ───────────────────────────── generation ─────────────────────────────
 
+/** How an attempt was run (what SessionScreen would pass to buildTrialOptions). */
+export interface AttemptFlags {
+  readyCue: boolean;
+  awaitReturn: boolean;
+  gripGate: boolean;
+}
+
 /** One attempt as the simulator performed it (truth in the SOURCE clock; subtract t0 for record time). */
 export interface AttemptInfo {
   trial_id: string;
   trial_index: number;
   attempt: number;
   behavior: SimBehavior;
+  /** the participant lingered at the nose past return_cap_ms */
+  late_return: boolean;
+  /** the simulated participant started at the nose (this attempt had awaitReturn) */
+  start_at_nose: boolean;
+  flags: AttemptFlags;
+  /** the hand the simulated participant used (the reported one for street's choice trial) */
+  hand: Hand;
   /** = timing.t0_perf_ms before rounding: source-clock time of the record's t = 0 */
   t0: number;
   truth: SimTruth;
@@ -462,6 +613,8 @@ export interface SyntheticSession {
   trials: TrialRecord[];
   /** parallel to trials */
   attempts: AttemptInfo[];
+  /** street: the participant took the bonus at the checkpoint (null when the plan has no optional block) */
+  bonus: boolean | null;
 }
 
 export interface SyntheticDataset {
@@ -475,6 +628,7 @@ const HOUR_MS = 3_600_000;
 async function generateSession(o: ResolvedDatasetOptions, d: ParticipantDesign, usedIds: Set<string>): Promise<SyntheticSession> {
   const i = d.index;
   const stream = (salt: number) => makeRng(seedOf(o.seed, salt, i));
+  const auto = o.reviewMode === 'auto';
 
   // ── simulated person and phone ──
   const simRng = stream(SALT.sim);
@@ -494,14 +648,6 @@ async function generateSession(o: ResolvedDatasetOptions, d: ParticipantDesign, 
   let perf = between(400, 1500); // app booted
   const at = (p: number) => isoTime(timeOrigin + p);
 
-  perf += between(15_000, 60_000);
-  const consentAt = at(perf);
-  perf += between(45_000, 150_000);
-  const profRng = stream(SALT.profile);
-  const { device, spec } = buildDevice(d.platform, profRng, o.language, timeOrigin);
-  const profile = buildProfile(participant, profRng, spec.model, at(perf));
-
-  // ── sensor check and calibration (simulated sources on the same clock) ──
   const calRng = stream(SALT.calibration);
   const source = (condition: TrialCondition, behavior: SimBehavior, startTime: number): SensorSource =>
     createSimulatedSource({
@@ -514,10 +660,7 @@ async function generateSession(o: ResolvedDatasetOptions, d: ParticipantDesign, 
       startTime,
       baseEpochMs: timeOrigin,
     });
-  perf += between(10_000, 30_000);
-  const measured = await measureRates(source(holdCondition(participant.dominant, 'upright_toward', o.posture), 'no_move', perf), SENSOR_CHECK_MS);
-  perf += SENSOR_CHECK_MS;
-  const capabilities: SensorCapabilities = {
+  const capabilitiesOf = (measured: SensorCapabilities['measured']): SensorCapabilities => ({
     secure_context: true,
     device_motion: true,
     device_orientation: true,
@@ -528,23 +671,57 @@ async function generateSession(o: ResolvedDatasetOptions, d: ParticipantDesign, 
     vibrate: d.platform === 'android',
     share_files: true,
     measured,
-  };
-  perf += between(15_000, 40_000);
-  const flatSamples = await recordWindow(source(holdCondition(participant.dominant, 'flat_up', o.posture), 'static', perf), CAL_FLAT.leadMs, CAL_FLAT.durationMs);
-  perf += CAL_FLAT.leadMs + CAL_FLAT.durationMs + between(5_000, 15_000);
-  const uprightSamples = await recordWindow(
-    source(holdCondition(participant.dominant, 'upright_toward', o.posture), 'no_move', perf),
-    CAL_UPRIGHT.leadMs,
-    CAL_UPRIGHT.durationMs,
-  );
-  perf += CAL_UPRIGHT.leadMs + CAL_UPRIGHT.durationMs;
-  const calibration: CalibrationResult = buildCalibration({
-    performedAt: at(perf),
-    flat: poseStats(flatSamples),
-    upright: poseStats(uprightSamples),
-    axis: null,
-    notes: [SIM_CALIBRATION_NOTE],
   });
+  const profRng = stream(SALT.profile);
+
+  let consentAt: string;
+  let profile: ParticipantProfile;
+  let device: DeviceInfo;
+  let capabilities: SensorCapabilities;
+  let calibration: CalibrationResult | null;
+  if (o.calibration === 'implicit') {
+    // ── v2 onboarding: welcome + consent (the Start tap starts the sensor check), the short profile ──
+    perf += between(15_000, 45_000);
+    consentAt = at(perf);
+    const measured = await measureRates(source(holdCondition(participant.dominant, 'upright_toward', o.posture), 'no_move', perf), SENSOR_CHECK_MS);
+    capabilities = capabilitiesOf(measured);
+    perf += between(20_000, 60_000); // the profile form (the measurement ran in the background)
+    const built = buildDevice(d.platform, profRng, o.language, timeOrigin);
+    device = built.device;
+    profile = o.profile === 'short' ? buildShortProfile(participant, profRng, i, at(perf)) : buildFullProfile(participant, profRng, built.spec.model, at(perf));
+    calibration = null; // implicitCalibration(started_at) below
+  } else {
+    // ── v1 onboarding: consent, profile, sensor check screen, calibration screen ──
+    perf += between(15_000, 60_000);
+    consentAt = at(perf);
+    perf += between(45_000, 150_000);
+    const built = buildDevice(d.platform, profRng, o.language, timeOrigin);
+    device = built.device;
+    profile = o.profile === 'short' ? buildShortProfile(participant, profRng, i, at(perf)) : buildFullProfile(participant, profRng, built.spec.model, at(perf));
+    perf += between(10_000, 30_000);
+    const measured = await measureRates(source(holdCondition(participant.dominant, 'upright_toward', o.posture), 'no_move', perf), SENSOR_CHECK_MS);
+    perf += SENSOR_CHECK_MS;
+    capabilities = capabilitiesOf(measured);
+    perf += between(15_000, 40_000);
+    const flatSamples = await recordWindow(source(holdCondition(participant.dominant, 'flat_up', o.posture), 'static', perf), CAL_FLAT.leadMs, CAL_FLAT.durationMs);
+    perf += CAL_FLAT.leadMs + CAL_FLAT.durationMs + between(5_000, 15_000);
+    const uprightSamples = await recordWindow(
+      source(holdCondition(participant.dominant, 'upright_toward', o.posture), 'no_move', perf),
+      CAL_UPRIGHT.leadMs,
+      CAL_UPRIGHT.durationMs,
+    );
+    perf += CAL_UPRIGHT.leadMs + CAL_UPRIGHT.durationMs;
+    calibration = {
+      ...buildCalibration({
+        performedAt: at(perf),
+        flat: poseStats(flatSamples),
+        upright: poseStats(uprightSamples),
+        axis: null,
+        notes: [SIM_CALIBRATION_NOTE],
+      }),
+      method: 'guided_v1',
+    };
+  }
 
   // ── session ──
   const sesRng = stream(SALT.session);
@@ -553,33 +730,70 @@ async function generateSession(o: ResolvedDatasetOptions, d: ParticipantDesign, 
   const protocolOpts: ProtocolOptions = { preset: o.preset, seed: sessionSeed, posture: o.posture, custom: o.custom };
   const plan = buildPlan(protocolOpts);
   const flat = flattenPlan(plan);
-  perf += between(10_000, 40_000); // setup screen
+  perf += o.calibration === 'implicit' ? between(300, 1500) : between(10_000, 40_000); // v1: setup screen
   const startedAt = at(perf);
-  const config = { ...DEFAULT_STUDY_CONFIG, study_code: o.studyCode };
+  if (calibration === null) calibration = implicitCalibration(startedAt);
+  // names are uploaded in this study (public/config.json upload_nickname: true)
+  const config = { ...DEFAULT_STUDY_CONFIG, study_code: o.studyCode, upload_nickname: true };
+  // a simulated session has no engine prior (app/sessionFlow.calibrationForDetection)
+  const engine = null;
+
+  // ── participant-level choices ──
+  const flowRng = stream(SALT.flow);
+  const hasOptional = plan.some(isOptionalBlock);
+  const takesBonus = flowRng() < o.bonusFraction;
+  const endsEarly = flowRng() < o.endEarlyFraction;
+  const uEndAt = flowRng();
+  // "Finish now" after a random required block other than the last (and not right after the first one,
+  // e.g. street's one-trial choice block, when there are enough blocks)
+  const required = plan.filter((b) => !isOptionalBlock(b) && b.trials.length > 0);
+  const stopCandidates = required.length > 2 ? required.slice(1, -1) : required.slice(0, -1);
+  const stopAfterBlock =
+    endsEarly && stopCandidates.length > 0
+      ? stopCandidates[Math.min(stopCandidates.length - 1, Math.floor(uEndAt * stopCandidates.length))].block_index
+      : null;
+  // the simulated person knows their usual phone hand: street's choice trial is done with it
+  // (model.performedCondition; 'both' → the dominant hand)
+  participant = { ...participant, phone_hand: profile.phone_hand };
 
   const trials: TrialRecord[] = [];
   const attempts: AttemptInfo[] = [];
   const progress = { next_trial_index: 0, n_attempts: 0, n_accepted: 0 };
   let status: SessionRecord['status'] = 'completed';
-  let lastBlock: number | null = null;
-  perf += between(5_000, 15_000); // first block intro
 
-  const runAttempt = async (planned: PlannedTrial, attempt: number): Promise<TrialRecord> => {
-    const aRng = makeRng(seedOf(o.seed, SALT.attempt, i, planned.trial_index, attempt));
+  const runAttempt = async (
+    block: PlannedBlock,
+    planned: PlannedTrial,
+    attempt: number,
+    flags: AttemptFlags,
+    discarded: number,
+  ): Promise<{ raw: TrialRecord; info: AttemptInfo }> => {
+    // a re-run after a discarded run (never reached GO) keeps the attempt number but draws anew
+    const aRng = makeRng(
+      discarded === 0
+        ? seedOf(o.seed, SALT.attempt, i, planned.trial_index, attempt)
+        : seedOf(o.seed, SALT.attempt, i, planned.trial_index, attempt, discarded),
+    );
     const trialId = seededUuid(aRng);
     const u = aRng();
-    const behavior: SimBehavior = u < o.failureRate / 2 ? 'no_move' : u < o.failureRate ? 'false_start' : 'normal';
-    perf += 1000 + 2000 * aRng(); // reads the instruction, taps Ready
+    const behavior: SimBehavior =
+      u < o.failureRate / 2 ? 'no_move' : u < o.failureRate ? 'false_start' : u < o.failureRate + o.swayRate ? 'sway' : 'normal';
+    const simSeed = uint32(aRng);
+    const late = aRng() < o.lateReturnRate;
+    const lateDelay = LATE_RETURN_MIN_MS + (LATE_RETURN_MAX_MS - LATE_RETURN_MIN_MS) * aRng();
     const src = createSimulatedSource({
       mode: 'offline',
       participant,
       platform,
-      condition: planned.condition,
-      seed: uint32(aRng),
+      condition: planned.condition, // a choice trial is performed with the participant's own hand
+      seed: simSeed,
       behavior,
       startTime: perf,
       baseEpochMs: timeOrigin,
+      startAtNose: flags.awaitReturn,
+      returnDelayMs: late ? lateDelay : undefined,
     });
+    const detection = detectionCalibration(calibration, engine, startedAt);
     // = sessionFlow.buildTrialOptions
     const ctrl = createTrialController({
       source: src,
@@ -596,44 +810,140 @@ async function generateSession(o: ResolvedDatasetOptions, d: ParticipantDesign, 
       },
       condition: planned.condition,
       params: resolveParams(o.segmentationParams, planned.condition),
-      calibration,
+      calibration: detection,
       rng: makeRng(appTrialSeed(sessionSeed, planned.trial_index, attempt)),
       appVersion: APP_VERSION,
       simulated: src.kind === 'simulated',
       getScreenOrientation: PORTRAIT,
       isHidden: NOT_HIDDEN,
+      awaitReturn: flags.awaitReturn,
+      readyCue: flags.readyCue,
+      gripGate: flags.gripGate && planned.condition.orientation !== 'free' && (detection?.gravity_sign ?? null) !== null,
     });
     const t0 = src.clock.now();
     await ctrl.start();
     const raw = await ctrl.result;
-    // sessionFlow.applyDecision(accept) for a complete trial, asFailedAttempt(record, null) otherwise
-    const accepted = raw.outcome.status === 'complete';
-    const record: TrialRecord = { ...raw, outcome: { ...raw.outcome, accepted, participant_flag: null, note: null } };
-    attempts.push({ trial_id: trialId, trial_index: planned.trial_index, attempt, behavior, t0, truth: { ...src.truth } });
-    // review (complete) or the failure notice, then the decision tap
-    perf = t0 + raw.timing.stop_ms + (accepted ? 2000 + 4000 * aRng() : 2500 + 2500 * aRng());
-    return record;
+    perf = t0 + raw.timing.stop_ms;
+    const info: AttemptInfo = {
+      trial_id: trialId,
+      trial_index: planned.trial_index,
+      attempt,
+      behavior,
+      late_return: late,
+      start_at_nose: flags.awaitReturn,
+      flags,
+      hand: src.performed.hand,
+      t0,
+      truth: { ...src.truth },
+    };
+    return { raw, info };
   };
 
-  outer: for (const planned of flat) {
-    if (lastBlock !== null && planned.block_index !== lastBlock) perf += between(15_000, 45_000); // break + intro
-    lastBlock = planned.block_index;
-    for (let attempt = 1; ; attempt++) {
-      const record = await runAttempt(planned, attempt);
-      trials.push(record);
-      // = sessionFlow.saveAttempt for a new attempt
-      progress.n_attempts += 1;
-      if (record.outcome.accepted) {
-        progress.n_accepted += 1;
-        progress.next_trial_index = Math.min(flat.length, Math.max(progress.next_trial_index, planned.trial_index + 1));
-        break;
-      }
-      if (attempt >= o.maxAttemptsPerTrial) {
-        status = 'abandoned';
-        break outer;
+  /** = sessionFlow.saveAttempt for a new attempt (plus the implicit calibration update). */
+  const save = (record: TrialRecord, info: AttemptInfo): void => {
+    trials.push(record);
+    attempts.push(info);
+    progress.n_attempts += 1;
+    if (record.outcome.accepted) {
+      progress.n_accepted += 1;
+      progress.next_trial_index = Math.min(flat.length, Math.max(progress.next_trial_index, record.trial_index + 1));
+    }
+    calibration = withUprightHold(calibration, record, engine);
+  };
+
+  // the first block starts from the How-to card ("Try it once") or, in tap mode, its intro
+  perf += auto ? between(10_000, 25_000) : between(5_000, 15_000);
+  let lastBlock: PlannedBlock | null = null;
+  outer: for (const block of plan) {
+    if (block.trials.length === 0) continue;
+    if (isOptionalBlock(block) && !takesBonus) break; // Finish at the checkpoint
+    if (lastBlock !== null) {
+      if (isOptionalBlock(block) && !isOptionalBlock(lastBlock)) perf += between(3_000, 6_000); // checkpoint: Bonus
+      perf += auto ? between(4_000, 8_000) : between(15_000, 45_000); // block intro (v1: break + intro)
+    }
+    lastBlock = block;
+    let chained = false; // the block intro is a tap: its first attempt plays the 'ready' cue
+    let awaitReturn = false;
+    let failuresInRow = 0;
+    for (const planned of block.trials) {
+      let discarded = 0;
+      for (let attempt = 1; ; attempt++) {
+        if (!auto) perf += 1000 + 2000 * calRng(); // reads the instruction, taps Ready
+        const flags: AttemptFlags = auto
+          ? { readyCue: !chained, awaitReturn, gripGate: true }
+          : { readyCue: true, awaitReturn: false, gripGate: false };
+        const { raw, info } = await runAttempt(block, planned, attempt, flags, discarded);
+        if (raw.timing.go_ms === null) {
+          // never reached GO (a gate that never opened): the app pauses and discards the run unsaved
+          // (sessionFlow); after Continue the same attempt number runs again. Not expected from the
+          // simulator; bounded like failures.
+          discarded++;
+          if (discarded >= o.maxAttemptsPerTrial) {
+            status = 'abandoned';
+            break outer;
+          }
+          attempt--;
+          chained = false;
+          awaitReturn = false;
+          failuresInRow = 0;
+          perf += between(3_000, 8_000);
+          continue;
+        }
+        let record: TrialRecord;
+        if (auto) {
+          record = autoDecisionLikeApp(raw);
+          if (block.kind === 'choice' && raw.outcome.status === 'complete') {
+            perf += between(2_000, 4_000); // the hand question
+            record = withReportedHandLikeApp(record, info.hand);
+          }
+        } else {
+          // sessionFlow.applyDecision(accept) for a complete trial, asFailedAttempt(record, null) otherwise
+          const accepted = raw.outcome.status === 'complete';
+          record = { ...raw, outcome: { ...raw.outcome, accepted, participant_flag: null, note: null } };
+          if (block.kind === 'choice' && accepted) record = withReportedHandLikeApp(record, info.hand);
+          perf += accepted ? 2000 + 4000 * calRng() : 2500 + 2500 * calRng(); // review or failure notice, then a tap
+        }
+        save(record, info);
+        if (record.outcome.accepted) {
+          failuresInRow = 0;
+          chained = true;
+          awaitReturn = auto && returnMissed(raw);
+          if (auto) perf += between(30, 150); // saved in the background; the next attempt starts at once
+          break;
+        }
+        if (attempt >= o.maxAttemptsPerTrial) {
+          status = 'abandoned';
+          break outer;
+        }
+        if (!auto) continue;
+        if (raw.outcome.status === 'complete') {
+          // auto_reject:orientation: the same trial again at once (the UI shows the grip hint)
+          chained = true;
+          awaitReturn = returnMissed(raw);
+          perf += between(30, 150);
+          continue;
+        }
+        // no_movement / too_long / interrupted: the reason shows ~1.5 s, then the trial re-runs;
+        // the second failure in a row opens the pause sheet (Continue is a tap)
+        failuresInRow++;
+        awaitReturn = false;
+        if (failuresInRow >= 2) {
+          failuresInRow = 0;
+          chained = false;
+          perf += between(3_000, 8_000);
+        } else {
+          chained = true;
+          perf += 1500;
+        }
       }
     }
+    if (stopAfterBlock === block.block_index) {
+      status = 'ended_early';
+      perf += between(1_000, 3_000); // the pause sheet's "Finish now"
+      break;
+    }
   }
+  if (status === 'completed') perf += between(1_000, 4_000); // the last tap (Finish)
   const endedAt = at(perf);
 
   const session: SessionRecord = {
@@ -667,6 +977,7 @@ async function generateSession(o: ResolvedDatasetOptions, d: ParticipantDesign, 
       audio: true,
       speech: true,
       segmentation_params: { ...o.segmentationParams },
+      review_mode: o.reviewMode,
     },
     progress,
     consent: { version: config.consent_version, accepted_at: consentAt },
@@ -674,7 +985,7 @@ async function generateSession(o: ResolvedDatasetOptions, d: ParticipantDesign, 
     simulated: true,
     notes: `synthetic (sim/dataset.ts): seed ${o.seed}, participant ${i + 1} of ${o.participants}, ${d.platform}-like, dominant hand ${d.dominant}`,
   };
-  return { design: d, sim: { participant, platform }, profile, session, trials, attempts };
+  return { design: d, sim: { participant, platform }, profile, session, trials, attempts, bonus: hasOptional ? takesBonus : null };
 }
 
 /** Yields one participant's session at a time (keeps memory flat for large datasets). */
@@ -713,17 +1024,31 @@ export interface SessionSummary {
   /** attempts the simulator performed with each behaviour */
   behaviors: Partial<Record<SimBehavior, number>>;
   gravity_sign: 1 | -1 | null;
+  /** complete attempts rejected for the grip ('auto_reject:orientation') */
+  n_orientation_rejects: number;
+  /** complete attempts in which the return of the arm was not seen */
+  n_return_missed: number;
+  /** street: bonus taken at the checkpoint (null without optional blocks) */
+  bonus: boolean | null;
+  /** wall-clock minutes from started_at to ended_at */
+  minutes: number;
 }
 
 export function summarizeSession(s: SyntheticSession): SessionSummary {
   const statuses: Record<TrialStatus, number> = { complete: 0, no_movement: 0, too_long: 0, aborted: 0, interrupted: 0 };
   let falseStarts = 0;
+  let rejects = 0;
+  let missed = 0;
   for (const t of s.trials) {
     statuses[t.outcome.status] += 1;
     falseStarts += t.timing.false_starts;
+    if (t.outcome.note === AUTO_REJECT_ORIENTATION_NOTE) rejects++;
+    if (returnMissed(t)) missed++;
   }
   const behaviors: Partial<Record<SimBehavior, number>> = {};
   for (const a of s.attempts) behaviors[a.behavior] = (behaviors[a.behavior] ?? 0) + 1;
+  const started = Date.parse(s.session.started_at);
+  const ended = Date.parse(s.session.ended_at ?? s.session.updated_at);
   return {
     participant_id: s.session.participant_id,
     session_id: s.session.session_id,
@@ -742,5 +1067,9 @@ export function summarizeSession(s: SyntheticSession): SessionSummary {
     false_starts: falseStarts,
     behaviors,
     gravity_sign: s.session.calibration?.gravity_sign ?? null,
+    n_orientation_rejects: rejects,
+    n_return_missed: missed,
+    bonus: s.bonus,
+    minutes: Math.round((ended - started) / 6000) / 10,
   };
 }

@@ -1,7 +1,9 @@
 /**
- * Settings: language, cue options, simulation mode (testing only, never remembered), the
- * researcher's upload override with a connection test, the active configuration and "Reset this
- * device". Also exports the small upload/confirm helpers shared by the other onboarding/admin screens.
+ * Settings: language, cue options, simulation mode (testing only, never remembered), the researcher's
+ * session switches (choose the session on the setup screen = ?setup=1, never remembered; review every
+ * trial with a tap = LocalSettings.review_each_trial), the researcher's upload override with a
+ * connection test, the active configuration and "Reset this device". Also exports the small
+ * upload/confirm helpers shared by the other onboarding/admin screens.
  */
 import { useState } from 'preact/hooks';
 import { effectiveUpload } from '../../core/config';
@@ -10,6 +12,7 @@ import type { Language, UploadConfig, UploadMode } from '../../core/types';
 import { LANGUAGES, useStrings, type Strings } from '../../i18n';
 import { Button, Card, ChoiceGroup, Field, Notice, Screen, Stat, TextInput, Toggle } from '../../ui/components';
 import '../../ui/onboarding.css';
+import { resetSensorCheck } from '../sensorCheck';
 import { getServices } from '../services';
 import type { AppState, LocalSettings } from '../state';
 import { getState, goBack, navigate, setState, showToast, updateSettings, useAppState } from '../store';
@@ -188,7 +191,13 @@ export function SettingsScreen() {
     updateSettings({ simulate: on });
     // A sensor measurement or calibration made with the other source must not carry over into the
     // next session (it would describe a different "device").
+    resetSensorCheck();
     setState({ calibration: null, capabilities: caps ? { ...caps, measured: null } : caps });
+  };
+
+  const onReviewEachTrial = (on: boolean) => {
+    if (sessionRunning) return; // the running session keeps the review mode it started with
+    updateSettings({ review_each_trial: on });
   };
 
   const onSave = () => {
@@ -227,6 +236,7 @@ export function SettingsScreen() {
     setResetting(true);
     try {
       await getServices().store.clearAll();
+      resetSensorCheck();
       updateSettings({ last_participant_id: null });
       setState({
         participant: null,
@@ -281,6 +291,23 @@ export function SettingsScreen() {
           onChange={onSimulate}
           label={t.simulate}
           hint={sessionRunning ? t.simulateLocked : t.simulateHint}
+        />
+      </Card>
+
+      <Card title={t.sessionTitle} testId="researcher-session">
+        <Toggle
+          testId="chk-setup-mode"
+          checked={st.setupRequested}
+          onChange={(setupRequested) => setState({ setupRequested })}
+          label={t.setupMode}
+          hint={t.setupModeHint}
+        />
+        <Toggle
+          testId="chk-review-each-trial"
+          checked={settings.review_each_trial}
+          onChange={onReviewEachTrial}
+          label={t.reviewEachTrial}
+          hint={sessionRunning ? t.simulateLocked : t.reviewEachTrialHint}
         />
       </Card>
 

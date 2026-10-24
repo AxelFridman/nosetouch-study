@@ -1,76 +1,171 @@
 /**
- * Small phone viewports: what the participant must follow is on screen above the sticky footer
- * button, without scrolling. 360×640 is a small Android phone, 390×664 the visible viewport of an
- * iPhone 12–15 in Safari. The trial has the longest instruction of the main blocks (sideways and
- * facing away × fast × in line with the shoulder). Screenshots go to LAYOUT_DIR (default
- * test-results/layout). data-testid selectors only; texts come from the string tables.
+ * Small phone viewports, English and Hebrew: the v2 cards fit 360×640 (a small Android phone) and
+ * 390×664 (the visible viewport of an iPhone 12–15 in Safari). What the participant must see or tap
+ * is on screen without scrolling — above the sticky footer button where there is one — and no page
+ * ever scrolls sideways. The live panel (read at arm's length, no free hand to scroll) must not
+ * scroll at all. The checkpoint card is checked at both sizes by the full journeys (flow.spec.ts in
+ * English, rtl.spec.ts in Hebrew). Screenshots go to LAYOUT_DIR (default test-results/layout).
+ * Sideways grips may rotate the page, so a sideways block also runs in landscape. data-testid selectors
+ * only; the only grip tile used is top_left_toward (never *_away).
  */
 import { mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
-import { expect, test, type Locator } from '@playwright/test';
-import { en } from '../src/i18n/en';
-import { he } from '../src/i18n/he';
-import { chooseCustomProtocol, onboardToSetup, tapFresh } from './helpers';
+import type { Page } from '@playwright/test';
+import { expect, test } from './fixtures';
+import {
+  chooseCustomProtocol,
+  currentView,
+  expectAbove,
+  expectInViewport,
+  expectNoHorizontalScroll,
+  expectNoVerticalScroll,
+  fillProfile,
+  onboard,
+  openApp,
+  setToggle,
+  SMALL_VIEWPORTS,
+  tapFresh,
+  watchErrors,
+} from './helpers';
 
 const DIR = process.env.LAYOUT_DIR ?? 'test-results/layout';
-const VIEWPORTS = [
-  { width: 360, height: 640 },
-  { width: 390, height: 664 },
-];
-const STRINGS = { en, he };
 
-async function box(l: Locator) {
-  const b = await l.boundingBox();
-  if (!b) throw new Error('element is not rendered');
-  return b;
+/** The live panel: hand and speed words, the status line and the pause control, no scrolling. */
+async function checkLivePanel(page: Page, what: string): Promise<void> {
+  await expect(page.getByTestId('trial-panel')).toBeVisible();
+  for (const id of ['tp-hand', 'tp-speed', 'tp-status', 'btn-pause']) {
+    await expectInViewport(page, page.getByTestId(id), `${what}: ${id}`);
+  }
+  await expectNoVerticalScroll(page, what);
+  await expectNoHorizontalScroll(page, what);
 }
 
-/** `item` lies inside the viewport, entirely above the top edge of `button`. */
-async function expectAbove(item: Locator, button: Locator, what: string): Promise<void> {
-  const a = await box(item);
-  const b = await box(button);
-  expect(a.y, `${what}: top edge`).toBeGreaterThanOrEqual(0);
-  expect(a.y + a.height, `${what}: bottom edge vs the button's top`).toBeLessThanOrEqual(b.y + 0.5);
+/**
+ * Sideways grips (street tier 2) rotate the page when the phone's auto-rotation is on (iOS web pages
+ * cannot lock it): the block intro of a sideways block and its live panel must work in landscape too.
+ * 640×360: a small Android phone turned; 844×350: an iPhone 12–15 turned, Safari's bars included.
+ */
+const LANDSCAPE = [
+  { width: 640, height: 360 },
+  { width: 844, height: 350 },
+] as const;
+
+for (const lang of ['en', 'he'] as const) {
+  test(`sideways blocks in landscape: block intro and live panel (${lang})`, async ({ page }) => {
+    test.setTimeout(4 * 60_000);
+    const errors = watchErrors(page);
+    const out = join(DIR, `${lang}-landscape`);
+    await mkdir(out, { recursive: true });
+    await openApp(page, { lang, setup: true });
+    await onboard(page, { until: 'setup' });
+    // one sideways trial per hand (researchers' custom plan)
+    await chooseCustomProtocol(page, { orientations: ['top_left_toward'], speeds: ['natural'], starts: ['natural'] });
+    await tapFresh(page, page.getByTestId('btn-start-session'));
+    for (const [i, vp] of LANDSCAPE.entries()) {
+      const start = page.getByTestId('btn-block-start');
+      await expect(start).toBeVisible({ timeout: 45_000 });
+      await page.setViewportSize(vp); // the participant turns the phone sideways while reading the intro
+      await page.evaluate(() => window.scrollTo(0, 0));
+      const what = `${vp.width}×${vp.height}`;
+      await expectInViewport(page, start, `block intro ${what}: Start`);
+      await expectInViewport(page, page.getByTestId('intro-hand'), `block intro ${what}: hand`);
+      await expectNoHorizontalScroll(page, `block intro ${what}`);
+      await page.screenshot({ path: join(out, `${i + 1}a-intro-${vp.width}x${vp.height}.png`) });
+      await tapFresh(page, start);
+      await checkLivePanel(page, `live panel ${what}`);
+      await page.screenshot({ path: join(out, `${i + 1}b-live-${vp.width}x${vp.height}.png`) });
+    }
+    await expect(page.getByTestId('screen-done')).toBeVisible({ timeout: 45_000 });
+    await expectInViewport(page, page.getByTestId('btn-next-person'), 'done (landscape): Next person');
+    expect(errors.pageErrors, errors.pageErrors.join('\n')).toEqual([]);
+  });
 }
 
-for (const vp of VIEWPORTS) {
+for (const vp of SMALL_VIEWPORTS) {
   test.describe(`${vp.width}×${vp.height}`, () => {
     test.use({ viewport: vp });
 
     for (const lang of ['en', 'he'] as const) {
-      test(`instructions stay above the sticky button (${lang})`, async ({ page }) => {
+      test(`the v2 cards fit without scrolling (${lang})`, async ({ page }) => {
+        test.setTimeout(4 * 60_000);
+        const errors = watchErrors(page);
         const out = join(DIR, `${lang}-${vp.width}x${vp.height}`);
         await mkdir(out, { recursive: true });
         const shot = (name: string) => page.screenshot({ path: join(out, `${name}.png`) });
 
-        await onboardToSetup(page, lang);
-        await chooseCustomProtocol(page, { orientations: ['top_right_away'], speeds: ['fast'], starts: ['shoulder'] });
+        // welcome + consent: the checkbox and Start in the sticky footer
+        await openApp(page, { lang });
+        await expectInViewport(page, page.getByTestId('btn-start'), 'welcome: Start');
+        await expectInViewport(page, page.getByTestId('chk-consent'), 'welcome: consent checkbox');
+        await expectNoHorizontalScroll(page, 'welcome');
+        await shot('1-welcome');
+        await setToggle(page.getByTestId('chk-consent'), true);
+        await tapFresh(page, page.getByTestId('btn-start'));
+
+        // profile
+        await expect(page.getByTestId('screen-profile')).toBeVisible();
+        await fillProfile(page);
         await page.evaluate(() => window.scrollTo(0, 0));
-        const start = page.getByTestId('btn-start-session');
-        await expectAbove(page.getByTestId('safety-note'), start, 'setup safety note');
-        await shot('1-setup');
+        await expectInViewport(page, page.getByTestId('btn-save-profile'), 'profile: Continue');
+        await expectInViewport(page, page.getByTestId('in-name'), 'profile: name');
+        await expectNoHorizontalScroll(page, 'profile');
+        await shot('2-profile');
+        await tapFresh(page, page.getByTestId('btn-save-profile'));
 
-        await tapFresh(page, start);
-        const blockStart = page.getByTestId('btn-block-start');
-        await expect(blockStart).toBeVisible();
-        await expectAbove(page.getByTestId('intro-safety'), blockStart, 'block intro safety notice');
-        await shot('2-intro');
+        // How-to card: the animation starts on screen, "Try it once" in the footer
+        await expect(page.getByTestId('howto-card')).toBeVisible({ timeout: 20_000 });
+        const demo = (await page.getByTestId('gesture-demo').boundingBox())!;
+        expect(demo.y, 'How-to: the animation starts on screen').toBeLessThan(vp.height * 0.6);
+        await expectInViewport(page, page.getByTestId('btn-try'), 'How-to: Try it once');
+        await expectNoHorizontalScroll(page, 'How-to card');
+        await shot('3-howto');
+        await tapFresh(page, page.getByTestId('btn-try'));
 
-        await tapFresh(page, blockStart);
-        const ready = page.getByTestId('btn-ready');
-        await expect(ready).toBeEnabled();
-        for (const row of ['instr-phone', 'instr-speed', 'instr-start', 'instr-movement']) {
-          await expectAbove(page.getByTestId(row), ready, row);
+        // the free trial's live panel
+        await checkLivePanel(page, 'live panel (free trial)');
+        await shot('4-live-free');
+
+        // hand question: both hand buttons and "not sure" on screen
+        await expect(page.getByTestId('hand-report')).toBeVisible({ timeout: 45_000 });
+        for (const id of ['btn-hand-left', 'btn-hand-right', 'btn-hand-unsure']) {
+          await expectInViewport(page, page.getByTestId(id), `hand question: ${id}`);
         }
-        await expect(page.getByTestId('ready-figure')).toBeHidden(); // short viewport: no figure
-        await shot('3-ready');
+        await expectNoHorizontalScroll(page, 'hand question');
+        await shot('5-hand');
+        await tapFresh(page, page.getByTestId('btn-hand-right'));
 
-        // the live panel names the start position next to the speed
-        await tapFresh(page, ready);
-        const s = STRINGS[lang].common;
-        await expect(page.getByTestId('tp-condition')).toContainText(s.startPositions.shoulder.label);
-        await expect(page.getByTestId('tp-condition')).toContainText(s.speeds.fast.label);
-        await shot('4-recording');
+        // block intro: the hand instruction above the Start button that names the hand
+        const start = page.getByTestId('btn-block-start');
+        await expect(start).toBeVisible();
+        await expectInViewport(page, start, 'block intro: Start');
+        await expectAbove(page, page.getByTestId('intro-hand'), start, 'block intro: hand');
+        await expectNoHorizontalScroll(page, 'block intro');
+        await shot('6-intro');
+        await tapFresh(page, start);
+
+        // a block trial's live panel
+        await expect.poll(async () => (await currentView(page))?.trial ?? null).not.toBeNull();
+        await checkLivePanel(page, 'live panel (block trial)');
+        await shot('7-live');
+
+        // pause sheet (system back): Continue and Finish now reachable without scrolling
+        await page.goBack();
+        await expect(page.getByTestId('pause-sheet')).toBeVisible({ timeout: 10_000 });
+        for (const id of ['pause-reason', 'btn-continue-session', 'btn-finish-now']) {
+          await expectInViewport(page, page.getByTestId(id), `pause sheet: ${id}`);
+        }
+        await expectNoHorizontalScroll(page, 'pause sheet');
+        await shot('8-pause');
+        await tapFresh(page, page.getByTestId('btn-finish-now'));
+
+        // done: thanks, the count and "Next person"
+        await expect(page.getByTestId('screen-done')).toBeVisible({ timeout: 30_000 });
+        for (const id of ['done-thanks', 'stat-accepted', 'btn-next-person']) {
+          await expectInViewport(page, page.getByTestId(id), `done: ${id}`);
+        }
+        await expectNoHorizontalScroll(page, 'done');
+        await shot('9-done');
+        expect(errors.pageErrors, errors.pageErrors.join('\n')).toEqual([]);
       });
     }
   });

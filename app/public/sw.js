@@ -6,7 +6,11 @@
  *
  * What it handles (everything else goes to the network untouched):
  *  - navigations           network first, so every deploy is picked up; the cached index.html when
- *                          the network fails or stalls for NAV_TIMEOUT_MS
+ *                          the network fails or stalls for NAV_TIMEOUT_MS. The network request
+ *                          revalidates the browser's HTTP cache (cache: 'no-cache'; a cheap 304 when
+ *                          nothing changed): GitHub Pages serves index.html with max-age=600, and a
+ *                          page opened within 10 minutes of the previous visit would otherwise get the
+ *                          old index.html from the HTTP cache after a deploy
  *  - ./assets/*            cache first: Vite puts a content hash in these file names, so a cached
  *                          copy can never be stale (matched ignoring Vary, see cacheFirst)
  *  - ./config.json         network first (study settings change without a rebuild); the last copy
@@ -26,12 +30,18 @@
  * optional: a deployment without config.json still installs, since the app then uses its defaults
  * anyway. skipWaiting + clients.claim make a new worker take over at once; that is safe because
  * navigations are network first and older hashed assets stay cached.
- * CACHE_VERSION: bump it only when this file's caching scheme changes (activate then deletes the old
- * caches). App releases need no bump.
+ * CACHE_VERSION: bump it when this file's caching scheme changes, or when a release must never start
+ * from an older cached shell (activate then deletes the old caches; the browser installs a changed
+ * sw.js at the next visit: register() checks the worker script without the HTTP cache). Other app
+ * releases need no bump.
+ *  - 1: app 0.1.x.
+ *  - 2: app 0.2.0 (the "street" visit): navigations revalidate the HTTP cache, and the v0.1 shell is
+ *       dropped, so a phone that starts offline or on a stalled network after the v0.2.0 deploy never
+ *       falls back to the v0.1 flow (calibration, long profile).
  */
 'use strict';
 
-const CACHE_VERSION = 1;
+const CACHE_VERSION = 2;
 const CACHE_PREFIX = 'nosetouch-';
 const SCOPE = self.registration.scope; // absolute URL ending in '/'
 const SCOPE_PATH = new URL(SCOPE).pathname;
@@ -98,6 +108,21 @@ async function storeIndex(res) {
   if (await cacheAssets(cache, await res.clone().text())) await cache.put(INDEX_URL, await storable(res));
 }
 
+/**
+ * The navigation request with cache: 'no-cache': the browser revalidates its HTTP cache with the
+ * server (If-None-Match / If-Modified-Since) instead of reusing a copy that is still "fresh" by
+ * max-age, so a deploy shows at the next start. Mode and redirect handling stay those of the original
+ * (a Request built from a navigation becomes same-origin, which a same-origin page is). The original
+ * request when a browser refuses to build it.
+ */
+function revalidating(req) {
+  try {
+    return new Request(req, { cache: 'no-cache' });
+  } catch (e) {
+    return req;
+  }
+}
+
 // ───────────────────────────── lifecycle ─────────────────────────────
 
 self.addEventListener('install', (event) => {
@@ -151,7 +176,7 @@ self.addEventListener('fetch', (event) => {
     const path = appPath(url);
     // only the app's own page refreshes the cached copy (a 404 page or another document must not)
     const own = path === '' || path === 'index.html';
-    event.respondWith(networkFirst(event, [INDEX_URL, SCOPE], NAV_TIMEOUT_MS, own ? storeIndex : null));
+    event.respondWith(networkFirst(event, [INDEX_URL, SCOPE], NAV_TIMEOUT_MS, own ? storeIndex : null, revalidating(req)));
     return;
   }
   const path = appPath(url);
@@ -188,10 +213,11 @@ async function cacheFirst(event) {
  * The network's answer when it arrives within `timeoutMs`; otherwise (or when it fails) the cached
  * copy under the first of `keys` that exists. A fresh 200 answer is handed to `store` (when given),
  * also when it arrives late. Without any cached copy the page simply waits for the network (or gets
- * its error), as it would without a service worker.
+ * its error), as it would without a service worker. `request`: what goes to the network (default:
+ * the page's own request).
  */
-function networkFirst(event, keys, timeoutMs, store) {
-  const network = fetch(event.request);
+function networkFirst(event, keys, timeoutMs, store, request) {
+  const network = fetch(request || event.request);
   // Registered before the page's handler below, so clone() runs before the body is consumed.
   const update = network.then((res) => (store && isFresh200(res) ? store(res.clone()) : undefined));
   event.waitUntil(update.catch(noop));

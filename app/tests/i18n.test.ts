@@ -118,14 +118,14 @@ const DATE = new Date(Date.UTC(2026, 0, 2, 3, 4, 5));
 const APP_UNIONS: string[][] = [
   // TrialMessage, TrialPhase, SensorError['code'], UploadMode, OutboxItem['status'], ScreenFacing,
   // toast kind, ScreenId
-  ['hold_still', 'too_early', 'go', 'moving', 'hold_at_nose', 'done', 'no_movement', 'too_long', 'sensor_stalled'],
-  ['waiting_still', 'foreperiod', 'armed', 'moving', 'post_roll', 'done'],
+  ['hold_still', 'too_early', 'go', 'moving', 'hold_at_nose', 'done', 'no_movement', 'too_long', 'sensor_stalled', 'return_arm', 'wrong_grip'],
+  ['waiting_still', 'foreperiod', 'armed', 'moving', 'post_roll', 'returning', 'done'],
   ['not_supported', 'permission_denied', 'insecure_context', 'no_events', 'sensor_error'],
   ['apps_script', 'json_post', 'none'],
   ['pending', 'sent', 'failed'],
   ['toward', 'away', 'up'],
   ['info', 'ok', 'warn', 'error'],
-  ['loading', 'welcome', 'consent', 'profile', 'sensors', 'calibration', 'setup', 'session', 'done', 'data', 'settings', 'sandbox', 'about'],
+  ['loading', 'welcome', 'profile', 'sensors', 'setup', 'session', 'done', 'data', 'settings', 'sandbox', 'about'],
 ];
 
 function schemaEnumValues(node: unknown, out: Set<string>): Set<string> {

@@ -212,6 +212,57 @@ describe('mirrorTrial', () => {
     }
   });
 
+  it('schema 1.2 streams: absolute orientation / quaternion like their relative twins, magnetometer x negated, screen events reflected', () => {
+    const cond = condition({ hand: 'right', orientation: 'top_left_toward' });
+    const base = trialFromCollected(run(cond, 37), cond);
+    const o = base.streams.orientation!;
+    const q = base.streams.quaternion!;
+    const trial = structuredClone(base);
+    trial.streams.orientation_abs = { ...structuredClone(o), absolute: true, compass: o.t.map((_, i) => (i % 2 ? 90.5 : null)), compass_accuracy: o.t.map(() => 12) };
+    trial.streams.quaternion_abs = { ...structuredClone(q), sensor: 'AbsoluteOrientationSensor' };
+    trial.streams.magnetometer = { t: [5, 21.5], x: [20.5, null], y: [-30, -29.5], z: [15.25, 14], frequency_hz: 60 };
+    trial.streams.screen_events = [
+      { t: 100, type: 'landscape-primary', angle: 90 },
+      { t: 200, type: 'portrait-primary', angle: 0 },
+      { t: 300, type: null, angle: null },
+    ];
+    trial.streams.touches = [{ t: 1200, type: 'start', n: 1, x: 100, y: 200, radius_x: 10, radius_y: 8, force: 0.5, rotation_angle: 20, x_norm: 0.25, y_norm: 0.3 }];
+    expectValid('TrialRecord', trial);
+    const m = mirrorTrial(trial);
+    expectValid('TrialRecord', m);
+    const ma = m.streams.orientation_abs!;
+    const mo = m.streams.orientation!;
+    expect(ma.absolute).toBe(true);
+    expect(ma.compass).toEqual(o.t.map((_, i) => (i % 2 ? 269.5 : null)));
+    expect(ma.compass_accuracy).toEqual(o.t.map(() => 12)); // an uncertainty, not a direction
+    for (let i = 0; i < o.t.length; i++) {
+      // the same angles as the mirrored relative stream (they were copies before mirroring)
+      expect([ma.alpha[i], ma.beta[i], ma.gamma[i]]).toEqual([mo.alpha[i], mo.beta[i], mo.gamma[i]]);
+    }
+    const mq = m.streams.quaternion_abs!;
+    expect(mq.sensor).toBe('AbsoluteOrientationSensor');
+    expect(mq.x).toEqual(q.x);
+    expect(mq.y).toEqual(q.y.map((v) => -v));
+    expect(mq.z).toEqual(q.z.map((v) => -v));
+    expect(mq.w).toEqual(q.w);
+    expect(m.streams.magnetometer).toEqual({ t: [5, 21.5], x: [-20.5, null], y: [-30, -29.5], z: [15.25, 14], frequency_hz: 60 });
+    expect(m.streams.screen_events).toEqual([
+      { t: 100, type: 'landscape-secondary', angle: 270 },
+      { t: 200, type: 'portrait-primary', angle: 0 },
+      { t: 300, type: null, angle: null },
+    ]);
+    expect(m.streams.touches).toEqual(trial.streams.touches); // touches are not mirrored
+    // involution: exact for everything but the Euler angles (compared as rotations above)
+    const back = mirrorTrial(m);
+    expect(back.streams.quaternion_abs).toEqual(trial.streams.quaternion_abs);
+    expect(back.streams.magnetometer).toEqual(trial.streams.magnetometer);
+    expect(back.streams.screen_events).toEqual(trial.streams.screen_events);
+    expect(back.streams.orientation_abs?.compass).toEqual(trial.streams.orientation_abs.compass);
+    // older records without the schema 1.2 streams stay without them
+    const old = mirrorTrial(base);
+    expect('orientation_abs' in old.streams || 'magnetometer' in old.streams || 'screen_events' in old.streams).toBe(false);
+  });
+
   it('is an involution', () => {
     const cond = condition({ hand: 'left', orientation: 'upright_away', speed: 'fast' });
     const trial = trialFromCollected(run(cond, 123), cond);

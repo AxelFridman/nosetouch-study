@@ -1,12 +1,12 @@
 {
   "study_code": "nose-touch-v1",
   "upload": {
-    "mode": "none",
-    "endpoint": "",
-    "study_key": ""
+    "mode": "json_post",
+    "endpoint": "https://nosetouch-study-14d4b1cd9830.herokuapp.com/api/ingest",
+    "study_key": "nt-amef2sil3m"
   },
-  "upload_nickname": false,
-  "consent_version": "2026-10-v1",
+  "upload_nickname": true,
+  "consent_version": "2026-10-v2",
   "contact": {
     "name": "",
     "email": ""
@@ -20,6 +20,6 @@
     "he": ""
   },
   "default_language": "en",
-  "default_preset": "standard",
+  "default_preset": "street",
   "min_age": 18
 }

@@ -1,16 +1,18 @@
 /**
- * Visual QA: walks the simulated journey and saves a screenshot of every screen.
- * Opt-in (not part of the normal e2e run):
+ * Visual QA: walks a whole simulated street visit and saves a screenshot of every screen and card
+ * (welcome + consent, profile, How-to card, live panel phases, hand question, every block intro, pause
+ * sheet, checkpoint, done, and the menu screens). Opt-in (not part of the normal e2e run):
  *   SCREENS=1 SCREENS_LANGS=en,he SCREENS_DIR=<folder> SCREENS_VIEWPORT=360x640 npx playwright test e2e/screens.spec.ts
  * Defaults: languages "en", folder test-results/screens, the Pixel 7 viewport of the project.
- * Screenshots are full-page; e2e/layout.spec.ts checks what is visible above the sticky buttons.
+ * Screenshots are full-page; e2e/layout.spec.ts checks what is visible without scrolling.
  */
 import { mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
-import { expect, test, type Page } from '@playwright/test';
-import { chooseTwoTrialProtocol, disableWebShare, fillProfile, runCalibrationStep, runTrial, tapFresh } from './helpers';
+import type { Page } from '@playwright/test';
+import { expect, test } from './fixtures';
+import { disableWebShare, fillProfile, openApp, runSession, setToggle, tapFresh, watchErrors } from './helpers';
 
-const LANGS = (process.env.SCREENS_LANGS ?? 'en').split(',').map((s) => s.trim()).filter(Boolean);
+const LANGS = (process.env.SCREENS_LANGS ?? 'en').split(',').map((s) => s.trim()).filter(Boolean) as ('en' | 'he')[];
 const DIR = process.env.SCREENS_DIR ?? 'test-results/screens';
 const VIEWPORT = /^(\d+)x(\d+)$/.exec(process.env.SCREENS_VIEWPORT ?? '');
 if (VIEWPORT) test.use({ viewport: { width: Number(VIEWPORT[1]), height: Number(VIEWPORT[2]) } });
@@ -18,66 +20,69 @@ if (VIEWPORT) test.use({ viewport: { width: Number(VIEWPORT[1]), height: Number(
 for (const lang of LANGS) {
   test(`screenshots (${lang})`, async ({ page }) => {
     test.skip(!process.env.SCREENS, 'set SCREENS=1 to capture screenshots');
-    test.setTimeout(300_000);
+    test.setTimeout(12 * 60_000);
     const out = join(DIR, lang);
     await mkdir(out, { recursive: true });
     let n = 0;
-    const snap = async (name: string): Promise<void> => {
+    const snap = async (name: string, fullPage = true): Promise<void> => {
       n += 1;
-      await page.screenshot({ path: join(out, `${String(n).padStart(2, '0')}-${name}.png`), fullPage: true });
+      await page.screenshot({ path: join(out, `${String(n).padStart(2, '0')}-${name}.png`), fullPage });
     };
-    const errors: string[] = [];
-    page.on('pageerror', (e) => errors.push(e.message));
+    const errors = watchErrors(page);
     await disableWebShare(page);
 
-    await page.goto(`./?sim=1&lang=${lang}`);
-    await expect(page.getByTestId('btn-start')).toBeVisible();
+    await openApp(page, { lang });
     await snap('welcome');
-    await page.getByTestId('btn-start').click();
-    await expect(page.getByTestId('chk-consent')).toBeVisible();
-    await snap('consent');
-    await page.getByTestId('chk-consent').click();
-    await page.getByTestId('btn-consent-accept').click();
+    await page.getByTestId('consent-details').locator('summary').click();
+    await snap('welcome-full-information');
+    await setToggle(page.getByTestId('chk-consent'), true);
+    await tapFresh(page, page.getByTestId('btn-start'));
 
-    await expect(page.getByTestId('in-age')).toBeVisible();
+    await expect(page.getByTestId('screen-profile')).toBeVisible();
     await snap('profile-empty');
     await fillProfile(page);
     await snap('profile-filled');
-    await page.getByTestId('btn-save-profile').click();
+    await tapFresh(page, page.getByTestId('btn-save-profile'));
 
-    await expect(page.getByTestId('btn-request-permission')).toBeVisible();
-    await snap('sensors-before');
-    await page.getByTestId('btn-request-permission').click();
-    await expect(page.getByTestId('btn-continue')).toBeEnabled({ timeout: 30_000 });
-    await snap('sensors-after');
-    await page.getByTestId('btn-continue').click();
+    await expect(page.getByTestId('howto-card')).toBeVisible({ timeout: 20_000 });
+    await snap('howto-card');
+    await tapFresh(page, page.getByTestId('btn-try'));
+    await expect(page.getByTestId('trial-panel')).toBeVisible();
+    await snap('live-free-trial', false);
+    await expect(page.getByTestId('hand-report')).toBeVisible({ timeout: 45_000 });
+    await snap('hand-question');
+    await tapFresh(page, page.getByTestId('btn-hand-right'));
 
-    await expect(page.getByTestId('btn-calibrate-flat')).toBeVisible();
-    await snap('calibration-start');
-    await runCalibrationStep(page, 'btn-calibrate-flat');
-    await runCalibrationStep(page, 'btn-calibrate-upright');
-    await snap('calibration-done');
-    await page.getByTestId('btn-continue').click();
-
-    await expect(page.getByTestId('opt-preset-standard')).toBeVisible();
-    await snap('setup-presets');
-    await chooseTwoTrialProtocol(page);
-    await snap('setup-custom');
-    await tapFresh(page, page.getByTestId('btn-start-session'));
-
-    const nextBlock = page.getByTestId('btn-next-block');
-    const doneScreen = page.getByTestId('screen-done');
-    for (let trial = 0; trial < 2; trial++) {
-      await runTrial(page, trial === 0 ? snap : async () => undefined);
-      await expect(
-        nextBlock.or(page.getByTestId('btn-block-start')).or(page.getByTestId('btn-ready')).or(doneScreen).first(),
-      ).toBeVisible({ timeout: 30_000 });
-      if (await nextBlock.isVisible()) {
-        await snap('block-break');
-        await tapFresh(page, nextBlock);
-      }
-    }
-    await expect(doneScreen).toBeVisible({ timeout: 30_000 });
+    const phases = new Set<string>();
+    let pauseShot = false;
+    await runSession(page, {
+      onIntro: async ({ block, page: p }) => {
+        await snap(`block-intro-${block}`);
+        if (!pauseShot && (await p.getByTestId('intro-encourage').isVisible())) {
+          pauseShot = true;
+          await tapFresh(p, p.getByTestId('btn-session-exit'));
+          await expect(p.getByTestId('pause-sheet')).toBeVisible();
+          await snap('pause-sheet');
+          await tapFresh(p, p.getByTestId('btn-continue-session'));
+          await expect(p.getByTestId('block-intro')).toBeVisible();
+        }
+        return 'start' as const;
+      },
+      onTrial: async ({ phase, page: p }) => {
+        if (phase && !phases.has(phase)) {
+          phases.add(phase);
+          await snap(`live-${phase}`, false);
+        } else {
+          await p.waitForTimeout(80);
+        }
+      },
+      onCheckpoint: async () => {
+        await snap('checkpoint');
+        return 'finish' as const;
+      },
+      deadlineMs: 10 * 60_000,
+    });
+    await expect(page.getByTestId('screen-done')).toBeVisible();
     await snap('done');
 
     await page.getByTestId('btn-home').click();
@@ -101,7 +106,7 @@ for (const lang of LANGS) {
       await snap(name);
       await goHome(page);
     }
-    expect(errors, `uncaught errors in the page:\n${errors.join('\n')}`).toEqual([]);
+    expect(errors.pageErrors, `uncaught errors in the page:\n${errors.pageErrors.join('\n')}`).toEqual([]);
   });
 }
 

@@ -8,9 +8,11 @@ Suggested layout:
 
 ```
 data/
-  synthetic/                regenerated on demand, never edited:  cd app && npm run synth -- --participants 12 --preset standard --out ../analysis/data/synthetic
+  synthetic/                regenerated on demand, never edited:  cd app && npm run synth -- --participants 12 --preset street --out ../analysis/data/synthetic
+  synthetic_v2/             the same for protocol 2.0.0 visits (--preset street)
+  live/                     the Heroku database, replaced by every pull:  python analysis/scripts/pull_live.py
   real/
-    2026-11-20/             a dated, read-only snapshot of the Drive folder (download or Drive for desktop sync)
+    2026-11-20/             a dated, read-only snapshot (copy data/live/ before analysing it)
     exports/                export bundles participants shared from the app (nosetouch_*.json / .json.txt)
     lab/                    copies of server/received/ from lab sessions
 ```
@@ -25,5 +27,8 @@ Rules (docs/02 sections 9-10, docs/06):
 * Synthetic records carry `simulated: true` and the study code `synthetic-v1` (the app) or
   `synthetic-py` (`motionlab.synth`). Filter them out of every real-data analysis
   (`--simulated exclude`).
-* Deletion on request: remove `<study_code>/<participant_id>/` from every snapshot and every derived copy.
-* Share data beyond the lab only without `device.user_agent` and only as the ethics approval allows.
+* Deletion on request: remove `<study_code>/<participant_id>/` from every snapshot and every derived copy
+  (and from the database).
+* From protocol 2.0.0 on the raw records carry the participant's full name (`participant.nickname`). The
+  tables of `motionlab` never include it; never share raw records beyond the lab, and share derived
+  tables only without names and without `device.user_agent`.

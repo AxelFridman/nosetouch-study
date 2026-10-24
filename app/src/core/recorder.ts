@@ -14,9 +14,18 @@
  *  - a motion sample with a non-finite t keeps its slot (stream indices must stay aligned with the
  *    segmenter) and repeats the previous t (0 for the first) — the TrialController drops such
  *    samples before they get here;
- *  - orientation/quaternion samples, touches and cues without a finite time are skipped, and so is a
- *    quaternion with a non-finite component.
- * Orientation / quaternion streams are null when no sample was recorded.
+ *  - orientation/quaternion/magnetometer samples, screen events, touches and cues without a finite
+ *    time are skipped, and so is a quaternion with a non-finite component.
+ * Orientation / quaternion / magnetometer streams are null when no sample was recorded.
+ *
+ * Schema 1.2 additions (the v2 app always writes them; every one is optional in the schema):
+ *  - orientation.compass_accuracy (iOS webkitCompassAccuracy, one entry per sample, null elsewhere);
+ *  - streams.orientation_abs ('deviceorientationabsolute' events, same layout as orientation),
+ *    streams.quaternion_abs (AbsoluteOrientationSensor), streams.magnetometer (µT, 3 decimals) — each
+ *    null without a sample — and streams.screen_events ([] without a change);
+ *  - touch contact details: radius_x / radius_y (CSS px, 0.01), force (1e-4), rotation_angle (deg,
+ *    1e-3), x_norm / y_norm (fraction of the viewport, clamped to [0, 1], 1e-4); null when unknown;
+ *  - quality.n_quaternion_abs / n_orientation_abs.
  *
  * IMPLEMENTED BY: segmentation agent.
  */
@@ -26,10 +35,16 @@ import type {
   CueKind,
   CueRecord,
   Euler,
+  MagnetometerSample,
+  MagnetometerStream,
   MotionSample,
   OrientationSample,
+  OrientationStream,
   QuaternionSample,
   QuaternionStream,
+  ScreenEventRecord,
+  ScreenSample,
+  TouchDetails,
   TouchRecord,
   TrialQuality,
   TrialRecord,
@@ -57,8 +72,14 @@ export const CLIP_ACC_MS2 = 3.5 * GRAVITY;
 
 const POW10 = [1, 10, 100, 1000, 1e4, 1e5, 1e6, 1e7, 1e8];
 const TWO_POW_52 = 4503599627370496;
-/** Touch coordinates are CSS px; 0.01 px is far below finger accuracy. */
+/** Touch coordinates and contact radii are CSS px; 0.01 px is far below finger accuracy. */
 const TOUCH_XY_DECIMALS = 2;
+/** Touch.force is 0..1. */
+const TOUCH_FORCE_DECIMALS = 4;
+/** x_norm / y_norm: 1e-4 of the viewport (≈ 0.04 px on a phone). */
+const TOUCH_NORM_DECIMALS = 4;
+/** Magnetometer readings (µT): the earth's field is 25–65 µT, sensor noise ~0.5 µT. */
+const MAGNETOMETER_DECIMALS = 3;
 
 /**
  * Rounds to `decimals` places, halves away from zero (same convention as util.roundOrNull);
@@ -76,6 +97,12 @@ export function roundValue(v: number | null | undefined, decimals: number): numb
 
 function finiteOrNull(v: number | null | undefined): number | null {
   return typeof v === 'number' && Number.isFinite(v) ? v : null;
+}
+
+/** A normalised coordinate: rounded, clamped to [0, 1]; null when unknown. */
+function unitOrNull(v: number | null | undefined): number | null {
+  const r = roundValue(v, TOUCH_NORM_DECIMALS);
+  return r === null ? null : Math.min(1, Math.max(0, r));
 }
 
 /** numpy-style percentile (linear interpolation between closest ranks) of a SORTED array. */
@@ -118,6 +145,93 @@ export function rateStats(times: number[]): RateStats {
 
 type Col = (number | null)[];
 
+/** Columns of one deviceorientation-style stream (relative or absolute). */
+class OrientationColumns {
+  readonly t: number[] = [];
+  readonly ts: Col = [];
+  readonly alpha: Col = [];
+  readonly beta: Col = [];
+  readonly gamma: Col = [];
+  readonly compass: Col = [];
+  readonly compassAccuracy: Col = [];
+  absolute: boolean | null = null;
+  tsFirst: number | null = null;
+
+  /** Appends a sample at relative time t (already rounded). */
+  add(t: number, s: OrientationSample): void {
+    this.t.push(t);
+    const tsRaw = finiteOrNull(s.ts);
+    if (this.tsFirst === null && tsRaw !== null) this.tsFirst = tsRaw;
+    this.ts.push(tsRaw !== null && this.tsFirst !== null ? roundValue(tsRaw - this.tsFirst, ROUNDING.time) : null);
+    this.alpha.push(roundValue(s.alpha, ROUNDING.angle));
+    this.beta.push(roundValue(s.beta, ROUNDING.angle));
+    this.gamma.push(roundValue(s.gamma, ROUNDING.angle));
+    this.compass.push(roundValue(s.compass, ROUNDING.angle));
+    this.compassAccuracy.push(roundValue(s.compass_accuracy, ROUNDING.angle));
+    if (this.absolute === null && typeof s.absolute === 'boolean') this.absolute = s.absolute;
+  }
+
+  build(): OrientationStream | null {
+    if (this.t.length === 0) return null;
+    return {
+      t: this.t.slice(),
+      ts: this.ts.slice(),
+      alpha: this.alpha.slice(),
+      beta: this.beta.slice(),
+      gamma: this.gamma.slice(),
+      compass: this.compass.slice(),
+      absolute: this.absolute,
+      ts_first_raw: this.tsFirst,
+      compass_accuracy: this.compassAccuracy.slice(),
+    };
+  }
+}
+
+/** Columns of one Generic Sensor quaternion stream. */
+class QuaternionColumns {
+  readonly t: number[] = [];
+  readonly x: number[] = [];
+  readonly y: number[] = [];
+  readonly z: number[] = [];
+  readonly w: number[] = [];
+  sensor: QuaternionStream['sensor'] | null = null;
+  freq: number | null = null;
+
+  /** Appends a sample at relative time t; false (nothing stored) when a component is not finite. */
+  add(t: number, s: QuaternionSample, frequencyHz: number): boolean {
+    const q = s.q;
+    if (!q) return false;
+    const x = roundValue(q[0], ROUNDING.quat);
+    const y = roundValue(q[1], ROUNDING.quat);
+    const z = roundValue(q[2], ROUNDING.quat);
+    const w = roundValue(q[3], ROUNDING.quat);
+    if (x === null || y === null || z === null || w === null) return false;
+    this.t.push(t);
+    this.x.push(x);
+    this.y.push(y);
+    this.z.push(z);
+    this.w.push(w);
+    if (this.sensor === null) {
+      this.sensor = s.sensor === 'AbsoluteOrientationSensor' ? 'AbsoluteOrientationSensor' : 'RelativeOrientationSensor';
+    }
+    if (this.freq === null && Number.isFinite(frequencyHz)) this.freq = frequencyHz;
+    return true;
+  }
+
+  build(fallbackSensor: QuaternionStream['sensor']): QuaternionStream | null {
+    if (this.t.length === 0) return null;
+    return {
+      t: this.t.slice(),
+      x: this.x.slice(),
+      y: this.y.slice(),
+      z: this.z.slice(),
+      w: this.w.slice(),
+      sensor: this.sensor ?? fallbackSensor,
+      frequency_hz: this.freq ?? 0,
+    };
+  }
+}
+
 export class StreamRecorder {
   private readonly t0: number;
 
@@ -129,23 +243,16 @@ export class StreamRecorder {
   private mInterval: number | null = null;
   private mTsFirst: number | null = null;
 
-  private readonly oT: number[] = [];
-  private readonly oTs: Col = [];
-  private readonly oAlpha: Col = [];
-  private readonly oBeta: Col = [];
-  private readonly oGamma: Col = [];
-  private readonly oCompass: Col = [];
-  private oAbsolute: boolean | null = null;
-  private oTsFirst: number | null = null;
+  private readonly orientation = new OrientationColumns();
+  private readonly orientationAbs = new OrientationColumns();
+  private readonly quaternion = new QuaternionColumns();
+  private readonly quaternionAbs = new QuaternionColumns();
 
-  private readonly qT: number[] = [];
-  private readonly qX: number[] = [];
-  private readonly qY: number[] = [];
-  private readonly qZ: number[] = [];
-  private readonly qW: number[] = [];
-  private qSensor: QuaternionStream['sensor'] | null = null;
-  private qFreq: number | null = null;
+  private readonly magT: number[] = [];
+  private readonly magXyz: [Col, Col, Col] = [[], [], []];
+  private magFreq: number | null = null;
 
+  private readonly screens: ScreenEventRecord[] = [];
   private readonly touches: TouchRecord[] = [];
   private readonly cues: CueRecord[] = [];
   private maxT: number | null = null;
@@ -205,52 +312,84 @@ export class StreamRecorder {
     return { t, ts, acc, accg, rr: rrOut, interval, index };
   }
 
+  /** 'deviceorientation' (relative on Chrome Android, absolute where the browser says so). */
   addOrientation(s: OrientationSample): void {
     const t = this.rel(s.t);
     if (t === null) return;
-    this.oT.push(t);
+    this.orientation.add(t, s);
     this.seen(t);
-    const tsRaw = finiteOrNull(s.ts);
-    if (this.oTsFirst === null && tsRaw !== null) this.oTsFirst = tsRaw;
-    this.oTs.push(tsRaw !== null && this.oTsFirst !== null ? roundValue(tsRaw - this.oTsFirst, ROUNDING.time) : null);
-    this.oAlpha.push(roundValue(s.alpha, ROUNDING.angle));
-    this.oBeta.push(roundValue(s.beta, ROUNDING.angle));
-    this.oGamma.push(roundValue(s.gamma, ROUNDING.angle));
-    this.oCompass.push(roundValue(s.compass, ROUNDING.angle));
-    if (this.oAbsolute === null && typeof s.absolute === 'boolean') this.oAbsolute = s.absolute;
   }
 
+  /** schema 1.2: 'deviceorientationabsolute' → streams.orientation_abs. */
+  addOrientationAbs(s: OrientationSample): void {
+    const t = this.rel(s.t);
+    if (t === null) return;
+    this.orientationAbs.add(t, s);
+    this.seen(t);
+  }
+
+  /** RelativeOrientationSensor (or any quaternion sensor) → streams.quaternion. */
   addQuaternion(s: QuaternionSample, frequencyHz: number): void {
     const t = this.rel(s.t);
-    const q = s.q;
-    if (t === null || !q) return;
-    const x = roundValue(q[0], ROUNDING.quat);
-    const y = roundValue(q[1], ROUNDING.quat);
-    const z = roundValue(q[2], ROUNDING.quat);
-    const w = roundValue(q[3], ROUNDING.quat);
-    if (x === null || y === null || z === null || w === null) return;
-    this.qT.push(t);
-    this.qX.push(x);
-    this.qY.push(y);
-    this.qZ.push(z);
-    this.qW.push(w);
-    this.seen(t);
-    if (this.qSensor === null) {
-      this.qSensor = s.sensor === 'AbsoluteOrientationSensor' ? 'AbsoluteOrientationSensor' : 'RelativeOrientationSensor';
-    }
-    if (this.qFreq === null && Number.isFinite(frequencyHz)) this.qFreq = frequencyHz;
+    if (t === null || !s.q) return;
+    if (this.quaternion.add(t, s, frequencyHz)) this.seen(t);
   }
 
-  /** t in source clock */
-  addTouch(t: number, type: 'start' | 'end' | 'cancel', n: number, x: number | null, y: number | null): void {
+  /** schema 1.2: AbsoluteOrientationSensor → streams.quaternion_abs (sensor always 'AbsoluteOrientationSensor'). */
+  addQuaternionAbs(s: QuaternionSample, frequencyHz: number): void {
+    const t = this.rel(s.t);
+    if (t === null || !s.q) return;
+    if (this.quaternionAbs.add(t, { ...s, sensor: 'AbsoluteOrientationSensor' }, frequencyHz)) this.seen(t);
+  }
+
+  /** schema 1.2: Magnetometer readings (µT) → streams.magnetometer. */
+  addMagnetometer(s: MagnetometerSample, frequencyHz: number): void {
+    const t = this.rel(s.t);
+    if (t === null) return;
+    this.magT.push(t);
+    this.magXyz[0].push(roundValue(s.x, MAGNETOMETER_DECIMALS));
+    this.magXyz[1].push(roundValue(s.y, MAGNETOMETER_DECIMALS));
+    this.magXyz[2].push(roundValue(s.z, MAGNETOMETER_DECIMALS));
+    if (this.magFreq === null && Number.isFinite(frequencyHz)) this.magFreq = frequencyHz;
+    this.seen(t);
+  }
+
+  /** schema 1.2: a screen orientation change → streams.screen_events. */
+  addScreen(s: ScreenSample): void {
+    const t = this.rel(s.t);
+    if (t === null) return;
+    this.screens.push({
+      t,
+      type: typeof s.type === 'string' ? s.type : null,
+      angle: roundValue(s.angle, ROUNDING.angle),
+    });
+    this.seen(t);
+  }
+
+  /** t in source clock; `details` = the contact of the same touch as x / y (schema 1.2, null when absent). */
+  addTouch(
+    t: number,
+    type: 'start' | 'end' | 'cancel',
+    n: number,
+    x: number | null,
+    y: number | null,
+    details?: Partial<TouchDetails> | null,
+  ): void {
     const rt = this.rel(t);
     if (rt === null) return;
+    const d = details ?? {};
     this.touches.push({
       t: rt,
       type,
       n: Number.isFinite(n) && n > 0 ? Math.round(n) : 0,
       x: roundValue(x, TOUCH_XY_DECIMALS),
       y: roundValue(y, TOUCH_XY_DECIMALS),
+      radius_x: roundValue(d.radius_x, TOUCH_XY_DECIMALS),
+      radius_y: roundValue(d.radius_y, TOUCH_XY_DECIMALS),
+      force: roundValue(d.force, TOUCH_FORCE_DECIMALS),
+      rotation_angle: roundValue(d.rotation_angle, ROUNDING.angle),
+      x_norm: unitOrNull(d.x_norm),
+      y_norm: unitOrNull(d.y_norm),
     });
     this.seen(rt);
   }
@@ -277,6 +416,16 @@ export class StreamRecorder {
 
   /** Builds the rounded, columnar streams object (arrays copied). */
   build(): TrialRecord['streams'] {
+    const magnetometer: MagnetometerStream | null =
+      this.magT.length > 0
+        ? {
+            t: this.magT.slice(),
+            x: this.magXyz[0].slice(),
+            y: this.magXyz[1].slice(),
+            z: this.magXyz[2].slice(),
+            frequency_hz: this.magFreq ?? 0,
+          }
+        : null;
     return {
       motion: {
         t: this.mT.slice(),
@@ -293,33 +442,14 @@ export class StreamRecorder {
         interval_raw: this.mInterval,
         ts_first_raw: this.mTsFirst,
       },
-      orientation:
-        this.oT.length > 0
-          ? {
-              t: this.oT.slice(),
-              ts: this.oTs.slice(),
-              alpha: this.oAlpha.slice(),
-              beta: this.oBeta.slice(),
-              gamma: this.oGamma.slice(),
-              compass: this.oCompass.slice(),
-              absolute: this.oAbsolute,
-              ts_first_raw: this.oTsFirst,
-            }
-          : null,
-      quaternion:
-        this.qT.length > 0
-          ? {
-              t: this.qT.slice(),
-              x: this.qX.slice(),
-              y: this.qY.slice(),
-              z: this.qZ.slice(),
-              w: this.qW.slice(),
-              sensor: this.qSensor ?? 'RelativeOrientationSensor',
-              frequency_hz: this.qFreq ?? 0,
-            }
-          : null,
+      orientation: this.orientation.build(),
+      quaternion: this.quaternion.build('RelativeOrientationSensor'),
       touches: this.touches.map((x) => ({ ...x })),
       cues: this.cues.map((c) => ({ ...c })),
+      quaternion_abs: this.quaternionAbs.build('AbsoluteOrientationSensor'),
+      orientation_abs: this.orientationAbs.build(),
+      screen_events: this.screens.map((s) => ({ ...s })),
+      magnetometer,
     };
   }
 }
@@ -341,7 +471,7 @@ const r3 = (v: number | null): number | null => roundValue(v, 3);
  * Quality summary for a built streams object. `warnings` are copied first; computeQuality then
  * appends (once each) what it can see in the streams: 'no_motion_samples', 'acc_unavailable' /
  * 'rotation_unavailable' (no sample with all 3 components), and 'low_motion_rate' (< LOW_MOTION_HZ).
- * Rates and dts are rounded to 0.001.
+ * Rates and dts are rounded to 0.001. n_quaternion_abs / n_orientation_abs (schema 1.2) are always set.
  */
 export function computeQuality(
   streams: TrialRecord['streams'],
@@ -396,6 +526,8 @@ export function computeQuality(
     rotation_available: rotationAvailable,
     hidden_during: hiddenDuring === true,
     warnings: out,
+    n_quaternion_abs: streams.quaternion_abs?.t.length ?? 0,
+    n_orientation_abs: streams.orientation_abs?.t.length ?? 0,
   };
 }
 

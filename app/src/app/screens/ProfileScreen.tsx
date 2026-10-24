@@ -1,56 +1,54 @@
 /**
- * Participant profile (ParticipantProfile in the schema). New participants get a random code that is
- * shown prominently before saving; returning participants can type their code: a profile stored on
- * this phone under that code is loaded, otherwise the code is kept as the participant_id.
+ * "About you" (spec v2 §1, screen 2): the short participant profile (ParticipantProfile in the schema):
+ * full name (optional, stored in `nickname`), age, sex, dominant hand, usual phone hand and height
+ * (optional). Nothing else is asked; the fields v1 asked (EHI-SF, arm issue, phone model, phone case)
+ * are written as null — or carried over from a returning participant's stored profile, never erased —
+ * and arm_issue is false (the consent checkbox confirms no arm or hand injury).
  *
- * Data-quality rules for the code field (see useEffect below):
+ * New participants get a random code (shown small, and on the done screen); returning participants
+ * type theirs inside "Returning? Enter your code": a profile stored on this phone under that code is
+ * loaded, otherwise the code is kept as the participant_id. Data-quality rules for the code field
+ * (see useEffect below):
  *  - the form is REPLACED when the active code matches a stored profile (it is loaded), including
  *    going back to the known participant's own code;
  *  - answers loaded from someone else's stored profile are never saved under a different code
  *    (the form is reset instead), while answers a new participant typed themselves are kept;
- *  - Save re-checks the store, so a code typed just before tapping Save cannot overwrite a stored
+ *  - Continue re-checks the store, so a code typed just before tapping it cannot overwrite a stored
  *    profile with answers that were not loaded from it.
+ * Validation errors appear inline only after the first Continue. Continue then saves the profile and
+ * goes on (startFlow.continueToSession): the session with the study's default preset, the repair
+ * screen when the sensors cannot record, or the researchers' setup screen.
  */
 import { useEffect, useRef, useState } from 'preact/hooks';
-import type {
-  EhiAnswer,
-  EhiShortForm,
-  HandednessSelf,
-  ParticipantProfile,
-  PhoneHand,
-  Sex,
-} from '../../core/types';
-import { EHI_ITEMS, isParticipantId, isoTime, newParticipantId, scoreEhi } from '../../core/util';
+import type { HandednessSelf, ParticipantProfile, PhoneHand, Sex } from '../../core/types';
+import { isParticipantId, isoTime, newParticipantId } from '../../core/util';
 import { useStrings } from '../../i18n';
-import { Button, Card, ChoiceGroup, Field, Notice, NumberInput, Screen, TextInput } from '../../ui/components';
+import { Button, ChoiceGroup, Field, Notice, NumberInput, Screen, TextInput } from '../../ui/components';
 import '../../ui/onboarding.css';
 import { getServices } from '../services';
+import { continueToSession, unlockInTap } from '../startFlow';
+import { createTapGuard } from '../state';
 import { navigate, setState, showToast, updateSettings, useAppState } from '../store';
 
 export const MAX_AGE = 110;
 export const HEIGHT_MIN_CM = 50;
 export const HEIGHT_MAX_CM = 250;
-export const NICKNAME_MAX = 60;
-export const PHONE_MODEL_MAX = 80;
+/** the schema's limit for ParticipantProfile.nickname, which holds the full name */
+export const NAME_MAX = 60;
 
 export const SEX_OPTIONS: Sex[] = ['female', 'male', 'other', 'prefer_not_to_say'];
 export const HANDEDNESS_OPTIONS: HandednessSelf[] = ['right', 'left', 'ambidextrous'];
 export const PHONE_HAND_OPTIONS: PhoneHand[] = ['right', 'left', 'both'];
-/** EHI-SF answer scale in questionnaire order (CSS lays it out with the left answers on the left). */
-export const EHI_ANSWERS: EhiAnswer[] = ['always_right', 'usually_right', 'both', 'usually_left', 'always_left'];
 
 /** Form state; empty strings / nulls mean "not answered". */
 export interface ProfileDraft {
-  nickname: string;
+  /** full name (optional), saved as ParticipantProfile.nickname */
+  name: string;
   age: number | null;
   sex: Sex | null;
   handedness: HandednessSelf | null;
-  ehi: Partial<EhiShortForm>;
   phoneHand: PhoneHand | null;
   height: number | null;
-  armIssue: boolean | null;
-  phoneModel: string;
-  phoneCase: boolean | null;
 }
 
 export type ProfileField = 'code' | 'age' | 'sex' | 'handedness' | 'phoneHand' | 'height';
@@ -59,33 +57,18 @@ export type ProfileErrors = Partial<Record<ProfileField, ProfileErrorCode>>;
 /** Display order of the fields that can have errors (first one gets scrolled into view). */
 export const PROFILE_FIELDS: ProfileField[] = ['code', 'age', 'sex', 'handedness', 'phoneHand', 'height'];
 
-export function emptyDraft(phoneModelHint: string | null = null): ProfileDraft {
-  return {
-    nickname: '',
-    age: null,
-    sex: null,
-    handedness: null,
-    ehi: {},
-    phoneHand: null,
-    height: null,
-    armIssue: null,
-    phoneModel: (phoneModelHint ?? '').slice(0, PHONE_MODEL_MAX),
-    phoneCase: null,
-  };
+export function emptyDraft(): ProfileDraft {
+  return { name: '', age: null, sex: null, handedness: null, phoneHand: null, height: null };
 }
 
 export function draftFromProfile(p: ParticipantProfile): ProfileDraft {
   return {
-    nickname: p.nickname ?? '',
+    name: p.nickname ?? '',
     age: p.age_years,
     sex: p.sex,
     handedness: p.handedness_self,
-    ehi: p.ehi_sf ? { ...p.ehi_sf } : {},
     phoneHand: p.phone_hand,
     height: p.height_cm,
-    armIssue: p.arm_issue,
-    phoneModel: p.phone_model ?? '',
-    phoneCase: p.phone_case,
   };
 }
 
@@ -120,71 +103,67 @@ export function validateDraft(d: ProfileDraft, minAge: number, codeText = ''): P
   return e;
 }
 
-function cleanText(v: string, max: number): string | null {
+/** Trimmed, inner whitespace collapsed, at most `max` characters; null when empty. */
+export function cleanText(v: string, max: number): string | null {
   const s = v.trim().replace(/\s+/g, ' ').slice(0, max).trim();
   return s === '' ? null : s;
 }
 
-/** The EHI-SF answers, only when all four items were answered. */
-export function completeEhi(ehi: Partial<EhiShortForm>): EhiShortForm | null {
-  const { writing, throwing, toothbrush, spoon } = ehi;
-  if (!writing || !throwing || !toothbrush || !spoon) return null;
-  return { writing, throwing, toothbrush, spoon };
-}
-
 /**
  * Builds the schema-valid profile from a VALIDATED draft (throws if a required answer is missing).
- * EHI fields stay null unless all four items were answered.
+ * `stored`: the profile already stored under this participant_id (a returning participant), or null.
+ * The v1-only answers (EHI-SF and its score, phone model, phone case) are kept from `stored` instead
+ * of being erased, and are null for a new participant; arm_issue is false (the consent checkbox
+ * confirms no arm or hand injury); created_at is kept from `stored`.
  */
-export function buildProfile(d: ProfileDraft, participantId: string, createdAt: string | null, now: string): ParticipantProfile {
+export function buildProfile(
+  d: ProfileDraft,
+  participantId: string,
+  stored: ParticipantProfile | null,
+  now: string,
+): ParticipantProfile {
   if (d.age === null || !d.sex || !d.handedness || !d.phoneHand) throw new Error('profile incomplete');
-  const ehi = completeEhi(d.ehi);
-  const score = ehi ? scoreEhi(ehi) : null;
   return {
     participant_id: participantId,
-    nickname: cleanText(d.nickname, NICKNAME_MAX),
+    nickname: cleanText(d.name, NAME_MAX),
     age_years: d.age,
     sex: d.sex,
     handedness_self: d.handedness,
-    ehi_sf: ehi,
-    ehi_lq: score ? score.lq : null,
-    ehi_class: score ? score.cls : null,
+    ehi_sf: stored?.ehi_sf ? { ...stored.ehi_sf } : null,
+    ehi_lq: stored?.ehi_lq ?? null,
+    ehi_class: stored?.ehi_class ?? null,
     phone_hand: d.phoneHand,
     height_cm: d.height,
-    arm_issue: d.armIssue,
-    phone_model: cleanText(d.phoneModel, PHONE_MODEL_MAX),
-    phone_case: d.phoneCase,
-    created_at: createdAt ?? now,
+    arm_issue: false,
+    phone_model: stored?.phone_model ?? null,
+    phone_case: stored?.phone_case ?? null,
+    created_at: stored?.created_at ?? now,
     updated_at: now,
   };
 }
 
 type CodeStatus = 'idle' | 'checking' | 'found' | 'new';
-type YesNo = 'yes' | 'no';
-
-function toYesNo(v: boolean | null): YesNo | null {
-  return v === null ? null : v ? 'yes' : 'no';
-}
 
 export function ProfileScreen() {
   const st = useAppState();
   const s = useStrings();
   const t = s.onboarding.profile;
   const minAge = st.config.min_age;
-  const modelHint = st.device?.model_hint ?? null;
 
   // Captured once: the participant who was active when the screen opened (null = new participant).
   const [baseProfile] = useState<ParticipantProfile | null>(st.participant);
   const [baseId] = useState<string>(() => st.participant?.participant_id ?? newParticipantId());
-  const [draft, setDraft] = useState<ProfileDraft>(() =>
-    st.participant ? draftFromProfile(st.participant) : emptyDraft(modelHint),
-  );
+  const [draft, setDraft] = useState<ProfileDraft>(() => (st.participant ? draftFromProfile(st.participant) : emptyDraft()));
   /** The stored profile the form content was loaded from (null = typed by the participant). */
   const [formSource, setFormSource] = useState<ParticipantProfile | null>(st.participant);
   const [codeText, setCodeText] = useState('');
   const [codeStatus, setCodeStatus] = useState<CodeStatus>('idle');
   const [submitted, setSubmitted] = useState(false);
   const [saving, setSaving] = useState(false);
+  /** "Returning? Enter your code" is folded away unless opened, typed in, or wrong */
+  const [codeOpen, setCodeOpen] = useState(false);
+  const [tap] = useState(createTapGuard);
+  tap.shown('profile');
   const lookupSeq = useRef(0);
   const fieldRefs = {
     code: useRef<HTMLDivElement>(null),
@@ -200,7 +179,7 @@ export function ProfileScreen() {
   const activeId = codeValid ? normalized : baseId;
 
   const load = (p: ParticipantProfile | null) => {
-    setDraft(p ? draftFromProfile(p) : emptyDraft(modelHint));
+    setDraft(p ? draftFromProfile(p) : emptyDraft());
     setFormSource(p);
   };
 
@@ -264,13 +243,16 @@ export function ProfileScreen() {
   };
 
   const onSave = async () => {
+    if (tap.tooSoon()) return; // the second tap of a double tap on the welcome screen's Start
+    // Inside the tap, before any await: keep the screen on and the audio unlocked (iOS needs a gesture).
+    unlockInTap();
     if (saving) return;
     setSubmitted(true);
     const errs = validateDraft(draft, minAge, codeText);
     const first = PROFILE_FIELDS.find((f) => errs[f]);
     if (first) {
+      if (first === 'code') setCodeOpen(true);
       fieldRefs[first].current?.scrollIntoView?.({ block: 'center', behavior: 'smooth' });
-      showToast(t.errors.fixBelow, 'warn');
       return;
     }
     setSaving(true);
@@ -280,20 +262,20 @@ export function ProfileScreen() {
       const loaded = formSource?.participant_id === id ? formSource : null;
       const stored = loaded ?? (await store.getParticipant(id)) ?? null;
       if (stored && !loaded) {
-        // Typed a known code and tapped Save before the lookup finished: show the stored answers first.
+        // Typed a known code and tapped Continue before the lookup finished: show the stored answers first.
         load(stored);
         setCodeStatus('found');
         showToast(t.codeFound, 'info');
         setSaving(false);
         return;
       }
-      const profile = buildProfile(draft, id, stored?.created_at ?? null, isoTime());
+      const profile = buildProfile(draft, id, stored, isoTime());
       await store.saveParticipant(profile);
       updateSettings({ last_participant_id: profile.participant_id });
       setState({ participant: profile });
-      navigate('sensors');
+      await continueToSession(); // navigates away (session / sensor repair / setup / welcome)
     } catch (e) {
-      console.error('saving the profile failed', e);
+      console.error('saving the profile or starting the session failed', e);
       showToast(s.common.errorGeneric, 'error');
       setSaving(false);
     }
@@ -301,7 +283,7 @@ export function ProfileScreen() {
 
   const codeHint =
     codeText.trim() === ''
-      ? t.haveCodeHint
+      ? t.codeHint
       : !codeValid
         ? t.codeFormat
         : codeStatus === 'checking'
@@ -310,12 +292,8 @@ export function ProfileScreen() {
             ? t.codeFound
             : codeStatus === 'new'
               ? t.codeNew
-              : t.haveCodeHint;
-  const nicknameHint = st.config.upload_nickname ? t.nicknameHintUploaded : t.nicknameHintLocal;
-  const yesNo = [
-    { value: 'yes' as const, label: s.common.yes },
-    { value: 'no' as const, label: s.common.no },
-  ];
+              : t.codeHint;
+  const nameHint = st.config.upload_nickname ? t.nameHintUploaded : t.nameHintLocal;
 
   return (
     <Screen
@@ -328,50 +306,61 @@ export function ProfileScreen() {
         </Button>
       }
     >
-      <p class="onb-lead">{t.intro}</p>
-
-      <Card tone="info" testId="participant-code-card">
-        <div class="onb-code-label">{t.codeTitle}</div>
-        <div class="onb-code" data-testid="participant-code">
-          <bdi>{activeId}</bdi>
-        </div>
-        <p class="small">{t.codeHint}</p>
-      </Card>
-
       <div ref={fieldRefs.code}>
-        <Field
-          label={baseProfile ? t.otherCodeTitle : t.haveCodeTitle}
-          htmlFor="in-code"
-          hint={errors.code ? undefined : codeHint}
-          error={errText(errors.code)}
+        <details
+          class="onb-details onb-code-details"
+          data-testid="returning-details"
+          open={codeOpen || codeText.trim() !== '' || !!errors.code}
+          onToggle={(e) => setCodeOpen((e.currentTarget as HTMLDetailsElement).open)}
         >
-          <div dir="ltr">
-            <TextInput
-              id="in-code"
-              testId="in-code"
-              value={codeText}
-              placeholder="P-XXXXXX"
-              maxLength={16}
-              onInput={setCodeText}
-            />
+          <summary>{baseProfile ? t.notYou : t.returning}</summary>
+          <div class="stack-sm onb-details-body">
+            <p class="small muted" data-testid="participant-code-card">
+              {t.codeYours}{' '}
+              <bdi class="mono onb-code-inline" data-testid="participant-code">
+                {activeId}
+              </bdi>
+            </p>
+            <Field label={t.codeInput} htmlFor="in-code" hint={errors.code ? undefined : codeHint} error={errText(errors.code)}>
+              <div dir="ltr">
+                <TextInput
+                  id="in-code"
+                  testId="in-code"
+                  value={codeText}
+                  placeholder="P-XXXXXX"
+                  maxLength={16}
+                  autoCapitalize="characters"
+                  onInput={setCodeText}
+                />
+              </div>
+            </Field>
           </div>
-        </Field>
+        </details>
       </div>
 
-      <Field label={`${t.nickname} (${t.optional})`} htmlFor="in-nickname" hint={nicknameHint}>
+      <Field label={t.name} htmlFor="in-name" hint={nameHint}>
         <TextInput
-          id="in-nickname"
-          testId="in-nickname"
-          value={draft.nickname}
-          maxLength={NICKNAME_MAX}
-          autoComplete="nickname"
-          onInput={(nickname) => set({ nickname })}
+          id="in-name"
+          testId="in-name"
+          value={draft.name}
+          placeholder={t.namePlaceholder}
+          maxLength={NAME_MAX}
+          autoCapitalize="words"
+          onInput={(name) => set({ name })}
         />
       </Field>
 
       <div ref={fieldRefs.age}>
-        <Field label={t.age} htmlFor="in-age" hint={t.ageHint} error={errText(errors.age)}>
-          <NumberInput id="in-age" testId="in-age" value={draft.age} min={minAge} max={MAX_AGE} onChange={(age) => set({ age })} />
+        <Field label={t.age} htmlFor="in-age" error={errText(errors.age)}>
+          <NumberInput
+            id="in-age"
+            testId="in-age"
+            value={draft.age}
+            min={minAge}
+            max={MAX_AGE}
+            inputMode="numeric"
+            onChange={(age) => set({ age })}
+          />
         </Field>
       </div>
 
@@ -380,6 +369,7 @@ export function ProfileScreen() {
           <ChoiceGroup<Sex>
             name="sex"
             value={draft.sex}
+            columns={2}
             options={SEX_OPTIONS.map((v) => ({ value: v, label: t.sexes[v] }))}
             onChange={(sex) => set({ sex })}
             testIdPrefix="opt-sex"
@@ -393,7 +383,7 @@ export function ProfileScreen() {
           <ChoiceGroup<HandednessSelf>
             name="handedness"
             value={draft.handedness}
-            columns={1}
+            columns={3}
             options={HANDEDNESS_OPTIONS.map((v) => ({ value: v, label: t.handednessOptions[v] }))}
             onChange={(handedness) => set({ handedness })}
             testIdPrefix="opt-handed"
@@ -401,28 +391,6 @@ export function ProfileScreen() {
           />
         </Field>
       </div>
-
-      <Card title={t.ehiTitle} testId="ehi-card">
-        <div class="stack">
-          <p class="small muted">
-            {t.ehiHint} ({t.optional})
-          </p>
-          {EHI_ITEMS.map((item) => (
-            <div class="onb-ehi" key={item}>
-              <div class="field-label">{t.ehiItems[item]}</div>
-              <ChoiceGroup<EhiAnswer>
-                name={`ehi-${item}`}
-                value={draft.ehi[item] ?? null}
-                columns={2}
-                options={EHI_ANSWERS.map((a) => ({ value: a, label: t.ehiAnswers[a] }))}
-                onChange={(answer) => setDraft((d) => ({ ...d, ehi: { ...d.ehi, [item]: answer } }))}
-                testIdPrefix={`opt-ehi-${item}`}
-                ariaLabel={t.ehiItems[item]}
-              />
-            </div>
-          ))}
-        </div>
-      </Card>
 
       <div ref={fieldRefs.phoneHand}>
         <Field label={t.phoneHand} error={errText(errors.phoneHand)}>
@@ -439,7 +407,7 @@ export function ProfileScreen() {
       </div>
 
       <div ref={fieldRefs.height}>
-        <Field label={`${t.height} (${t.optional})`} htmlFor="in-height" error={errText(errors.height)}>
+        <Field label={t.height} htmlFor="in-height" error={errText(errors.height)}>
           <NumberInput
             id="in-height"
             testId="in-height"
@@ -450,38 +418,6 @@ export function ProfileScreen() {
           />
         </Field>
       </div>
-
-      <Field label={`${t.armIssue} (${t.optional})`}>
-        <ChoiceGroup<YesNo>
-          name="arm-issue"
-          value={toYesNo(draft.armIssue)}
-          options={yesNo}
-          onChange={(v) => set({ armIssue: v === 'yes' })}
-          testIdPrefix="opt-armissue"
-          ariaLabel={t.armIssue}
-        />
-      </Field>
-
-      <Field label={`${t.phoneModel} (${t.optional})`} htmlFor="in-phonemodel" hint={t.phoneModelHint}>
-        <TextInput
-          id="in-phonemodel"
-          testId="in-phonemodel"
-          value={draft.phoneModel}
-          maxLength={PHONE_MODEL_MAX}
-          onInput={(phoneModel) => set({ phoneModel })}
-        />
-      </Field>
-
-      <Field label={`${t.phoneCase} (${t.optional})`}>
-        <ChoiceGroup<YesNo>
-          name="phone-case"
-          value={toYesNo(draft.phoneCase)}
-          options={yesNo}
-          onChange={(v) => set({ phoneCase: v === 'yes' })}
-          testIdPrefix="opt-case"
-          ariaLabel={t.phoneCase}
-        />
-      </Field>
 
       {submitted && Object.keys(errors).length > 0 && <Notice kind="error">{t.errors.fixBelow}</Notice>}
     </Screen>

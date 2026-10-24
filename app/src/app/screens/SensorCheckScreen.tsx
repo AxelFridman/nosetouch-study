@@ -1,107 +1,45 @@
 /**
- * Sensor check: explains why motion access is needed, requests it inside the tap (WebKit only shows
- * the prompt while a user gesture is being processed), measures the real sampling rates for 2.5 s and
- * stores permission + measurement in state.capabilities (snapshotted into every session record).
- * Gives platform-specific help when access is denied, no events arrive or the rate is too low.
+ * Sensor check, v2: the REPAIR screen. It is not on the participant path: the welcome screen's Start
+ * tap already requested the motion permission and measured the rates in the background
+ * (app/sensorCheck.ts). This screen opens only when that check found that the sensors cannot record
+ * (permission denied, no events, below MIN_MOTION_HZ, no secure context), or when resuming a session
+ * needs the permission again. It explains what to do for the browser context the page runs in, lets
+ * the participant allow access and measure again (the request is the FIRST statement of the tap:
+ * WebKit only shows the prompt while the gesture is being processed), and Continue then goes on to
+ * the session (or back to the welcome screen's resume card).
  */
 import { useEffect, useState } from 'preact/hooks';
-import { detectCapabilities, measureRates, requestMotionPermission } from '../../core/sensors';
-import type { DeviceInfo, MeasuredRates, PermissionState, SensorCapabilities } from '../../core/types';
+import type { DeviceInfo, PermissionState } from '../../core/types';
 import { useStrings, type Strings } from '../../i18n';
 import { Button, Card, Notice, ProgressBar, Screen, Stat } from '../../ui/components';
 import '../../ui/onboarding.css';
+import {
+  beginSensorCheck,
+  getRepairNext,
+  lastSensorCheck,
+  MEASURE_MS,
+  safeRequestPermission,
+  sensorVerdict,
+  type SensorIssue,
+} from '../sensorCheck';
 import { getServices } from '../services';
-import { getState, navigate, setState, useAppState } from '../store';
+import { continueToSession, unlockInTap } from '../startFlow';
+import { createTapGuard } from '../state';
+import { navigate, showToast, useAppState } from '../store';
 
-/** Length of the rate measurement. */
-export const MEASURE_MS = 2500;
-/** Below this the movement cannot be recorded usefully: continuing is blocked. */
-export const MIN_MOTION_HZ = 20;
-/** Typical browsers deliver ~60 Hz; below this we warn (Low Power Mode, throttling). */
-export const GOOD_MOTION_HZ = 45;
-
-/**
- * Starts the motion-permission request. Call it as the FIRST statement of a tap handler, before any
- * await: WebKit only shows the prompt while the gesture is being processed. Never throws/rejects
- * ('unknown' when the request itself failed).
- */
-export function safeRequestPermission(): Promise<PermissionState> {
-  try {
-    return requestMotionPermission().catch((e: unknown) => {
-      console.warn('motion permission request failed', e);
-      return 'unknown' as const;
-    });
-  } catch (e) {
-    console.warn('motion permission request failed', e);
-    return Promise.resolve('unknown');
-  }
-}
-
-/** Capabilities when feature detection itself failed: conservative, but schema-valid. */
-export function fallbackCapabilities(): SensorCapabilities {
-  return {
-    secure_context: typeof isSecureContext === 'boolean' ? isSecureContext : false,
-    device_motion: false,
-    device_orientation: false,
-    permission_api: false,
-    permission_state: 'unknown',
-    generic_relative_orientation: false,
-    wake_lock: false,
-    vibrate: false,
-    share_files: false,
-    measured: null,
-  };
-}
-
-export function currentCapabilities(): SensorCapabilities {
-  const caps = getState().capabilities;
-  if (caps) return caps;
-  try {
-    return detectCapabilities();
-  } catch (e) {
-    console.warn('detectCapabilities failed', e);
-    return fallbackCapabilities();
-  }
-}
-
-export function patchCapabilities(patch: Partial<SensorCapabilities>): void {
-  setState({ capabilities: { ...currentCapabilities(), ...patch } });
-}
-
-export type SensorIssue = 'insecure' | 'denied' | 'failed' | 'no_events' | 'too_slow' | 'slow' | 'no_gyro';
-
-export interface SensorVerdict {
-  canContinue: boolean;
-  issues: SensorIssue[];
-  /** rounded motion rate, or null when nothing was measured */
-  hz: number | null;
-}
-
-/** What the check found, independent of the UI (unit-tested). */
-export function sensorVerdict(input: {
-  simulate: boolean;
-  secureContext: boolean;
-  permission: PermissionState | null;
-  measured: MeasuredRates | null;
-  failed: boolean;
-}): SensorVerdict {
-  const raw = input.measured?.motion_hz ?? null;
-  const hz = raw !== null && Number.isFinite(raw) ? Math.round(raw) : null;
-  // The simulator delivers data regardless of the browser, so nothing can block the flow.
-  if (input.simulate) return { canContinue: true, issues: [], hz };
-  const issues: SensorIssue[] = [];
-  if (!input.secureContext) issues.push('insecure');
-  if (input.permission === 'denied') issues.push('denied');
-  if (input.failed) issues.push('failed');
-  if (input.measured) {
-    if (hz === null || hz <= 0) issues.push('no_events');
-    else if (hz < MIN_MOTION_HZ) issues.push('too_slow');
-    else if (hz < GOOD_MOTION_HZ) issues.push('slow');
-    if (hz !== null && hz > 0 && !input.measured.rotation_available) issues.push('no_gyro');
-  }
-  const canContinue = input.permission !== 'denied' && raw !== null && raw >= MIN_MOTION_HZ;
-  return { canContinue, issues, hz };
-}
+// The permission and measurement helpers live in app/sensorCheck.ts; re-exported for older imports.
+export {
+  currentCapabilities,
+  fallbackCapabilities,
+  GOOD_MOTION_HZ,
+  MEASURE_MS,
+  MIN_MOTION_HZ,
+  patchCapabilities,
+  safeRequestPermission,
+  sensorVerdict,
+  type SensorIssue,
+  type SensorVerdict,
+} from '../sensorCheck';
 
 function isIos(device: DeviceInfo | null): boolean {
   return device?.platform === 'ios' || device?.engine === 'webkit';
@@ -201,11 +139,19 @@ export function SensorCheckScreen() {
   const t = s.onboarding.sensors;
   const caps = st.capabilities;
   const measured = caps?.measured ?? null;
-  const [phase, setPhase] = useState<Phase>(measured ? 'done' : 'idle');
-  // Permission asked on THIS screen; earlier results (e.g. coming back from calibration) count too.
-  const [permission, setPermission] = useState<PermissionState | null>(measured ? (caps?.permission_state ?? null) : null);
-  const [failed, setFailed] = useState(false);
+  // What the background check (or an earlier visit of this screen) found is shown at once; a denial
+  // seen since (e.g. by "Resume session") wins over an older result.
+  const [earlier] = useState(lastSensorCheck);
+  const deniedNow = caps?.permission_state === 'denied';
+  const [phase, setPhase] = useState<Phase>(earlier !== null || measured !== null || deniedNow ? 'done' : 'idle');
+  const [permission, setPermission] = useState<PermissionState | null>(
+    deniedNow ? 'denied' : (earlier?.permission ?? (measured ? (caps?.permission_state ?? null) : null)),
+  );
+  const [failed, setFailed] = useState(earlier?.failed ?? false);
   const [progress, setProgress] = useState(0);
+  const [starting, setStarting] = useState(false);
+  const [tap] = useState(createTapGuard);
+  tap.shown('sensors');
 
   useEffect(() => {
     if (phase !== 'measuring') return;
@@ -218,30 +164,15 @@ export function SensorCheckScreen() {
   const onRequest = async () => {
     // FIRST statement, before any await (WebKit gesture rule). Then unlock audio inside the same tap.
     const pending = safeRequestPermission();
-    try {
-      void getServices().cues.unlock();
-    } catch (e) {
-      console.warn('audio unlock failed', e);
-    }
+    unlockInTap();
     if (phase === 'requesting' || phase === 'measuring') return;
     setFailed(false);
     setPhase('requesting');
-    let perm = await pending;
-    if (getState().settings.simulate) perm = 'granted';
-    setPermission(perm);
-    patchCapabilities({ permission_state: perm, measured: null });
-    if (perm === 'denied') {
-      setPhase('done');
-      return;
-    }
-    setPhase('measuring');
-    try {
-      const rates = await measureRates(getServices().createSource(), MEASURE_MS);
-      patchCapabilities({ permission_state: perm, measured: rates });
-    } catch (e) {
-      console.error('sensor measurement failed', e);
-      setFailed(true);
-    }
+    // runSensorCheck measures once the permission is answered: show that as 'measuring'
+    void pending.then(() => setPhase((p) => (p === 'requesting' ? 'measuring' : p)));
+    const outcome = await beginSensorCheck(pending);
+    setPermission(outcome.permission);
+    setFailed(outcome.failed);
     setPhase('done');
   };
 
@@ -254,6 +185,23 @@ export function SensorCheckScreen() {
         .catch(() => undefined);
     } catch (e) {
       console.warn('test beep failed', e);
+    }
+  };
+
+  const onContinue = async () => {
+    if (tap.tooSoon() || starting) return;
+    unlockInTap(); // inside the tap: the session needs audio and the wake lock
+    if (getRepairNext() === 'welcome') {
+      navigate('welcome'); // came from "Resume session": its card resumes now that access works
+      return;
+    }
+    setStarting(true);
+    try {
+      await continueToSession();
+    } catch (e) {
+      console.error('starting the session failed', e);
+      showToast(s.common.errorGeneric, 'error');
+      setStarting(false);
     }
   };
 
@@ -275,34 +223,12 @@ export function SensorCheckScreen() {
       onBack={() => navigate('profile')}
       testId="screen-sensorcheck"
       footer={
-        <Button testId="btn-continue" size="lg" block disabled={busy || !verdict.canContinue} onClick={() => navigate('calibration')}>
+        <Button testId="btn-continue" size="lg" block disabled={busy || starting || !verdict.canContinue} onClick={() => void onContinue()}>
           {s.common.continue}
         </Button>
       }
     >
       <p class="onb-lead">{t.intro}</p>
-      <Card title={t.stepsTitle}>
-        <ol class="onb-steps">
-          {t.steps.map((line) => (
-            <li key={line}>{line}</li>
-          ))}
-        </ol>
-        <p class="small muted">{t.privacyNote}</p>
-      </Card>
-
-      <Button
-        testId="btn-request-permission"
-        size="lg"
-        block
-        variant={phase === 'done' ? 'secondary' : 'primary'}
-        disabled={busy}
-        onClick={() => void onRequest()}
-      >
-        {phase === 'done' ? t.measureAgain : t.allow}
-      </Button>
-
-      {phase === 'requesting' && <Notice kind="info">{t.requesting}</Notice>}
-      {phase === 'measuring' && <ProgressBar value={progress} label={t.measuring} />}
 
       {phase === 'done' && (
         <>
@@ -318,6 +244,29 @@ export function SensorCheckScreen() {
           )}
         </>
       )}
+
+      <Card title={t.stepsTitle}>
+        <ol class="onb-steps">
+          {t.steps.map((line) => (
+            <li key={line}>{line}</li>
+          ))}
+        </ol>
+        <p class="small muted">{t.privacyNote}</p>
+      </Card>
+
+      <Button
+        testId="btn-request-permission"
+        size="lg"
+        block
+        variant={phase === 'done' && verdict.canContinue ? 'secondary' : 'primary'}
+        disabled={busy}
+        onClick={() => void onRequest()}
+      >
+        {phase === 'done' ? t.measureAgain : t.allow}
+      </Button>
+
+      {phase === 'requesting' && <Notice kind="info">{t.requesting}</Notice>}
+      {phase === 'measuring' && <ProgressBar value={progress} label={t.measuring} />}
 
       {(phase === 'done' || measured) && (
         <Card title={t.resultsTitle} testId="sensor-results">

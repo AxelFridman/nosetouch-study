@@ -140,22 +140,20 @@ function syncHistory(): void {
 
 /**
  * Where the system back button goes from a screen: the same place as the screen's ← arrow (done:
- * the Home button). null at the root, where back leaves the app. The session screen normally takes
- * the press itself (setBackHandler); 'welcome' is its fallback when no session is running.
+ * the Home button). null at the root, where back leaves the app. The participant path (spec v2 §1):
+ * welcome ← profile ← session; the repair screen (sensors) and the researchers' setup go back to the
+ * profile. The session screen normally takes the press itself (setBackHandler: its pause dialog);
+ * 'profile' is its fallback when no session is running.
  */
 export function backTargetOf(st: Pick<AppState, 'screen' | 'returnTo'>): ScreenId | null {
   switch (st.screen) {
-    case 'consent':
     case 'profile':
-    case 'session':
     case 'done':
       return 'welcome';
     case 'sensors':
-      return 'profile';
-    case 'calibration':
-      return 'sensors';
     case 'setup':
-      return 'calibration';
+    case 'session':
+      return 'profile';
     case 'data':
     case 'settings':
     case 'sandbox':

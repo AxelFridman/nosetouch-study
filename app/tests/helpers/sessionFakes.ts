@@ -7,6 +7,7 @@
 import { vi } from 'vitest';
 import { DEFAULT_SEGMENTATION_PARAMS } from '../../src/core/constants';
 import type {
+  BlockKind,
   CustomProtocolSpec,
   DeviceInfo,
   ExportBundle,
@@ -19,10 +20,14 @@ import type {
   ProtocolOptions,
   SegmentationParams,
   SensorCapabilities,
+  OrientationId,
   SessionRecord,
+  Speed,
   StudyConfig,
   TrialCondition,
   TrialRecord,
+  TrialTiming,
+  Variant,
 } from '../../src/core/types';
 import type { LocalStore, OutboxCounts } from '../../src/core/storage';
 import type { FlushReport, UploadQueue } from '../../src/core/uploader';
@@ -30,7 +35,7 @@ import type { FlushReport, UploadQueue } from '../../src/core/uploader';
 // ───────────────────────────── protocol (simple, deterministic) ─────────────────────────────
 
 export const FAKE_DEFAULT_CUSTOM_SPEC: CustomProtocolSpec = {
-  orientations: ['upright_toward', 'upright_away'],
+  orientations: ['upright_toward', 'top_left_toward', 'top_right_toward'],
   speeds: ['natural', 'fast', 'slow'],
   start_positions: ['natural'],
   reps: 1,
@@ -51,8 +56,59 @@ function fakeFirstHand(opts: ProtocolOptions): Hand {
   return opts.firstHand ?? (opts.seed & 1 ? 'left' : 'right');
 }
 
+/**
+ * preset 'street': a small plan with the street STRUCTURE (A = first hand, B = the other):
+ *   block 0 tier 0 choice A free         natural (hand_source 'reported')      trial 0
+ *   block 1 tier 1 main   A upright      natural, fast                         trials 1-2
+ *   block 2 tier 1 main   B upright      natural, slow                         trials 3-4
+ *   block 3 tier 2 main   B top_left     natural                               trial 5
+ *   block 4 tier 3 odd    A upright      tilted_touch                          trial 6
+ *   block 5 tier 4 main   A upright      natural   (optional)                  trial 7
+ *   block 6 tier 4 main   B upright      fast      (optional)                  trial 8
+ */
+export const FAKE_STREET = { trials: 9, required: 7, firstOptionalTrial: 7, firstOptionalBlock: 5 } as const;
+
+function fakeStreetPlan(opts: ProtocolOptions): PlannedBlock[] {
+  const a = fakeFirstHand(opts);
+  const b: Hand = a === 'left' ? 'right' : 'left';
+  const specs: { kind: BlockKind; tier: number; hand: Hand; orientation: OrientationId; cells: [Speed, Variant][] }[] = [
+    { kind: 'choice', tier: 0, hand: a, orientation: 'free', cells: [['natural', 'standard']] },
+    { kind: 'main', tier: 1, hand: a, orientation: 'upright_toward', cells: [['natural', 'standard'], ['fast', 'standard']] },
+    { kind: 'main', tier: 1, hand: b, orientation: 'upright_toward', cells: [['natural', 'standard'], ['slow', 'standard']] },
+    { kind: 'main', tier: 2, hand: b, orientation: 'top_left_toward', cells: [['natural', 'standard']] },
+    { kind: 'odd', tier: 3, hand: a, orientation: 'upright_toward', cells: [['natural', 'tilted_touch']] },
+    { kind: 'main', tier: 4, hand: a, orientation: 'upright_toward', cells: [['natural', 'standard']] },
+    { kind: 'main', tier: 4, hand: b, orientation: 'upright_toward', cells: [['fast', 'standard']] },
+  ];
+  let trialIndex = 0;
+  return specs.map((spec, blockIndex) => ({
+    block_index: blockIndex,
+    kind: spec.kind,
+    tier: spec.tier,
+    optional: spec.tier === 4,
+    hand: spec.hand,
+    orientation: spec.orientation,
+    trials: spec.cells.map(([speed, variant], trialInBlock) => ({
+      trial_index: trialIndex++,
+      block_index: blockIndex,
+      trial_in_block: trialInBlock,
+      condition: {
+        hand: spec.hand,
+        orientation: spec.orientation,
+        speed,
+        start_position: 'natural',
+        variant,
+        posture: opts.posture,
+        rep: 0,
+        hand_source: spec.kind === 'choice' ? 'reported' : 'instructed',
+      },
+    })),
+  }));
+}
+
 /** orientations × [A, B] blocks, each with speeds × start positions × reps trials (no shuffling). */
 function fakeBuildPlan(opts: ProtocolOptions): PlannedBlock[] {
+  if (opts.preset === 'street') return fakeStreetPlan(opts);
   const spec = opts.preset === 'custom' ? (opts.custom ?? FAKE_DEFAULT_CUSTOM_SPEC) : PRESET_SPEC;
   const a = fakeFirstHand(opts);
   const b: Hand = a === 'left' ? 'right' : 'left';
@@ -98,6 +154,7 @@ export const protocolModule = {
       c.speed === 'fast' ? { ...base, onset_sustain_ms: 40 } : { ...base },
   ),
   presetTrialCount: vi.fn(() => 8),
+  isOptionalBlock: vi.fn((block: PlannedBlock) => block.optional === true),
   DEFAULT_CUSTOM_SPEC: FAKE_DEFAULT_CUSTOM_SPEC,
 };
 
@@ -182,6 +239,11 @@ export const sensorsModule = {
   requestMotionPermission: vi.fn(async () => 'not_required' as const),
   createBrowserSensorSource: vi.fn(),
   measureRates: vi.fn(),
+  readTouch: vi.fn(() => ({
+    x: null,
+    y: null,
+    details: { radius_x: null, radius_y: null, force: null, rotation_angle: null, x_norm: null, y_norm: null },
+  })),
 };
 
 // ───────────────────────────── storage / uploader / services ─────────────────────────────
@@ -315,6 +377,7 @@ export function createMemoryStore(): MemoryStore {
 export function createFakeUploader(store: LocalStore): UploadQueue & { flush: ReturnType<typeof vi.fn> } {
   return {
     flush: vi.fn(async (): Promise<FlushReport> => ({ attempted: 0, sent: 0, failed: 0, counts: await store.outboxCounts() })),
+    flushOnLeave: vi.fn(async () => 0),
     start: vi.fn(),
     stop: vi.fn(),
     onChange: vi.fn(() => () => undefined),
@@ -423,15 +486,30 @@ export function makeMotionStream(n = 150, opts: { linear?: boolean; dtMs?: numbe
   return m;
 }
 
-/** A schema-valid TrialRecord for a planned trial of a session. */
+/**
+ * A schema-valid TrialRecord for a planned trial of a session. The phone rests still and upright
+ * (accg = (0, 9.81, 0)) from 0 to 1000 ms, i.e. through the pre-GO hold (still_ms - still_hold_ms ...
+ * go_ms = 100 ... 900 ms), so it can fill an implicit calibration; `accgY` changes that resting value.
+ */
 export function makeTrialRecord(
   session: SessionRecord,
   planned: PlannedTrial,
   attempt: number,
-  overrides: { status?: TrialRecord['outcome']['status']; accepted?: boolean; trial_id?: string } = {},
+  overrides: {
+    status?: TrialRecord['outcome']['status'];
+    accepted?: boolean;
+    trial_id?: string;
+    orientation_match?: boolean | null;
+    simulated?: boolean;
+    timing?: Partial<TrialTiming>;
+    accgY?: number;
+    created_at?: string;
+  } = {},
 ): TrialRecord {
   const status = overrides.status ?? 'complete';
   const motion = makeMotionStream(120);
+  const accgY = overrides.accgY;
+  if (accgY !== undefined) motion.accg_y = motion.accg_y.map(() => accgY);
   return {
     record_type: 'trial',
     schema_version: '1.0.0',
@@ -440,12 +518,12 @@ export function makeTrialRecord(
     session_id: session.session_id,
     participant_id: session.participant_id,
     study_code: session.study_code,
-    created_at: new Date().toISOString(),
+    created_at: overrides.created_at ?? new Date().toISOString(),
     block_index: planned.block_index,
     trial_index: planned.trial_index,
     trial_in_block: planned.trial_in_block,
     attempt,
-    simulated: true,
+    simulated: overrides.simulated ?? true,
     condition: planned.condition,
     outcome: { status, accepted: overrides.accepted ?? status === 'complete', participant_flag: null, note: null },
     timing: {
@@ -460,6 +538,7 @@ export function makeTrialRecord(
       first_touch_ms: null,
       foreperiod_ms: 400,
       false_starts: 0,
+      ...overrides.timing,
     },
     segmentation: {
       method: 'online_v1',
@@ -472,7 +551,12 @@ export function makeTrialRecord(
       peak_acc_ms2: status === 'complete' ? 3 : null,
       baseline: { n: 30, gyro_mean: 1.1, gyro_sd: 0.2, acc_mean: 0.05, acc_sd: 0.01, gravity: [0, 9.81, 0] },
     },
-    detected: { rotation_start: 'upright', rotation_end: 'upright', tilt_change_deg: 4, orientation_match: true },
+    detected: {
+      rotation_start: 'upright',
+      rotation_end: 'upright',
+      tilt_change_deg: 4,
+      orientation_match: overrides.orientation_match === undefined ? true : overrides.orientation_match,
+    },
     quality: {
       n_motion: motion.t.length,
       n_orientation: 0,

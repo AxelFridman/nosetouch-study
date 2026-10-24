@@ -31,3 +31,6 @@ server/received/
 .DS_Store
 Thumbs.db
 *.log
+
+# crash dumps of MSYS / Git Bash tools
+*.stackdump

@@ -27,10 +27,39 @@ def test_every_synthetic_record_is_valid_full_mode(tiny_dataset):
 
 def test_synthetic_sessions_use_schema_1_1_fields(tiny_dataset):
     s = tiny_dataset.sessions[0]
-    assert s['schema_version'] == '1.1.0'
+    assert s['schema_version'] == synth.SCHEMA_VERSION == '1.2.0'
     assert s['device']['engine'] in ('webkit', 'blink')
     assert s['calibration']['axis_check']['verdict'] == 'w3c'
     assert all(t['simulated'] for t in tiny_dataset.trials)
+
+
+def test_street_records_are_valid_protocol_2_records(street_dataset):
+    """synth's protocol 2.0.0 visits: schema 1.2, the short profile (removed fields written as null / false,
+    never omitted), the implicit_v1 calibration, review_mode 'auto' and v2 trials."""
+    for s in street_dataset.sessions:
+        assert schema.validate(s, 'SessionRecord', mode='full') == []
+        assert (s['schema_version'], s['protocol']['protocol_version'], s['consent']['version']) == (
+            '1.2.0', '2.0.0', synth.CONSENT_VERSION_V2)
+        assert s['settings']['review_mode'] == 'auto' and s['protocol']['preset'] == 'street'
+        p = s['participant']
+        assert {k: p[k] for k in ('ehi_sf', 'ehi_lq', 'ehi_class', 'phone_model', 'phone_case', 'arm_issue')} == {
+            'ehi_sf': None, 'ehi_lq': None, 'ehi_class': None, 'phone_model': None, 'phone_case': None, 'arm_issue': False}
+        assert p['nickname'] and p['phone_hand'] in ('left', 'right', 'both')
+        cal = s['calibration']
+        assert cal['method'] == 'implicit_v1' and cal['flat'] is None and cal['gyro_bias_dps'] is None
+        assert cal['axis_check'] is None and cal['upright_check'] == 'ok' and cal['upright']['still']
+        assert cal['gravity_sign'] == (-1 if s['device']['engine'] == 'webkit' else 1)
+    for p in street_dataset.participants:
+        assert schema.validate(p, 'ParticipantProfile', mode='full') == []
+    for t in street_dataset.trials:
+        assert schema.validate(t, 'TrialRecord', mode='fast') == [], t['trial_id']
+    for t in street_dataset.trials[:3]:
+        assert schema.validate(t, 'TrialRecord', mode='full') == []
+    t = next(x for x in street_dataset.trials if x['outcome']['status'] == 'complete' and x['streams']['touches'])
+    assert set(t['streams']['touches'][0]) == {'t', 'type', 'n', 'x', 'y', 'radius_x', 'radius_y', 'force',
+                                               'rotation_angle', 'x_norm', 'y_norm'}
+    assert t['timing']['return_onset_ms'] > t['timing']['end_detected_ms'] and 'return_cap_ms' in t['segmentation']['params']
+    assert set(t['streams']) >= {'quaternion_abs', 'orientation_abs', 'magnetometer', 'screen_events'}
 
 
 def test_export_bundle_is_valid(tiny_dataset):

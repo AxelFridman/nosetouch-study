@@ -1,21 +1,37 @@
-// Strings of the onboarding flow: welcome → consent → profile → sensors → calibration → setup.
-// Functions are allowed for interpolation. Hebrew mirror: ../he/onboarding.ts (identical keys and
-// array lengths; tests/i18n.test.ts checks this).
-import type { EhiAnswer, EhiShortForm, HandednessSelf, PhoneHand, ProtocolPreset, Sex } from '../../core/types';
+// Strings of the screens outside the session: welcome (with the consent) → profile → (sensor repair)
+// → (researchers' session setup), and the done screen. Functions are allowed for interpolation.
+// Hebrew mirror: ../he/onboarding.ts (identical keys and array lengths; tests/i18n.test.ts checks this).
+// NOTE for the PI: the consent wording (welcome.summary*, welcome.agree and consent.*) is the version
+// in public/config.json consent_version (2026-10-v2); bump it whenever this wording changes.
+import type { HandednessSelf, PhoneHand, ProtocolPreset, Sex } from '../../core/types';
 
 export const onboarding = {
   welcome: {
-    tagline: 'Can a phone feel which hand is holding it? Help us find out.',
-    aboutTitle: 'What you will do',
-    aboutBody:
-      'Hold your phone with your arm stretched out in front of you, then bring it in to gently touch the tip of your nose. You will repeat this with each hand, holding the phone in different ways and at different speeds.',
-    needsTitle: 'You need',
-    needs: ['About 10–30 minutes', 'This phone', 'A little space around you'],
-    privacy:
-      'Pseudonymous: you get a random participant code instead of your name. Only the motion sensors are recorded, and only during the movements.',
+    title: 'Nose-touch study',
+    lead: 'Help us teach a phone to tell which hand moved it.',
+    gestureLabel:
+      'Animation: a person holds the phone with the arm stretched out, brings it in to touch the tip of the nose, then stretches the arm out again.',
+    // the four key facts of the consent, shown before everything else
+    summaryDuration:
+      "You'll hold your phone at arm's length and touch your nose with it, about 40 times — around 5 minutes. You can stop at any time; everything you've done is kept.",
+    summarySensors: "We record only the phone's motion sensors (movement and rotation) — no camera, microphone or location.",
+    /** uploads: data goes to the research server; names: the name goes too (config.upload_nickname) */
+    summaryStored: (uploads: boolean, names: boolean): string =>
+      uploads
+        ? names
+          ? 'We store your name, age, sex, dominant hand and height with the data on a private research server.'
+          : 'We store your age, sex, dominant hand and height with the data on a private research server. Your name stays on this phone.'
+        : 'Your name, age, sex, dominant hand and height are stored with the data on this phone until it is sent to the researcher.',
+    summaryDelete: 'To have your data deleted, contact the researcher (details below).',
+    fullInfo: 'Full information',
+    /** region: StudyConfig.region in this language ('' → no location clause) */
+    agree: (minAge: number, region: string) =>
+      `I agree, I'm ${minAge} or older, ${region ? `I'm taking part from ${region}, ` : ''}and I have no arm or hand injury that makes this uncomfortable.`,
+    permissionNote: 'Your phone may ask to use its motion sensors: tap Allow.',
     start: 'Start',
-    continueAs: 'Continue as',
-    newParticipant: 'New participant (someone else)',
+    continueAs: (name: string) => `Continue as ${name}`,
+    continueHint: 'Tap Start to check your answers and go on.',
+    newPerson: 'New person',
     resumeTitle: 'Unfinished session',
     resumeBody: (done: number, total: number) => `${done} of ${total} ${total === 1 ? 'movement' : 'movements'} recorded.`,
     resumeStarted: (when: string) => `Started ${when}.`,
@@ -39,25 +55,27 @@ export const onboarding = {
       'You opened this link inside another app. Motion sensors often do not work there: tap the ⋯ or ⋮ menu and choose "Open in browser", or copy the link into Safari (iPhone) or Chrome (Android).',
     warnSim:
       'Simulation mode is on: a built-in simulator replaces the real sensors. For testing only — it switches off when the app is reloaded.',
+    warnSetup:
+      'Researcher mode: after the profile you choose the session on the setup screen. It switches off when the app is reloaded.',
     pendingUploads: (n: number) =>
       `${n} ${n === 1 ? 'item is' : 'items are'} waiting to be uploaded. ${n === 1 ? 'It is' : 'They are'} sent automatically when you are online.`,
     version: (v: string) => `Version ${v}`,
   },
 
+  // "Full information" on the welcome screen (a <details> below the four key facts).
   consent: {
-    title: 'Information and consent',
-    intro: 'Please read this before you decide whether to take part.',
     purposeTitle: 'What is this study about?',
     /** institution: StudyConfig.institution in this language ('' → neutral wording) */
     purpose: (institution: string) =>
       `${institution ? `Researchers at ${institution}` : 'Researchers'} are studying whether the motion sensors of a phone can tell if it is held in the left or in the right hand. Your recordings will be used to develop and test such a method.`,
     procedureTitle: 'What will I do?',
+    // street preset: 29 movements, plus 10 in the optional bonus round
     procedure:
-      'You will hold the phone with your arm stretched straight out in front of you and bring it in to gently touch the tip of your nose, many times. You will use both hands (one after the other), hold the phone in several ways (upright, sideways, upside down, screen toward you or away from you), move at different speeds, and do a few deliberately unusual movements. The app explains every part and beeps to start each movement.',
+      'You will hold the phone with your arm stretched straight out in front of you and bring it in to touch the tip of your nose, about 30 times (about 40 if you also do the optional bonus round at the end). You will use both hands (one after the other), hold the phone upright and sideways with the screen facing you, move at different speeds and do a few slightly different movements. Any part of the phone may touch your nose. The app shows what to do and beeps to start each movement. No table or other equipment is needed.',
     durationTitle: 'How long does it take?',
-    // estimateMinutes: quick 7.5, standard 14, full 29.5 min of movements, plus the setup steps
+    // street preset: estimateMinutes 5 min (the required part), plus the bonus round of about 1 minute
     duration:
-      'About 10–30 minutes, depending on the session you choose (the standard session takes about 15–20 minutes, including the setup). You can pause or stop at any time.',
+      'About 5 minutes, and at the end an optional bonus round of about 1 minute. You can pause or stop at any time; everything recorded until then is kept.',
     risksTitle: 'Risks and safety',
     risks: [
       'You might drop the phone: hold it firmly and, if you can, stand or sit where it would land on a bed or a sofa.',
@@ -66,56 +84,37 @@ export const onboarding = {
     ],
     voluntaryTitle: 'Taking part is voluntary',
     voluntary:
-      'You can stop at any moment without giving a reason. You can delete the data stored on this phone at any time on the "My data" screen. To have data that was already uploaded deleted, contact the researcher and quote your participant code.',
+      'You can stop at any moment without giving a reason. You can delete the data stored on this phone at any time on the "My data" screen. To have data that was already uploaded deleted, contact the researcher and quote your participant code (it is shown at the end).',
     collectedTitle: 'What is recorded',
     collected: [
-      'The motion sensors (accelerometer, gyroscope, orientation) and screen touches, only while a movement is being recorded.',
-      'Your answers to the short profile questions (age, sex, handedness, height, phone details).',
-      'Technical details of the phone and the browser, for example how fast the sensors report.',
+      'The motion sensors (accelerometer, gyroscope, orientation and, where the phone has one, the compass direction) and screen touches, only while a movement is being recorded.',
+      'Your answers to the short questions: your name, age, sex, dominant hand, the hand you usually hold your phone in, and your height (optional).',
+      'Technical details of the phone and the browser, for example the phone model and how fast the sensors report.',
     ],
     notCollectedTitle: 'What is never recorded',
     notCollected: 'No camera, no microphone, no location, no contacts and nothing from other apps.',
-    nicknameLocal:
-      'Your name is not needed. An optional nickname stays on this phone and is not uploaded.',
-    nicknameUploaded:
-      'Your name is not needed. An optional nickname is stored with your data, so please do not use your full name.',
+    nameUploaded:
+      'Your name is stored with your data on the private research server, so that the researcher can find your recordings (for example to delete them). It is never published.',
+    nameLocal: 'Your name stays on this phone and is not uploaded.',
     storageTitle: 'Where the data is stored',
     storageUpload:
-      'On this phone and in the study storage managed by the research team. It is sent there automatically when you are online.',
-    storageLocal:
-      'On this phone. You can export it as a file and send it to the research team.',
+      'On this phone and on a private research server managed by the research team. Each movement is sent there as soon as it is recorded, whenever the phone is online.',
+    storageLocal: 'On this phone. You can export it as a file and send it to the research team.',
     retentionTitle: 'How long it is kept',
     retention: (institution: string) =>
-      `The pseudonymous data is kept only as long as it is needed for this research and its publications, according to the rules of ${institution || 'the research institution'} and of the ethics committee that approved the study.`,
-    contactTitle: 'Questions?',
-    contactIntro: 'For questions or requests about your data, contact:',
-    contactNone: 'Contact the researcher who sent you this link.',
+      `The data is kept only as long as it is needed for this research and its publications, according to the rules of ${institution || 'the research institution'}. Publications never contain names.`,
+    contactIntro: 'For questions or to have your data deleted, contact:',
+    contactNone: 'For questions or to have your data deleted, contact the researcher who sent you this link.',
     version: (v: string) => `Consent version ${v}`,
-    /** region: StudyConfig.region in this language ('' → no location clause) */
-    agree: (minAge: number, region: string) =>
-      `I am at least ${minAge} years old, ${region ? `I am taking part from ${region}, ` : ''}I have read the information above, and I agree to take part.`,
-    accept: 'I agree, continue',
-    decline: 'Not now',
   },
 
   profile: {
     title: 'About you',
-    intro: 'A few quick questions. They help us understand for whom the method works well and for whom it does not.',
-    codeTitle: 'Your participant code',
-    codeHint:
-      'Write it down or take a screenshot. You need it to continue on another day or phone, or to ask for your data to be deleted.',
-    haveCodeTitle: 'Already have a participant code?',
-    otherCodeTitle: 'Not you? Enter your own participant code',
-    haveCodeHint: 'Enter it to keep using the same code. Leave it empty if this is your first time.',
-    codeFormat: 'A code looks like P-ABC234: "P-" and 6 letters or digits.',
-    codeChecking: 'Checking the code…',
-    codeFound: 'Welcome back! Your answers were loaded from this phone. Please check them.',
-    codeNew: 'Code accepted. Please fill in your details below.',
-    nickname: 'Nickname',
-    nicknameHintLocal: 'Optional. Stays on this phone, so you can recognise your profile.',
-    nicknameHintUploaded: 'Optional. It is stored with your data, so please do not use your full name.',
+    name: 'Full name',
+    namePlaceholder: 'First and last name',
+    nameHintUploaded: 'Optional. Stored with your data on the private research server.',
+    nameHintLocal: 'Optional. Stays on this phone.',
     age: 'Age',
-    ageHint: 'In years',
     sex: 'Sex',
     sexes: {
       female: 'Female',
@@ -123,41 +122,30 @@ export const onboarding = {
       other: 'Other',
       prefer_not_to_say: 'Prefer not to say',
     } as Record<Sex, string>,
-    handedness: 'Are you right-handed or left-handed?',
+    handedness: 'Dominant hand',
     handednessOptions: {
-      right: 'Right-handed',
-      left: 'Left-handed',
-      ambidextrous: 'Both equally (ambidextrous)',
+      right: 'Right',
+      left: 'Left',
+      ambidextrous: 'Both',
     } as Record<HandednessSelf, string>,
-    ehiTitle: 'Which hand do you use for…',
-    ehiHint: 'Four short questions from a standard handedness questionnaire.',
-    ehiItems: {
-      writing: 'Writing',
-      throwing: 'Throwing',
-      toothbrush: 'Holding a toothbrush',
-      spoon: 'Holding a spoon',
-    } as Record<keyof EhiShortForm, string>,
-    ehiAnswers: {
-      always_right: 'Always right',
-      usually_right: 'Usually right',
-      both: 'Both equally',
-      usually_left: 'Usually left',
-      always_left: 'Always left',
-    } as Record<EhiAnswer, string>,
     phoneHand: 'Which hand do you usually hold your phone in?',
     phoneHandOptions: {
       right: 'Right',
       left: 'Left',
-      both: 'Both / it varies',
+      both: 'Both',
     } as Record<PhoneHand, string>,
-    height: 'Height (cm)',
-    armIssue: 'Do you have an injury or a condition that affects how you move your arms or hands?',
-    phoneModel: 'Phone model',
-    phoneModelHint: 'For example iPhone 13 or Galaxy S23.',
-    phoneCase: 'Is your phone in a case or a cover?',
-    optional: 'Optional',
-    save: 'Save and continue',
-    saving: 'Saving…',
+    height: 'Height (cm, optional)',
+    returning: 'Returning? Enter your code',
+    notYou: 'Not you? Enter your own code',
+    codeYours: 'Participant code of this visit:',
+    codeInput: 'Code from your earlier visit',
+    codeHint: 'If you took part before, enter the code you got then. Leave it empty if this is your first time.',
+    codeFormat: 'A code looks like P-ABC234: "P-" and 6 letters or digits.',
+    codeChecking: 'Checking the code…',
+    codeFound: 'Welcome back! Your answers were loaded from this phone. Please check them.',
+    codeNew: 'Code accepted. Please fill in your details below.',
+    save: 'Continue',
+    saving: 'One moment…',
     errors: {
       ageRequired: 'Please enter your age.',
       ageRange: 'Please enter your age in whole years (up to 110).',
@@ -168,10 +156,12 @@ export const onboarding = {
     },
   },
 
+  // The repair screen: shown only when the background check after Start found that the sensors cannot
+  // record (permission denied, no events, too slow), or when resuming needs the permission again.
   sensors: {
     title: 'Sensor check',
     intro:
-      'The study records the motion sensors of your phone. Your browser may ask whether this page may use "motion and orientation": if it does, please tap Allow.',
+      'The study needs the motion sensors of your phone, and they are not working for this page yet. Follow the advice below, then measure again.',
     stepsTitle: 'What happens',
     steps: [
       'Tap the button below.',
@@ -230,61 +220,24 @@ export const onboarding = {
     testBeep: 'Play a test beep',
   },
 
-  calibration: {
-    title: 'Calibration',
-    intro:
-      'Three short steps (about 30 seconds) let us read the sensors of your phone correctly. You may skip them, but they make the data better.',
-    stepLabel: (n: number) => `Step ${n} of 3`,
-    flatTitle: 'Phone flat on a table',
-    flatHow:
-      'Put the phone on a table with the screen facing up. Tap "Measure", take your hand away and do not touch the phone until you hear the double beep.',
-    uprightTitle: 'Phone upright in front of you',
-    uprightHow:
-      'Hold the phone upright in front of you with the screen facing you, as if reading a message. Keep it still until the double beep.',
-    tiltTitle: 'Tilt test',
-    tiltHow:
-      'Hold the phone flat in front of you, screen facing up. At the beep, slowly tilt it to the RIGHT until it stands on its side, then bring it back flat (about 3 seconds).',
-    tiltSim: 'Skipped in simulation mode: the simulator cannot tilt the phone.',
-    measure: 'Measure',
-    measureAgain: 'Measure again',
-    getReady: (sec: number) => `Starting in ${sec}…`,
-    holdStill: 'Measuring… keep still',
-    tiltNow: 'Tilt slowly to the right… and back',
-    flatOk: 'Done ✓',
-    flatOkInverted: 'Done ✓ This browser reports gravity with the opposite sign (normal on an iPhone). Nothing to do.',
-    flatFaceDown:
-      'The phone seems to be lying screen-down. Put it on the table with the screen facing UP, take your hand away and tap "Measure again". If the screen was already facing up, you can continue.',
-    flatMoving: 'The phone moved. Put it on the table, take your hand away and try again.',
-    flatNotFlat: 'The phone does not seem to lie flat. Put it screen-up on a level table and try again.',
-    flatOdd: 'The readings look unusual. Try again; if it keeps happening, skip this step.',
-    noData: 'No sensor data arrived. Go back to the sensor check and try again.',
-    uprightOk: 'Done ✓',
-    uprightInverted:
-      'The readings do not match step 1. Please repeat step 1 (phone flat, screen facing UP), then this step (top edge up, screen facing you).',
-    uprightMoving: 'Please keep the phone still while it measures, then try again.',
-    uprightUnclear: 'Hold the phone upright (top edge up) with the screen facing you and try again.',
-    axisOk: 'Done ✓ The rotation readings look standard.',
-    axisNoted: 'Done ✓ This phone reports rotation in an unusual way. That is useful to know and has been noted.',
-    axisRadians: 'Done ✓ This phone reports rotation in radians. That has been noted.',
-    axisUnclear:
-      'We could not see a clear tilt. Tilt slowly, about a quarter turn to the right, and back. You can try again or simply continue.',
-    doneEarlier: 'Your earlier calibration is kept. Continue, or measure again.',
-    continue: 'Continue',
-    skip: 'Skip calibration',
-  },
-
+  // Researchers only (?setup=1 or Settings): choose the session instead of the study's default.
   setup: {
-    title: 'Your session',
-    intro: 'Choose how long you want to record. Longer sessions cover more ways of holding the phone.',
+    title: 'Session setup',
+    intro: 'For researchers: choose the session. Participants never see this screen; they get the study session.',
     presetLabel: 'Session',
     presets: {
-      quick: { label: 'Quick', desc: '4 ways of holding the phone, 3 speeds.' },
-      standard: { label: 'Standard', desc: '5 ways of holding the phone, speeds, start positions and a few unusual movements.' },
-      full: { label: 'Full', desc: 'All 9 ways of holding the phone, every speed and start position, unusual and free movements.' },
+      street: {
+        label: 'Street',
+        desc: 'The 5-minute visit: both hands, upright and sideways, then a few different movements. No table needed; a short bonus round is optional.',
+      },
+      quick: { label: 'Quick', desc: '3 ways of holding the phone, 3 speeds.' },
+      standard: { label: 'Standard', desc: '4 ways of holding the phone, speeds, start positions and a few unusual movements.' },
+      full: { label: 'Full', desc: 'All 5 ways of holding the phone, every speed and start position, unusual and free movements.' },
       custom: { label: 'Custom', desc: 'Build your own session (for researchers).' },
     } as Record<ProtocolPreset, { label: string; desc: string }>,
-    presetMeta: (trials: number, minutes: number) =>
-      `${trials} ${trials === 1 ? 'movement' : 'movements'} · about ${minutes} min`,
+    /** bonus: movements of the optional bonus round (0 = none) */
+    presetMeta: (trials: number, minutes: number, bonus: number) =>
+      `${trials} ${trials === 1 ? 'movement' : 'movements'}${bonus > 0 ? ` (+${bonus} bonus)` : ''} · about ${minutes} min`,
     posture: 'Will you stand or sit?',
     postureHint: 'Standing is preferred. Please keep the same posture for the whole session.',
     customTitle: 'Custom session',
@@ -301,8 +254,9 @@ export const onboarding = {
     errStart: 'Choose at least one start position.',
     errReps: 'Repetitions must be a whole number from 1 to 5.',
     summaryTitle: 'Summary',
-    summary: (trials: number, minutes: number) =>
-      `${trials} ${trials === 1 ? 'movement' : 'movements'}, about ${minutes} ${minutes === 1 ? 'minute' : 'minutes'} including short breaks.`,
+    /** bonus: movements of the optional bonus round (0 = none) */
+    summary: (trials: number, minutes: number, bonus: number) =>
+      `${trials} ${trials === 1 ? 'movement' : 'movements'}, about ${minutes} ${minutes === 1 ? 'minute' : 'minutes'} including short breaks${bonus > 0 ? `, plus an optional bonus round of ${bonus} ${bonus === 1 ? 'movement' : 'movements'}` : ''}.`,
     participant: 'Participant',
     bothHands: 'You will switch between your right and your left hand several times. The app always tells you which hand to use.',
     checklistTitle: 'Before you start',
@@ -315,6 +269,44 @@ export const onboarding = {
     start: 'Start recording',
     starting: 'Preparing…',
     needProfile: 'Please fill in your profile first.',
-    needConsent: 'Please read and accept the consent first.',
+    needConsent: 'Please agree to take part on the start screen first.',
+  },
+
+  done: {
+    /** firstName: first word of the participant's name ('' → no name) */
+    thanks: (firstName: string) => (firstName ? `Thank you, ${firstName}!` : 'Thank you!'),
+    completed: 'You finished the session. Thank you for helping our research!',
+    endedEarly: 'You stopped before the end. Thank you: everything you did is kept and useful.',
+    abandoned: 'The session ended early. Thank you: everything you recorded is still useful.',
+    noSession: 'Thank you for taking part!',
+    recorded: (n: number) => `${n} ${n === 1 ? 'movement' : 'movements'} recorded`,
+    uploadTitle: 'Sending your data',
+    allSent: 'All data uploaded ✓',
+    sending: (left: number) => `Uploading… please keep this page open a moment (${left} left)`,
+    offline: (left: number) =>
+      `This phone is offline: ${left} ${left === 1 ? 'item is' : 'items are'} waiting. ${left === 1 ? 'It is' : 'They are'} sent automatically the next time this page is open with an internet connection.`,
+    failed: (n: number) =>
+      `${n === 1 ? '1 item' : `${n} items`} could not be sent yet. The app keeps trying while this page is open; if it keeps failing, "My data" on the start screen shows why.`,
+    notConfigured: 'This study collects data as a file: tap "Save / share my data" and send the file to the researcher.',
+    uploadNow: 'Upload now',
+    uploading: 'Uploading…',
+    uploadResult: (sent: number, failed: number) =>
+      failed > 0 ? `Sent ${sent}, ${failed} not sent yet. See "My data" on the start screen for details.` : `Sent ${sent}.`,
+    nothingToUpload: 'Nothing left to upload.',
+    codeLabel: 'Your code:',
+    codeHint: '(to delete your data later)',
+    detailsTitle: 'Details',
+    attempts: 'Attempts (including repeats)',
+    duration: 'Time',
+    nextPerson: 'Next person',
+    home: 'Home',
+    exportData: 'Save / share my data',
+    exporting: 'Preparing your file…',
+    exported: {
+      shared: 'Shared.',
+      downloaded: 'The file was saved to your downloads.',
+      cancelled: 'Sharing was cancelled.',
+    },
+    exportFailed: 'The data file could not be created.',
   },
 };

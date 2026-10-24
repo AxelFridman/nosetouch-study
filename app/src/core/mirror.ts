@@ -16,7 +16,10 @@
  * (For generic angles this is (alpha, beta, gamma) → (360 − alpha, beta, −gamma); going through the
  * matrix also handles gamma = −90° and gimbal lock.) Quaternions: (x, y, z, w) → (x, −y, −z, w).
  * Compass headings (clockwise from North) → 360 − heading. Screen-orientation angles → 360 − angle
- * (landscape-primary ↔ landscape-secondary).
+ * (landscape-primary ↔ landscape-secondary). Magnetometer readings (device frame) of the earth's
+ * field, which lies in the North–South vertical plane that Mw reflects across (the same choice as the
+ * compass): m' = S·m → (−mx, my, mz), like acceleration. The schema 1.2 absolute streams
+ * (orientation_abs, quaternion_abs) mirror like their relative twins.
  *
  * Mirroring is an involution: mirroring twice returns the original values (up to float rounding
  * for the Euler angles, exactly for everything else).
@@ -29,7 +32,9 @@ import type {
   Hand,
   MotionSample,
   OrientationSample,
+  OrientationStream,
   PhoneRotation,
+  QuaternionStream,
   TrialCondition,
   TrialRecord,
   Vec3,
@@ -107,7 +112,7 @@ export function mirrorMotionSample(s: MotionSample): MotionSample {
 /** Mirrors W3C Euler angles: R' = Mw·R·S, re-expressed with eulerZXYFromMat. Nulls stay null. */
 export function mirrorOrientationSample(s: OrientationSample): OrientationSample {
   const e = mirrorEuler(s.alpha, s.beta, s.gamma);
-  return {
+  const out: OrientationSample = {
     t: s.t,
     ts: s.ts,
     alpha: e.alpha,
@@ -116,13 +121,36 @@ export function mirrorOrientationSample(s: OrientationSample): OrientationSample
     absolute: s.absolute,
     compass: s.compass === null ? null : mirrorHeading(s.compass),
   };
+  if (s.compass_accuracy !== undefined) out.compass_accuracy = s.compass_accuracy; // an uncertainty, not a direction
+  return out;
+}
+
+/** In place: Euler angles and compass headings of an orientation stream (compass_accuracy is kept). */
+function mirrorOrientationStream(o: OrientationStream | null | undefined): void {
+  if (!o) return;
+  for (let i = 0; i < o.t.length; i++) {
+    const e = mirrorEuler(o.alpha[i], o.beta[i], o.gamma[i]);
+    o.alpha[i] = e.alpha;
+    o.beta[i] = e.beta;
+    o.gamma[i] = e.gamma;
+  }
+  o.compass = o.compass.map((c) => (c === null ? null : mirrorHeading(c)));
+}
+
+/** In place: (x, y, z, w) → (x, −y, −z, w). */
+function mirrorQuaternionStream(q: QuaternionStream | null | undefined): void {
+  if (!q) return;
+  q.y = q.y.map((v) => -v);
+  q.z = q.z.map((v) => -v);
 }
 
 /**
  * Returns a deep-copied trial whose streams, condition and detected rotation are mirrored.
- * Also mirrored, for consistency: segmentation.baseline.gravity (device-frame vector) and the
- * screen orientation (angle → 360 − angle, landscape-primary ↔ landscape-secondary).
- * NOT mirrored: touch x/y (the screen width is not stored), ids, timing, outcome and quality.
+ * Also mirrored, for consistency: segmentation.baseline.gravity (device-frame vector), the screen
+ * orientation (angle → 360 − angle, landscape-primary ↔ landscape-secondary) and the schema 1.2
+ * streams (orientation_abs, quaternion_abs, magnetometer, screen_events).
+ * NOT mirrored: touches (x/y in px; the screen width is not stored, and the contact details follow
+ * x/y), ids, timing, outcome and quality.
  */
 export function mirrorTrial(trial: TrialRecord): TrialRecord {
   const out = structuredClone(trial);
@@ -134,21 +162,20 @@ export function mirrorTrial(trial: TrialRecord): TrialRecord {
   m.rr_beta = m.rr_beta.map(neg); // y
   m.rr_gamma = m.rr_gamma.map(neg); // z
 
-  const o = out.streams.orientation;
-  if (o) {
-    for (let i = 0; i < o.t.length; i++) {
-      const e = mirrorEuler(o.alpha[i], o.beta[i], o.gamma[i]);
-      o.alpha[i] = e.alpha;
-      o.beta[i] = e.beta;
-      o.gamma[i] = e.gamma;
-    }
-    o.compass = o.compass.map((c) => (c === null ? null : mirrorHeading(c)));
-  }
+  mirrorOrientationStream(out.streams.orientation);
+  mirrorOrientationStream(out.streams.orientation_abs);
+  mirrorQuaternionStream(out.streams.quaternion);
+  mirrorQuaternionStream(out.streams.quaternion_abs);
 
-  const q = out.streams.quaternion;
-  if (q) {
-    q.y = q.y.map((v) => -v);
-    q.z = q.z.map((v) => -v);
+  const mag = out.streams.magnetometer;
+  if (mag) mag.x = mag.x.map(neg);
+
+  const screens = out.streams.screen_events;
+  if (screens) {
+    for (const s of screens) {
+      s.angle = s.angle === null ? null : mirrorHeading(s.angle);
+      s.type = mirrorScreenType(s.type);
+    }
   }
 
   out.detected.rotation_start = mirrorRotation(trial.detected.rotation_start);

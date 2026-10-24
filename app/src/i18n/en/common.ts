@@ -101,6 +101,10 @@ export const common = {
     chin: { label: 'Touch your chin', how: 'This time touch your CHIN instead of your nose.' },
     forehead: { label: 'Touch your forehead', how: 'This time touch your FOREHEAD instead of your nose.' },
     jerky: { label: 'Jerky movement', how: 'Move to your nose in a jerky, stop-and-go way.' },
+    tilted_touch: {
+      label: 'Tilted touch',
+      how: 'Touch your nose with the top edge of the phone: tilt it as you arrive.',
+    },
   } as Record<Variant, { label: string; how: string }>,
 
   postures: {
@@ -108,7 +112,8 @@ export const common = {
     sitting: 'Sitting',
   } as Record<Posture, string>,
 
+  // The double beep (end cue) means "arm out again": in the hands-free flow the next trial starts by itself.
   movementSummary:
-    'Stretch your arm out and hold still. At the beep, bring the phone to gently touch the tip of your nose and hold it there until the double beep.',
+    'Stretch your arm out and hold still. At the beep, bring the phone to gently touch your nose (any part of the phone may touch it) and hold it there until the double beep, then stretch your arm out again.',
   safety: 'Hold the phone firmly (doing this over a bed or sofa is a good idea) and always touch your nose gently.',
 };

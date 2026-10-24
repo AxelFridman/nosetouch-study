@@ -1,37 +1,41 @@
 /**
- * Participant session runner: block intro → trial instruction (Ready) → live recording → review →
- * (next trial | block break → block intro) → … → finishSession('completed') → Done screen.
+ * Participant session screen. The session's logic (the hands-free chain, the hand question, the pause
+ * sheet, the checkpoint, the tap-review mode, saving and finishing) lives in sessionRunner.ts, which
+ * is unit-tested; this file renders runner.state() and forwards to it:
+ *  - the taps (How-to card btn-try / block intro btn-block-start, hand-report buttons, pause sheet,
+ *    checkpoint, and the tap mode's Ready / review / break / retry);
+ *  - the recorder's results (useTrialRecorder: one TrialController at a time, the live panel's state,
+ *    the stall watchdog and the no-GO idle limit);
+ *  - the system back button (setBackHandler) and page visibility (visibilitychange → hidden, pagehide).
  *
- * Everything is derived from state.session (progress.next_trial_index), so a resumed session continues
- * at the right trial; the local view state only says which step of the current trial is on screen.
- *  - Ready tap: the iOS motion-permission request (when still needed) and the audio unlock run
- *    synchronously inside the tap; the attempt number is fetched BEFORE the tap.
+ * Cards (spec v2 §1): How-to card (howto-card: gesture-demo animation, three steps, "I'm sitting"
+ * toggle tgl-sitting, btn-try), hand question (hand-report), block intro (block-intro: tier label,
+ * "Phone in your LEFT hand" / "Keep the phone in your LEFT hand", POV animation + grip text, what
+ * varies, btn-block-start naming the hand), live panel (trial-panel with data-phase and
+ * data-trial-index: huge hand and speed words, the variant / start-position instruction, a status line
+ * by phase, the grip picture on a wrong grip, progress bar, "about N min left", btn-pause: hold ≈800 ms),
+ * pause sheet (pause-sheet inside session-exit), checkpoint (checkpoint: btn-finish, btn-bonus).
+ *
+ * UI rules:
  *  - The live panel re-renders at most ~15 Hz (immediately on phase/message changes), never per sample.
- *  - Touches anywhere on the panel go to controller.addTouch. The only control is a long-press Stop,
- *    disabled while the phone travels to / rests at the nose (where the nose could press it).
- *  - Page hidden → abort('interrupted'); no new motion sample for 2 s → abort('interrupted') and a
- *    sensors-stalled message. The UI reason is appended to quality.warnings ('ui_abort:…').
- *  - Failed attempts are saved automatically (accepted=false). A complete attempt is saved the moment
- *    it ends, BEFORE the review shows, as not accepted (outcome.note 'review_interrupted'): a reload,
- *    a back gesture or a closed tab during the review can no longer lose it (IndexedDB work started
- *    in pagehide does not finish). The decision (Next / Redo / Problem) re-saves the same trial_id,
- *    which saveAttempt counts as a change of acceptance, not as a new attempt.
- *  - System back button / edge swipe (setBackHandler): never leaves the session. It stops a running
- *    trial like the Stop control (reason 'user') and opens the Pause dialog; the guard history entry
- *    is restored, so repeated presses are caught too.
- *  - Taps within TAP_GUARD_MS of a step change are ignored: Start, Ready, Try again, Continue and the
- *    review buttons share screen positions with the step before, so a double tap must not press the
- *    next step's button.
+ *  - Touches anywhere on the panel go to controller.addTouch with their contact details.
+ *  - No motion sample for STALL_MS → abort('stalled'); auto mode: no GO within IDLE_MS → abort('idle').
+ *  - Taps within TAP_GUARD_MS of a step change are ignored, and the buttons of a screen that appears
+ *    without a tap of the participant (after a trial: the phone may still be near the face) stay
+ *    disabled for ARM_DELAY_MS, so a nose or a cheek cannot press them.
+ *  - Nothing animates while a trial records: the animations are on the intro screens only.
  */
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
-import type { JSX } from 'preact';
+import type { ComponentChildren, JSX } from 'preact';
 import type {
   DeviceInfo,
+  Hand,
   ParticipantFlag,
-  PermissionState,
   PhoneRotation,
+  PlannedBlock,
   PlannedTrial,
   SessionRecord,
+  TrialCondition,
   TrialLiveState,
   TrialMessage,
   TrialPhase,
@@ -39,46 +43,77 @@ import type {
 } from '../../core/types';
 import { ORIENTATIONS } from '../../core/constants';
 import { createTrialController, type TrialController } from '../../core/trialController';
-import { getScreenOrientation, requestMotionPermission } from '../../core/sensors';
-import { Button, Card, Notice, ProgressBar, Screen } from '../../ui/components';
+import { getScreenOrientation, readTouch } from '../../core/sensors';
+import { Button, Card, Notice, ProgressBar, Screen, Toggle } from '../../ui/components';
+import { GestureAnimation, type GestureContact, type GestureVariant } from '../../ui/GestureAnimation';
 import { PhoneFigure } from '../../ui/PhoneFigure';
 import { finiteMax, motionMagnitudes, SignalPlot, type SignalMarker, type SignalSeries } from '../../ui/SignalPlot';
-import { stringsFor, useStrings, type Strings } from '../../i18n';
+import { useStrings, type Strings } from '../../i18n';
 import { getServices } from '../services';
 import { createTapGuard } from '../state';
-import { getState, navigate, setBackHandler, setState, showToast, useAppState } from '../store';
+import { navigate, setBackHandler, useAppState } from '../store';
 import { deniedContext } from './SensorCheckScreen';
 import {
-  applyDecision,
-  asFailedAttempt,
-  asUnreviewed,
+  blockChange,
   blockOf,
   blockPosition,
+  blockSpeeds,
   buildTrialOptions,
-  finishSession,
-  nextAttemptNumber,
-  nextPlannedTrial,
-  saveAttempt,
-  stepAfterAccept,
+  isChoiceTrial,
+  plannedAt,
+  previousBlock,
+  progressOf,
+  reviewModeOf,
+  roundMinutes,
+  secondsLeft,
   type TrialDecision,
 } from '../sessionFlow';
+import {
+  createSessionRunner,
+  type PauseReason,
+  type RecorderPort,
+  type RecorderStart,
+  type RunInfo,
+  type SessionRunner,
+  type UiAbort,
+} from '../sessionRunner';
 import '../../ui/session.css';
+
+// the session logic's helpers, also reachable from here (tests, older imports)
+export {
+  failureKind,
+  IDLE_MS,
+  introWords,
+  pauseReasonOf,
+  perTrialSpeechAllowed,
+  persistAttempt,
+  reachedGo,
+  RETRY_FLASH_MS,
+  saveForReview,
+  trialWords,
+  uiAbortWarning,
+  type FailureKind,
+  type PauseReason,
+  type UiAbort,
+} from '../sessionRunner';
 
 /** Watchdog: abort when no motion sample has arrived for this long. */
 export const STALL_MS = 2000;
 /** Live panel refresh period (≈ 15 Hz). */
 export const RENDER_MS = 66;
+/** Buttons of a screen that appeared without a tap stay disabled this long (see the module doc). */
+export const ARM_DELAY_MS = 900;
 /** If the controller does not deliver a record this long after an abort, give up on it. */
 const FINISH_FALLBACK_MS = 3000;
 const FLAGS: ParticipantFlag[] = ['wrong_hand', 'wrong_orientation', 'other_problem'];
 
 // ───────────────────────────── pure helpers (exported for tests) ─────────────────────────────
 
-export type UiAbort = 'user' | 'hidden' | 'stalled' | 'unmount' | 'start_failed';
-export type FailureKind = 'no_movement' | 'too_long' | 'aborted' | 'interrupted' | 'sensor_stalled' | 'error';
 export type PanelTone = 'wait' | 'go' | 'move' | 'done' | 'error';
+/** A key of the live panel's status line texts (strings.session.live.status). */
+export type StatusKey = keyof Strings['session']['live']['status'];
 
-const ERROR_MESSAGES: TrialMessage[] = ['too_early', 'no_movement', 'too_long', 'sensor_stalled'];
+const ERROR_MESSAGES: TrialMessage[] = ['too_early', 'no_movement', 'too_long', 'sensor_stalled', 'wrong_grip'];
 
 /** Background colour family of the live panel for a phase/message. */
 export function panelTone(phase: TrialPhase | null, message: TrialMessage | null): PanelTone {
@@ -89,6 +124,7 @@ export function panelTone(phase: TrialPhase | null, message: TrialMessage | null
     case 'moving':
       return 'move';
     case 'post_roll':
+    case 'returning':
     case 'done':
       return 'done';
     default:
@@ -96,34 +132,46 @@ export function panelTone(phase: TrialPhase | null, message: TrialMessage | null
   }
 }
 
-/** Why an attempt failed, for the participant-facing message. */
-export function failureKind(record: TrialRecord | null, uiAbort: UiAbort | null): FailureKind {
-  if (uiAbort === 'stalled') return 'sensor_stalled';
-  if (!record) return 'error';
-  switch (record.outcome.status) {
+/** The live panel's status line: a special message first, else by phase. */
+export function statusKey(phase: TrialPhase | null, message: TrialMessage | null): StatusKey {
+  switch (message) {
+    case 'too_early':
+    case 'wrong_grip':
+    case 'sensor_stalled':
     case 'no_movement':
     case 'too_long':
-    case 'aborted':
-    case 'interrupted':
-      return record.outcome.status;
+      return message;
+    case 'return_arm':
+      return 'returning';
     default:
-      return 'error';
+      break;
+  }
+  switch (phase) {
+    case 'waiting_still':
+      return 'waiting';
+    case 'foreperiod':
+      return 'foreperiod';
+    case 'armed':
+      return 'go';
+    case 'moving':
+      return 'moving';
+    case 'post_roll':
+      return 'at_nose';
+    case 'returning':
+      return 'returning';
+    case 'done':
+      return 'done';
+    default:
+      return 'starting';
   }
 }
 
-/** quality.warnings entry recording why the UI aborted the trial. */
-export function uiAbortWarning(reason: UiAbort | null): string | null {
-  if (!reason) return null;
-  const name = reason === 'hidden' ? 'page_hidden' : reason === 'stalled' ? 'sensor_stall' : reason;
-  return `ui_abort:${name}`;
-}
-
-/** The Stop control works before the movement only: at the nose, the nose itself could long-press it. */
+/** The pause control works before the movement only: at the nose, the nose itself could long-press it. */
 export function stopAllowed(phase: TrialPhase | null): boolean {
   return phase === null || phase === 'waiting_still' || phase === 'foreperiod' || phase === 'armed';
 }
 
-/** The Ready screen's advice after a denied motion permission, for the browser the page runs in. */
+/** The advice after a denied motion permission, for the browser the page runs in. */
 export function permissionDeniedText(t: Strings['session']['ready']['permissionDenied'], device: DeviceInfo | null): string {
   const ctx = deniedContext(device);
   switch (ctx.kind) {
@@ -142,89 +190,36 @@ export function permissionDeniedText(t: Strings['session']['ready']['permissionD
   }
 }
 
+/** The illustration of a trial: tilted_touch → the angled contact; curved / pause → their variant. */
+export function gestureFor(c: TrialCondition): { contact: GestureContact; variant: GestureVariant } {
+  return {
+    contact: c.variant === 'tilted_touch' ? 'angled' : 'straight',
+    variant: c.variant === 'curved' || c.variant === 'pause' ? c.variant : 'standard',
+  };
+}
+
+/** The intro's line on what changes inside a block: its special movements, else changing speeds. */
+export function variesLine(block: PlannedBlock, s: Strings): string | null {
+  const items: string[] = [];
+  for (const { condition: c } of block.trials) {
+    const label =
+      c.variant !== 'standard'
+        ? s.common.variants[c.variant].label
+        : c.start_position !== 'natural'
+          ? s.common.startPositions[c.start_position].label
+          : null;
+    if (label && !items.includes(label)) items.push(label);
+  }
+  if (items.length > 0) return s.session.intro.variesList(items.join(' · '));
+  return blockSpeeds(block).length > 1 ? s.session.intro.speedsVary : null;
+}
+
 function safeScreenOrientation(): { type: string | null; angle: number | null } {
   try {
     return getScreenOrientation();
   } catch {
     return { type: null, angle: null };
   }
-}
-
-function unlockAudio(): void {
-  try {
-    void getServices().cues.unlock().catch(() => undefined);
-  } catch {
-    // audio cues are optional; the visual cues still work
-  }
-}
-
-function acquireWakeLock(): void {
-  try {
-    void getServices().wakeLock.acquire().catch(() => false);
-  } catch {
-    // not fatal: the screen may dim between trials
-  }
-}
-
-function releaseWakeLock(): void {
-  try {
-    void getServices().wakeLock.release().catch(() => undefined);
-  } catch {
-    // nothing to release
-  }
-}
-
-/**
- * Speaks `parts` when speech is enabled. MUST be called synchronously inside a tap handler: iOS
- * Safari only speaks while a user gesture is being processed (timers/effects stay silent).
- */
-function speak(parts: (string | null | false | undefined)[]): void {
-  try {
-    const { cues } = getServices();
-    const { settings } = getState();
-    if (!settings.speech || !cues.say) return;
-    const text = parts.filter(Boolean).join('. ');
-    if (text) cues.say(text, settings.language);
-  } catch {
-    // speech is a convenience; the screen and the beeps carry the protocol
-  }
-}
-
-/** What is said at the Ready tap: useful when the screen will face away from the participant. */
-function trialSpeech(c: PlannedTrial['condition']): string[] {
-  const words = stringsFor(getState().settings.language).common;
-  return [
-    words.hands[c.hand],
-    words.speeds[c.speed].label,
-    c.start_position !== 'natural' ? words.startPositions[c.start_position].label : '',
-    c.variant !== 'standard' ? words.variants[c.variant].label : '',
-  ];
-}
-
-/** Saves an attempt into its own session; never throws (a toast reports failures). */
-export async function persistAttempt(record: TrialRecord): Promise<SessionRecord | null> {
-  try {
-    const cur = getState().session;
-    const base =
-      cur && cur.session_id === record.session_id ? cur : await getServices().store.getSession(record.session_id);
-    if (!base) throw new Error(`session ${record.session_id} not found`);
-    return await saveAttempt(base, record);
-  } catch (e) {
-    console.error('saving the attempt failed', e);
-    showToast(stringsFor(getState().settings.language).session.saveFailed, 'error');
-    return null;
-  }
-}
-
-/**
- * Saves a complete attempt the moment it ends, before its review shows: not accepted, outcome.note
- * 'review_interrupted'. The decision re-saves the same trial_id later (saveAttempt counts that as a
- * change of acceptance, never as another attempt). Marks it settled, so the protective save on
- * pagehide/unmount has nothing left to do.
- */
-export function saveForReview(record: TrialRecord, settled: Set<string>): Promise<SessionRecord | null> {
-  settled.add(record.trial_id);
-  return persistAttempt(asUnreviewed(record));
 }
 
 // ───────────────────────────── recorder hook ─────────────────────────────
@@ -237,20 +232,16 @@ interface Run {
   fallback: ReturnType<typeof setTimeout> | undefined;
 }
 
-interface Recorder {
+interface Recorder extends RecorderPort {
   live: TrialLiveState | null;
   stalled: boolean;
-  active: boolean;
-  start(session: SessionRecord, planned: PlannedTrial, attempt: number): void;
-  abort(reason: UiAbort): void;
   touch(type: 'start' | 'end' | 'cancel', e: TouchEvent): void;
 }
 
-/** Owns one TrialController at a time: throttled live state, watchdog, abort reasons. */
+/** Owns one TrialController at a time: throttled live state, watchdogs, abort reasons. */
 function useTrialRecorder(onFinished: FinishHandler): Recorder {
   const [live, setLive] = useState<TrialLiveState | null>(null);
   const [stalled, setStalled] = useState(false);
-  const [active, setActive] = useState(false);
   const runRef = useRef<Run | null>(null);
   const abortRef = useRef<UiAbort | null>(null);
   const mounted = useRef(true);
@@ -280,10 +271,10 @@ function useTrialRecorder(onFinished: FinishHandler): Recorder {
     };
   }, []);
 
-  const start = (session: SessionRecord, planned: PlannedTrial, attempt: number) => {
+  const start = (session: SessionRecord, planned: PlannedTrial, attempt: number, o: RecorderStart) => {
     if (runRef.current) return;
     abortRef.current = null;
-    const buf = { live: null as TrialLiveState | null, seq: 0, shown: 0, key: '' };
+    const buf = { live: null as TrialLiveState | null, seq: 0, shown: 0, key: '', goSeen: false };
     let ticker: ReturnType<typeof setInterval> | undefined;
     let settled = false;
     const run: Run = {
@@ -295,14 +286,14 @@ function useTrialRecorder(onFinished: FinishHandler): Recorder {
         clearInterval(ticker);
         clearTimeout(run.fallback);
         if (runRef.current === run) runRef.current = null;
-        if (mounted.current) setActive(false);
         handler.current(record, abortRef.current, error);
       },
     };
 
     try {
       const services = getServices();
-      const source = services.createSource({ condition: planned.condition });
+      // awaitReturn: the simulated participant starts this trial at the nose (real sensors ignore it)
+      const source = services.createSource({ condition: planned.condition, startAtNose: o.awaitReturn });
       run.controller = createTrialController(
         buildTrialOptions(session, planned, attempt, {
           source,
@@ -310,6 +301,7 @@ function useTrialRecorder(onFinished: FinishHandler): Recorder {
           onLive: (ls) => {
             buf.live = ls;
             buf.seq++;
+            if (ls.phase !== 'waiting_still' && ls.phase !== 'foreperiod') buf.goSeen = true;
             const key = `${ls.phase}|${ls.message ?? ''}`;
             if (key !== buf.key) {
               // phase changes (GO!) are shown at once; everything else waits for the ticker
@@ -320,6 +312,9 @@ function useTrialRecorder(onFinished: FinishHandler): Recorder {
           },
           getScreenOrientation: safeScreenOrientation,
           isHidden: () => typeof document !== 'undefined' && document.hidden,
+          readyCue: o.readyCue,
+          awaitReturn: o.awaitReturn,
+          gripGate: o.gripGate,
         }),
       );
     } catch (e) {
@@ -328,13 +323,15 @@ function useTrialRecorder(onFinished: FinishHandler): Recorder {
     }
 
     runRef.current = run;
-    setLive(null);
-    setStalled(false);
-    setActive(true);
+    if (mounted.current) {
+      setLive(null);
+      setStalled(false);
+    }
 
     const controller = run.controller;
     let lastSeen = controller.lastSampleAt;
-    let lastChange = performance.now();
+    const startedAt = performance.now();
+    let lastChange = startedAt;
     ticker = setInterval(() => {
       if (buf.seq !== buf.shown) {
         buf.shown = buf.seq;
@@ -348,7 +345,9 @@ function useTrialRecorder(onFinished: FinishHandler): Recorder {
       } else if (now - lastChange > STALL_MS && !abortRef.current) {
         if (mounted.current) setStalled(true);
         abort('stalled');
+        return;
       }
+      if (o.idleMs !== null && !buf.goSeen && now - startedAt > o.idleMs && !abortRef.current) abort('idle');
     }, RENDER_MS);
 
     controller.result.then(
@@ -365,15 +364,26 @@ function useTrialRecorder(onFinished: FinishHandler): Recorder {
   const touch = (type: 'start' | 'end' | 'cancel', e: TouchEvent) => {
     const run = runRef.current;
     if (!run) return;
-    const first = e.changedTouches[0] ?? e.touches[0];
     try {
-      run.controller.addTouch(type, e.touches.length, first ? first.clientX : null, first ? first.clientY : null);
+      // position + contact size/force/angle + the position as a fraction of the viewport (schema 1.2)
+      const r = readTouch(e.changedTouches[0] ?? e.touches[0]);
+      run.controller.addTouch(type, e.touches.length, r.x, r.y, undefined, r.details);
     } catch {
       // touches are auxiliary data; never break the trial for them
     }
   };
 
-  return { live, stalled, active, start, abort, touch };
+  return { live, stalled, isRunning: () => runRef.current !== null, start, abort, touch };
+}
+
+/** false for `ms` after `key` changed (see ARM_DELAY_MS). */
+function useArmed(key: string, ms: number = ARM_DELAY_MS): boolean {
+  const [armedKey, setArmedKey] = useState<string | null>(null);
+  useEffect(() => {
+    const t = setTimeout(() => setArmedKey(key), ms);
+    return () => clearTimeout(t);
+  }, [key]);
+  return armedKey === key;
 }
 
 // ───────────────────────────── small components ─────────────────────────────
@@ -398,8 +408,8 @@ function ProgressRing(props: { value: number }) {
   );
 }
 
-/** Stop control that only fires after a ~800 ms press (a brushing nose or cheek must not stop a trial). */
-function HoldToStop(props: { disabled: boolean; onStop: () => void; label: string; aria: string }) {
+/** Pause control that only fires after a ~800 ms press (a nose touch lasts 80–240 ms and must never trigger it). */
+function HoldToPause(props: { disabled: boolean; onPause: () => void; label: string; aria: string }) {
   const [pressing, setPressing] = useState(false);
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const cancel = () => {
@@ -413,7 +423,7 @@ function HoldToStop(props: { disabled: boolean; onStop: () => void; label: strin
     timer.current = setTimeout(() => {
       timer.current = undefined;
       setPressing(false);
-      props.onStop();
+      props.onPause();
     }, 800);
   };
   useEffect(() => () => clearTimeout(timer.current), []);
@@ -426,7 +436,7 @@ function HoldToStop(props: { disabled: boolean; onStop: () => void; label: strin
       class={`tp-stop ${pressing ? 'is-pressing' : ''}`}
       disabled={props.disabled}
       aria-label={props.aria}
-      data-testid="btn-stop-hold"
+      data-testid="btn-pause"
       onPointerDown={begin}
       onPointerUp={cancel}
       onPointerLeave={cancel}
@@ -446,16 +456,34 @@ function HoldToStop(props: { disabled: boolean; onStop: () => void; label: strin
   );
 }
 
-function TrialPanel(props: { planned: PlannedTrial; recorder: Recorder; simulated: boolean }) {
+function TrialPanel(props: {
+  run: RunInfo;
+  recorder: Recorder;
+  simulated: boolean;
+  progress: { done: number; total: number };
+  minutes: number | null;
+}) {
   const s = useStrings();
   const { live, stalled } = props.recorder;
-  const c = props.planned.condition;
-  const phase = live?.phase ?? null;
-  const message: TrialMessage | null = stalled ? 'sensor_stalled' : (live?.message ?? null);
+  const { run } = props;
+  const c = run.planned.condition;
+  const flash = run.flash;
+  const phase: TrialPhase | null = flash ? 'done' : (live?.phase ?? (run.chained ? 'waiting_still' : null));
+  const message: TrialMessage | null = flash ?? (stalled ? 'sensor_stalled' : (live?.message ?? null));
   const tone = panelTone(phase, message);
-  const big = message ? s.session.live.messages[message] : live ? s.session.live.messages.hold_still : s.session.live.starting;
-  const holding = !stalled && (phase === null || phase === 'waiting_still' || phase === 'foreperiod') && message !== 'too_early';
-  const progress = phase === 'foreperiod' ? 1 : (live?.still_progress ?? 0);
+  const status = s.session.live.status[statusKey(phase, message)];
+  const before = phase === null || phase === 'waiting_still' || phase === 'foreperiod';
+  const holding = !flash && !stalled && before && message !== 'too_early' && message !== 'wrong_grip' && message !== 'return_arm';
+  const showGrip = !flash && (message === 'wrong_grip' || (run.gripHint && before));
+  const stillProgress = phase === 'foreperiod' ? 1 : (live?.still_progress ?? 0);
+  const choice = isChoiceTrial(c);
+  const special =
+    c.variant !== 'standard'
+      ? s.common.variants[c.variant]
+      : c.start_position !== 'natural'
+        ? s.common.startPositions[c.start_position]
+        : null;
+  const pct = props.progress.total > 0 ? Math.min(1, props.progress.done / props.progress.total) : 0;
   const onTouch = (type: 'start' | 'end' | 'cancel') => (e: JSX.TargetedTouchEvent<HTMLDivElement>) =>
     props.recorder.touch(type, e);
 
@@ -465,29 +493,49 @@ function TrialPanel(props: { planned: PlannedTrial; recorder: Recorder; simulate
       data-testid="trial-panel"
       data-phase={phase ?? 'waiting_still'}
       data-tone={tone}
+      data-trial-index={run.planned.trial_index}
       onTouchStart={onTouch('start')}
       onTouchEnd={onTouch('end')}
       onTouchCancel={onTouch('cancel')}
     >
       <div class="tp-top">
-        <span class="tp-chip">{s.common.handShort[c.hand]}</span>
-        <span class="tp-condition" data-testid="tp-condition">
-          {s.common.speeds[c.speed].label}
-          {c.start_position !== 'natural' ? ` · ${s.common.startPositions[c.start_position].label}` : ''}
-          {c.variant !== 'standard' ? ` · ${s.common.variants[c.variant].label}` : ''}
-        </span>
-        {props.simulated ? <span class="tp-chip">{s.session.live.sim}</span> : <span aria-hidden="true" />}
+        <div class="tp-progress" aria-hidden="true">
+          <div style={{ width: `${(pct * 100).toFixed(1)}%` }} />
+        </div>
+        <div class="tp-top-row">
+          <span class="tp-left" data-testid="tp-time-left">
+            {props.minutes !== null ? s.session.live.minutesLeft(props.minutes) : ''}
+          </span>
+          {props.simulated ? <span class="tp-chip">{s.session.live.sim}</span> : <span aria-hidden="true" />}
+        </div>
       </div>
-      {holding && <ProgressRing value={progress} />}
-      <p class="tp-message" aria-live="assertive">
-        {big}
+      <div class="tp-words" data-testid="tp-condition">
+        <span class={`tp-hand tp-hand-${choice ? 'any' : c.hand}`} data-testid="tp-hand">
+          {choice ? s.session.live.anyHand : s.common.handShort[c.hand]}
+        </span>
+        <span class="tp-speed" data-testid="tp-speed">
+          {s.session.live.speedWords[c.speed]}
+        </span>
+      </div>
+      {special && (
+        <p class="tp-variant" data-testid="tp-variant">
+          <strong>{special.label}</strong> <span>{special.how}</span>
+        </p>
+      )}
+      {showGrip && (
+        <div class="tp-grip" data-testid="tp-grip">
+          <PhoneFigure orientation={c.orientation} size={104} />
+        </div>
+      )}
+      {holding && <ProgressRing value={stillProgress} />}
+      <p class="tp-message" aria-live="assertive" data-testid="tp-status">
+        {status}
       </p>
-      {holding && live && <p class="tp-sub">{s.session.live.waitBeep}</p>}
-      <HoldToStop
-        disabled={stalled || !stopAllowed(phase)}
-        onStop={() => props.recorder.abort('user')}
-        label={s.session.live.stop}
-        aria={s.session.live.stopAria}
+      <HoldToPause
+        disabled={!!flash || stalled || !stopAllowed(phase)}
+        onPause={() => props.recorder.abort('user')}
+        label={s.session.live.pause}
+        aria={s.session.live.pauseAria}
       />
     </div>
   );
@@ -618,258 +666,346 @@ function TrialReview(props: { record: TrialRecord; busy: boolean; onDecide: (d: 
   );
 }
 
-// ───────────────────────────── screen ─────────────────────────────
+/** The intro of the choice block: how to do the movement, then one free trial (btn-try). */
+function HowToCard(props: {
+  session: SessionRecord;
+  headerRight: ComponentChildren;
+  enabled: boolean;
+  notices: ComponentChildren;
+  onStart: () => void;
+  onSitting: (sitting: boolean) => void;
+}) {
+  const s = useStrings();
+  const t = s.session.howTo;
+  return (
+    <Screen
+      title={t.title}
+      headerRight={props.headerRight}
+      testId="screen-session"
+      footer={
+        <Button size="xl" block testId="btn-try" disabled={!props.enabled} onClick={props.onStart}>
+          {t.try}
+        </Button>
+      }
+    >
+      <section class="stack howto" data-testid="howto-card">
+        {props.notices}
+        <div class="howto-demo" data-testid="gesture-demo">
+          <GestureAnimation hand={null} view="both" speed="natural" contact="straight" label={t.gestureAria} />
+        </div>
+        <div class="howto-angled">
+          <div class="howto-angled-figure">
+            <GestureAnimation hand={null} view="side" contact="angled" compact label={t.angledAria} />
+          </div>
+          <p class="howto-caption">{t.anyPart}</p>
+        </div>
+        <ol class="howto-steps">
+          {t.steps.map((step, i) => (
+            <li key={i}>{step}</li>
+          ))}
+        </ol>
+        <Notice kind="warn" testId="intro-safety">
+          {t.safety}
+        </Notice>
+        <p class="muted small">{s.session.intro.choice}</p>
+        <Toggle
+          testId="tgl-sitting"
+          checked={props.session.protocol.posture === 'sitting'}
+          onChange={props.onSitting}
+          label={t.sitting}
+        />
+      </section>
+    </Screen>
+  );
+}
 
-type View =
-  | { kind: 'intro' }
-  | { kind: 'ready'; notice?: 'permission_denied' }
-  | { kind: 'recording' }
-  | { kind: 'review'; record: TrialRecord }
-  | { kind: 'failed'; reason: FailureKind; saving: boolean }
-  | { kind: 'break'; fromBlock: number };
+/** The intro of a block: one tap (naming the hand) starts it. */
+function BlockIntro(props: {
+  session: SessionRecord;
+  planned: PlannedTrial;
+  auto: boolean;
+  headerRight: ComponentChildren;
+  enabled: boolean;
+  notices: ComponentChildren;
+  progress: { done: number; total: number };
+  minutes: number;
+  onStart: () => void;
+}) {
+  const s = useStrings();
+  const { session, planned } = props;
+  const block = blockOf(session, planned.block_index);
+  const hand = block?.hand ?? planned.condition.hand;
+  const orientation = block?.orientation ?? planned.condition.orientation;
+  const change = blockChange(session, planned.block_index);
+  const prev = previousBlock(session, planned.block_index);
+  const switchHands = !!prev && prev.kind !== 'choice' && prev.hand !== hand;
+  const pos = blockPosition(session, planned.block_index);
+  const title = typeof block?.tier === 'number' ? s.session.intro.tier(block.tier) : s.session.blockOf(pos.position, pos.count);
+  const varies = block ? variesLine(block, s) : null;
+  const needsSafety = block?.kind === 'odd' || !!block?.trials.some((t) => t.condition.speed === 'fast');
+  const hasChoiceBlock = session.protocol.plan.some((b) => b.kind === 'choice');
+  const g = gestureFor(planned.condition);
+  const grip = s.common.orientations[orientation];
+  return (
+    <Screen
+      title={title}
+      headerRight={props.headerRight}
+      testId="screen-session"
+      footer={
+        <Button size="xl" block testId="btn-block-start" disabled={!props.enabled} onClick={props.onStart}>
+          {props.auto ? s.session.intro.startIn(hand) : s.session.intro.start}
+        </Button>
+      }
+    >
+      {/* the notices come first: below the animation they sat under the sticky Start button */}
+      <section class="stack session-center block-intro" data-testid="block-intro" data-block-index={planned.block_index}>
+        {change.afterBasics && (
+          <Notice kind="ok" testId="intro-encourage">
+            {s.session.intro.basicsDone}
+          </Notice>
+        )}
+        {props.notices}
+        <div style={{ width: '100%' }}>
+          <ProgressBar
+            value={props.progress.total > 0 ? props.progress.done / props.progress.total : 0}
+            label={title}
+            right={s.session.live.minutesLeft(props.minutes)}
+          />
+        </div>
+        {switchHands && <p class="new-hand">{s.session.intro.newHand}</p>}
+        <p class={`intro-hand hand-${hand}`} data-testid="intro-hand">
+          {change.handChanged ? s.session.intro.phoneIn(hand) : s.session.intro.keepIn(hand)}
+        </p>
+        <div class="intro-gesture" data-testid="intro-gesture">
+          <GestureAnimation
+            view="pov"
+            compact
+            hand={hand}
+            orientation={orientation}
+            speed="natural"
+            contact={g.contact}
+            variant={g.variant}
+            label={s.session.intro.gestureAria(s.common.hands[hand], grip.label)}
+          />
+        </div>
+        <h2 class="intro-grip">{grip.label}</h2>
+        <p class="session-sub">{grip.how}</p>
+        {varies && (
+          <p class="intro-varies" data-testid="intro-varies">
+            {varies}
+          </p>
+        )}
+        {block?.kind === 'free' && (
+          <Notice kind="info" testId="intro-free">
+            {s.session.intro.free}
+          </Notice>
+        )}
+        {!props.auto && block?.kind === 'odd' && (
+          <Notice kind="info" testId="intro-odd">
+            {s.session.intro.odd}
+          </Notice>
+        )}
+        {needsSafety ? (
+          <Notice kind="warn" testId="intro-safety">
+            {s.common.safety}
+          </Notice>
+        ) : (
+          <p class="muted small" data-testid="intro-safety">
+            {s.common.safety}
+          </p>
+        )}
+        {!hasChoiceBlock && <p>{s.common.movementSummary}</p>}
+      </section>
+    </Screen>
+  );
+}
+
+/** After the choice trial: which hand was it? */
+function HandReport(props: { enabled: boolean; onAnswer: (answer: Hand | 'unsure') => void }) {
+  const s = useStrings();
+  const t = s.session.hand;
+  return (
+    <Screen testId="screen-session">
+      <section class="stack hand-report" data-testid="hand-report">
+        <h2 class="hand-question">{t.question}</h2>
+        {/* physical sides: the left hand's button stays on the left on right-to-left pages too */}
+        <div class="hand-buttons" dir="ltr">
+          <Button size="xl" block testId="btn-hand-left" disabled={!props.enabled} onClick={() => props.onAnswer('left')}>
+            <span class="hand-choice hand-left">{t.left}</span>
+          </Button>
+          <Button size="xl" block testId="btn-hand-right" disabled={!props.enabled} onClick={() => props.onAnswer('right')}>
+            <span class="hand-choice hand-right">{t.right}</span>
+          </Button>
+        </div>
+        <Button variant="ghost" block testId="btn-hand-unsure" disabled={!props.enabled} onClick={() => props.onAnswer('unsure')}>
+          {t.unsure}
+        </Button>
+      </section>
+    </Screen>
+  );
+}
+
+function Checkpoint(props: {
+  done: number;
+  bonusMinutes: number;
+  enabled: boolean;
+  headerRight: ComponentChildren;
+  onFinish: () => void;
+  onBonus: () => void;
+}) {
+  const s = useStrings();
+  const t = s.session.checkpoint;
+  return (
+    <Screen
+      title={t.title}
+      headerRight={props.headerRight}
+      testId="screen-session"
+      footer={
+        <>
+          <Button size="xl" block testId="btn-finish" disabled={!props.enabled} onClick={props.onFinish}>
+            {t.finish}
+          </Button>
+          <Button size="lg" variant="secondary" block testId="btn-bonus" disabled={!props.enabled} onClick={props.onBonus}>
+            {t.bonus(Math.max(1, props.bonusMinutes))}
+          </Button>
+        </>
+      }
+    >
+      <section class="stack session-center" data-testid="checkpoint">
+        <p class="checkpoint-body">{t.body(props.done)}</p>
+        <p class="muted">{t.bonusHint}</p>
+      </section>
+    </Screen>
+  );
+}
+
+function PauseSheet(props: {
+  reason: PauseReason;
+  canRedo: boolean;
+  enabled: boolean;
+  busy: boolean;
+  onContinue: () => void;
+  onRedo: () => void;
+  onWrongHand: () => void;
+  onFinish: () => void;
+  onLater: () => void;
+}) {
+  const s = useStrings();
+  const t = s.session.pause;
+  const live = props.enabled && !props.busy;
+  return (
+    <Screen title={t.title} testId="screen-session">
+      {/* session-exit: the pause dialog's id since v1 (e2e); pause-sheet: v2 */}
+      <div class="pause-wrap" data-testid="session-exit">
+        <Card testId="pause-sheet">
+          <p class="pause-reason" data-testid="pause-reason" data-reason={props.reason}>
+            {t.reasons[props.reason]}
+          </p>
+          <div class="pause-actions">
+            <Button size="xl" block testId="btn-continue-session" disabled={!live} onClick={props.onContinue}>
+              {props.busy ? s.session.saving : t.continue}
+            </Button>
+            <Button variant="secondary" block testId="btn-redo-last" disabled={!live || !props.canRedo} onClick={props.onRedo}>
+              {t.redo}
+            </Button>
+            <Button
+              variant="secondary"
+              block
+              testId="btn-wrong-hand"
+              disabled={!live || !props.canRedo}
+              onClick={props.onWrongHand}
+            >
+              {t.wrongHand}
+            </Button>
+            <Button variant="danger" block testId="btn-finish-now" disabled={!live} onClick={props.onFinish}>
+              {t.finish}
+            </Button>
+            <Button variant="ghost" block testId="btn-exit-pause" disabled={props.busy} onClick={props.onLater}>
+              {t.later}
+            </Button>
+          </div>
+          <p class="muted small">{t.kept}</p>
+        </Card>
+      </div>
+    </Screen>
+  );
+}
+
+// ───────────────────────────── screen ─────────────────────────────
 
 export function SessionScreen() {
   const st = useAppState();
   const s = useStrings();
   const session = st.session;
-  const [view, setView] = useState<View>({ kind: 'intro' });
-  const [busy, setBusy] = useState(false);
-  const [exitOpen, setExitOpen] = useState(false);
-  const [attempt, setAttempt] = useState<{ trialIndex: number; nAttempts: number; n: number } | null>(null);
-  const mounted = useRef(true);
-  const viewRef = useRef(view);
-  viewRef.current = view;
-  // trial_ids that must not be protectively saved again (already saved, or a decision is under way)
-  const settledIds = useRef(new Set<string>());
-  const deciding = useRef(false);
-  // read by callbacks that outlive a render (the permission prompt, the back button)
-  const exitOpenRef = useRef(exitOpen);
-  exitOpenRef.current = exitOpen;
-  const openExit = () => {
-    exitOpenRef.current = true;
-    setExitOpen(true);
-  };
-  const closeExit = () => {
-    exitOpenRef.current = false;
-    setExitOpen(false);
-  };
+  const auto = session ? reviewModeOf(session) === 'auto' : true;
+
+  // the runner drives the session; it reaches the recorder through a ref (the hook needs the runner)
+  const [, setTick] = useState(0);
+  const recorderRef = useRef<Recorder | null>(null);
+  const [runner] = useState<SessionRunner>(() =>
+    createSessionRunner(
+      {
+        start: (cur, planned, attempt, o) => recorderRef.current?.start(cur, planned, attempt, o),
+        abort: (reason) => recorderRef.current?.abort(reason),
+        isRunning: () => recorderRef.current?.isRunning() ?? false,
+      },
+      () => setTick((n) => n + 1),
+    ),
+  );
+  const recorder = useTrialRecorder((record, uiAbort, error) => runner.finished(record, uiAbort, error));
+  recorderRef.current = recorder;
+  const { view, pause, cursor, bonus, busy, attemptsReady, canRedo } = runner.state();
+
   // double-tap guard: taps within TAP_GUARD_MS of a step change are ignored (see the module doc)
   const [tap] = useState(createTapGuard);
-  tap.shown(`${view.kind}|${exitOpen}`);
-
-  const next = session ? nextPlannedTrial(session) : null;
-  const total = session?.protocol.n_planned_trials ?? 0;
-  const done = session?.progress.next_trial_index ?? 0;
-
-  const goTo = (v: View) => {
-    if (mounted.current) setView(v);
-  };
-
-  // Each step starts at the top: the Start/Next buttons sit at the bottom of long screens, and a
-  // participant must not miss the hand / orientation instruction at the top of the next one.
-  useEffect(() => {
-    try {
-      window.scrollTo(0, 0);
-    } catch {
-      // not available (tests)
-    }
-  }, [view.kind]);
-
-  const finish = async (status: 'completed' | 'abandoned') => {
-    const cur = getState().session;
-    if (!cur) return;
-    setBusy(true);
-    try {
-      await finishSession(cur, status);
-    } catch (e) {
-      console.error(e);
-      showToast(s.session.saveFailed, 'error');
-      if (mounted.current) setBusy(false);
-      return;
-    }
-    releaseWakeLock();
-    navigate('done');
-  };
-
-  const onFinished: FinishHandler = (record, uiAbort, error) => {
-    if (error) console.warn('trial ended without a normal result', error);
-    if (record && record.outcome.status === 'complete') {
-      // saved before the review shows (also when the screen went away meanwhile): no event that
-      // ends the page reliably finishes an IndexedDB write, so the review must not hold the only copy
-      void saveForReview(record, settledIds.current);
-      goTo({ kind: 'review', record });
-      return;
-    }
-    const reason = failureKind(record, uiAbort);
-    if (!record) {
-      goTo({ kind: 'failed', reason, saving: false });
-      return;
-    }
-    goTo({ kind: 'failed', reason, saving: true });
-    void persistAttempt(asFailedAttempt(record, uiAbortWarning(uiAbort))).then(() => {
-      // functional update: the save may resolve before the failed view has even rendered
-      if (mounted.current) setView((v) => (v.kind === 'failed' ? { ...v, saving: false } : v));
-    });
-  };
-
-  const recorder = useTrialRecorder(onFinished);
-  const recorderRef = useRef(recorder);
-  recorderRef.current = recorder;
-
-  // System back button / edge swipe: stay. A running trial stops as if Stop had been held (kept as an
-  // 'aborted' attempt), then the Pause dialog offers to pause, end or go on. Returning true makes
-  // the store push its guard entry again, so the next press lands here too.
-  useEffect(
-    () =>
-      setBackHandler(() => {
-        const cur = getState().session;
-        if (!cur || cur.status !== 'in_progress') return false;
-        recorderRef.current.abort('user');
-        openExit();
-        return true;
-      }),
-    [],
-  );
-
-  // protective save of an unanswered review + abort of a running trial when the page is hidden
-  useEffect(() => {
-    const protect = () => {
-      recorderRef.current.abort('hidden');
-      const v = viewRef.current;
-      if (v.kind === 'review' && !settledIds.current.has(v.record.trial_id)) {
-        settledIds.current.add(v.record.trial_id);
-        void persistAttempt(asUnreviewed(v.record));
-      }
+  const stepKey = `${view.kind}|${pause ?? ''}|${cursor}`;
+  tap.shown(stepKey);
+  const armed = useArmed(stepKey);
+  /** a button press, unless it came too soon after the screen changed (or before the arm delay) */
+  const press =
+    (fn: () => void, needsArm = false) =>
+    () => {
+      if (tap.tooSoon() || (needsArm && !armed)) return;
+      fn();
     };
+
+  // on entry: a finished session goes to Done; otherwise the stored attempts seed the local counters
+  useEffect(() => {
+    runner.enter();
+    return () => runner.dispose();
+  }, []);
+
+  // System back button / edge swipe: stay. A running trial stops as if the pause control had been
+  // held, then the pause sheet opens. Returning true makes the store push its guard entry again.
+  useEffect(() => setBackHandler(() => runner.back()), []);
+
+  // the page is hidden: a running trial stops (auto: the pause sheet waits for the return); tap mode:
+  // an unanswered review is saved protectively
+  useEffect(() => {
     const onVisibility = () => {
-      if (document.hidden) protect();
+      if (document.hidden) runner.pageHidden();
     };
+    const onPageHide = () => runner.pageHidden();
     document.addEventListener('visibilitychange', onVisibility);
-    window.addEventListener('pagehide', protect);
-    mounted.current = true;
+    window.addEventListener('pagehide', onPageHide);
     return () => {
-      mounted.current = false;
       document.removeEventListener('visibilitychange', onVisibility);
-      window.removeEventListener('pagehide', protect);
-      const v = viewRef.current;
-      if (v.kind === 'review' && !settledIds.current.has(v.record.trial_id)) {
-        settledIds.current.add(v.record.trial_id);
-        void persistAttempt(asUnreviewed(v.record));
-      }
-      releaseWakeLock();
+      window.removeEventListener('pagehide', onPageHide);
     };
   }, []);
 
-  // on entry: a finished session goes to Done; an in-progress one with no trial left is completed
+  // a block intro appears: block-start chime (Web Audio works outside gestures once unlocked). The
+  // spoken hand + grip is said in the Start tap instead — iOS ignores speech outside gestures.
+  const next = session ? plannedAt(session, cursor) : null;
+  const introBlock = view.kind === 'intro' && pause === null && next ? next.block_index : null;
   useEffect(() => {
-    const cur = getState().session;
-    if (!cur) return;
-    if (cur.status !== 'in_progress') navigate('done');
-    else if (!nextPlannedTrial(cur)) void finish('completed');
-  }, []);
-
-  // the attempt number is needed synchronously in the Ready tap, so fetch it beforehand; it can only
-  // change when an attempt is saved (n_attempts) or the planned trial changes
-  const nAttempts = session?.progress.n_attempts ?? 0;
-  useEffect(() => {
-    if (!session || !next) return;
-    let alive = true;
-    const key = { trialIndex: next.trial_index, nAttempts };
-    nextAttemptNumber(session, next.trial_index).then(
-      (n) => alive && setAttempt({ ...key, n }),
-      (e) => {
-        console.error(e);
-        if (alive) setAttempt({ ...key, n: 1 });
-      },
-    );
-    return () => {
-      alive = false;
-    };
-  }, [session?.session_id, next?.trial_index, nAttempts]);
-  const attemptOk = !!attempt && !!next && attempt.trialIndex === next.trial_index && attempt.nAttempts === nAttempts;
-
-  // block intro: block-start chime (Web Audio works outside gestures once unlocked). The spoken
-  // hand + orientation is said in the Start tap instead — iOS ignores speech outside gestures.
-  const introBlock = view.kind === 'intro' && next ? next.block_index : null;
-  useEffect(() => {
-    if (introBlock === null || !session) return;
-    if (!blockOf(session, introBlock)) return;
+    if (introBlock === null) return;
     try {
       getServices().cues.play('block_start');
     } catch {
       // cues are best effort
     }
   }, [introBlock, session?.session_id]);
-
-  const onReady = () => {
-    if (tap.tooSoon() || !session || !next || !attemptOk || !attempt || busy || recorder.active) return;
-    const st0 = getState();
-    const caps = st0.capabilities;
-    // iOS: the permission prompt must be requested synchronously inside the tap, before any await
-    let permission: Promise<PermissionState> | null = null;
-    if (!st0.settings.simulate && caps?.permission_api && caps.permission_state !== 'granted') {
-      try {
-        permission = requestMotionPermission();
-      } catch (e) {
-        console.warn('motion permission request failed', e);
-      }
-    }
-    unlockAudio(); // iOS: audio must also be unlocked inside the tap
-    acquireWakeLock();
-    speak(trialSpeech(next.condition));
-    const plannedNow = next;
-    const attemptNow = attempt.n;
-    const sessionNow = session;
-    setView({ kind: 'recording' });
-    const begin = () => {
-      // back was pressed while the permission prompt was open: the Pause dialog comes first
-      if (exitOpenRef.current) goTo({ kind: 'ready' });
-      else recorder.start(sessionNow, plannedNow, attemptNow);
-    };
-    if (!permission) {
-      begin();
-      return;
-    }
-    permission.then(
-      (p) => {
-        const capsNow = getState().capabilities;
-        if (capsNow) setState({ capabilities: { ...capsNow, permission_state: p } });
-        if (p === 'denied') goTo({ kind: 'ready', notice: 'permission_denied' });
-        else begin();
-      },
-      () => begin(),
-    );
-  };
-
-  const decide = async (decision: TrialDecision) => {
-    const v = viewRef.current;
-    // ref guard: two taps in the same frame must not both save
-    if (v.kind !== 'review' || deciding.current) return;
-    deciding.current = true;
-    const record = v.record;
-    settledIds.current.add(record.trial_id);
-    setBusy(true);
-    const saved = await persistAttempt(applyDecision(record, decision));
-    deciding.current = false;
-    if (mounted.current) setBusy(false);
-    if (!saved) {
-      settledIds.current.delete(record.trial_id);
-      return;
-    }
-    if (decision.kind !== 'accept') {
-      goTo({ kind: 'ready' });
-      return;
-    }
-    const step = stepAfterAccept(saved, record.block_index);
-    if (step === 'finished') await finish('completed');
-    else goTo(step === 'block_break' ? { kind: 'break', fromBlock: record.block_index } : { kind: 'ready' });
-  };
-
-  const pauseAndExit = () => {
-    releaseWakeLock();
-    showToast(s.session.exit.paused, 'info');
-    navigate('welcome');
-  };
 
   // ── render ──
 
@@ -884,77 +1020,106 @@ export function SessionScreen() {
     );
   }
 
-  if (view.kind === 'recording' && next) {
+  if (pause !== null) {
+    return (
+      <PauseSheet
+        reason={pause}
+        canRedo={canRedo && attemptsReady}
+        enabled={armed}
+        busy={busy}
+        onContinue={press(() => void runner.continueSession())}
+        onRedo={press(() => void runner.revoke(null))}
+        onWrongHand={press(() => void runner.revoke('wrong_hand'))}
+        onFinish={press(() => void runner.finishNow())}
+        onLater={() => void runner.later()}
+      />
+    );
+  }
+
+  const progress = progressOf(session, cursor, bonus);
+  const minutes = roundMinutes(secondsLeft(session, cursor, bonus ? 'include' : 'exclude'));
+
+  if (view.kind === 'recording') {
     return (
       <Screen className="session-screen is-recording" testId="screen-session">
-        <TrialPanel planned={next} recorder={recorder} simulated={st.settings.simulate} />
+        <TrialPanel run={view.run} recorder={recorder} simulated={st.settings.simulate} progress={progress} minutes={minutes} />
       </Screen>
     );
   }
 
-  // The header's Pause button is not offered during the review (it asks for a decision); the system
-  // back button opens the same dialog from every step, the review included (its attempt is saved).
-  const canExit = view.kind !== 'review' && !busy;
-  const headerRight = canExit ? (
-    <Button variant="ghost" testId="btn-session-exit" onClick={openExit}>
-      {s.session.exit.open}
+  const headerRight = !busy ? (
+    <Button variant="ghost" testId="btn-session-exit" onClick={() => runner.openPause('paused')}>
+      {s.session.pause.open}
     </Button>
   ) : undefined;
 
-  if (exitOpen && !busy) {
+  if (view.kind === 'hand') {
+    return <HandReport enabled={armed && !busy} onAnswer={(a) => press(() => void runner.answerHand(a), true)()} />;
+  }
+
+  if (view.kind === 'checkpoint') {
     return (
-      <Screen title={s.session.exit.title} headerRight={undefined} testId="screen-session">
-        <Card testId="session-exit">
-          <p>{s.session.exit.body}</p>
-          <div class="exit-actions">
-            <Button
-              block
-              testId="btn-exit-pause"
-              onClick={() => {
-                if (!tap.tooSoon()) pauseAndExit();
-              }}
-            >
-              {s.session.exit.pause}
-            </Button>
-            <Button
-              block
-              variant="danger"
-              testId="btn-exit-end"
-              onClick={() => {
-                if (!tap.tooSoon()) void finish('abandoned');
-              }}
-            >
-              {s.session.exit.end}
-            </Button>
-            <Button block variant="ghost" testId="btn-exit-cancel" onClick={closeExit}>
-              {s.session.exit.cancel}
-            </Button>
-          </div>
-        </Card>
+      <Checkpoint
+        done={progressOf(session, cursor, false).done}
+        bonusMinutes={roundMinutes(secondsLeft(session, cursor, 'only'))}
+        enabled={armed && !busy}
+        headerRight={headerRight}
+        onFinish={press(() => void runner.finishNow(), true)}
+        onBonus={press(() => runner.startBonus(), true)}
+      />
+    );
+  }
+
+  if (view.kind === 'review') {
+    return (
+      <Screen title={s.session.trialOf(view.record.trial_index + 1, session.protocol.n_planned_trials)} testId="screen-session">
+        <TrialReview record={view.record} busy={busy} onDecide={(d) => void runner.decide(d)} />
       </Screen>
     );
   }
 
-  if (!next) {
-    // all planned trials accepted: finishing is under way (see the entry effect / decide)
+  if (!next || view.kind === 'resume') {
+    // finishing is under way (entry / last trial), or a chain paused without its sheet
     return (
       <Screen title={s.common.appName} testId="screen-session">
-        <p class="muted">{s.session.saving}</p>
+        {view.kind === 'resume' && next ? (
+          <Button size="xl" block testId="btn-continue-session" onClick={() => runner.openPause('paused')}>
+            {s.session.pause.continue}
+          </Button>
+        ) : (
+          <p class="muted">{s.session.saving}</p>
+        )}
       </Screen>
     );
   }
 
-  const block = blockOf(session, next.block_index);
-  const hand = block?.hand ?? next.condition.hand;
-  const orientation = block?.orientation ?? next.condition.orientation;
-  const pos = blockPosition(session, next.block_index);
+  const total = session.protocol.n_planned_trials;
   const trialTitle = s.session.trialOf(next.trial_index + 1, total);
-  const blockTitle = s.session.blockOf(pos.position, pos.count);
-  const progressRight = s.session.trialsDone(done, total);
+  const progressRight = s.session.trialsDone(progress.done, progress.total);
+  const block = blockOf(session, next.block_index);
+  const deniedNotice =
+    (view.kind === 'intro' || view.kind === 'ready') && view.notice === 'permission_denied' ? (
+      <Notice kind="error" testId="ready-permission-denied">
+        {permissionDeniedText(s.session.ready.permissionDenied, st.device)}
+      </Notice>
+    ) : null;
+  const notices = (
+    <>
+      {view.kind === 'intro' && view.redo && (
+        <Notice kind="info" testId="intro-redo">
+          {s.session.intro.redo}
+        </Notice>
+      )}
+      {deniedNotice}
+      {session.simulated !== st.settings.simulate && <Notice kind="info">{s.session.simMismatch}</Notice>}
+    </>
+  );
 
   if (view.kind === 'break') {
     const from = blockPosition(session, view.fromBlock);
     const cheers = s.session.breakScreen.cheers;
+    const hand = block?.hand ?? next.condition.hand;
+    const orientation = block?.orientation ?? next.condition.orientation;
     return (
       <Screen
         title={s.session.blockOf(from.position, from.count)}
@@ -962,26 +1127,10 @@ export function SessionScreen() {
         testId="screen-session"
         footer={
           <>
-            <Button
-              size="xl"
-              block
-              testId="btn-next-block"
-              onClick={() => {
-                if (tap.tooSoon()) return;
-                unlockAudio();
-                setView({ kind: 'intro' });
-              }}
-            >
+            <Button size="xl" block testId="btn-next-block" onClick={press(() => runner.nextBlock())}>
               {s.session.breakScreen.continue}
             </Button>
-            <Button
-              variant="secondary"
-              block
-              testId="btn-pause-exit"
-              onClick={() => {
-                if (!tap.tooSoon()) pauseAndExit();
-              }}
-            >
+            <Button variant="secondary" block testId="btn-pause-exit" onClick={() => void runner.later()}>
               {s.session.breakScreen.pauseExit}
             </Button>
           </>
@@ -991,7 +1140,7 @@ export function SessionScreen() {
           <p class="break-cheer">{cheers[(from.position - 1) % cheers.length]}</p>
           <h2>{s.session.breakScreen.heading(from.position, from.count)}</h2>
           <div style={{ width: '100%' }}>
-            <ProgressBar value={total > 0 ? done / total : 0} label={progressRight} />
+            <ProgressBar value={progress.total > 0 ? progress.done / progress.total : 0} label={progressRight} />
           </div>
           <p>{s.session.breakScreen.rest}</p>
           <p>
@@ -1003,75 +1152,32 @@ export function SessionScreen() {
   }
 
   if (view.kind === 'intro') {
-    const prev = pos.position > 1 ? session.protocol.plan[pos.position - 2] : null;
-    const newHand = !!prev && prev.hand !== hand;
-    const needsSafety = block?.kind === 'odd' || !!block?.trials.some((t) => t.condition.speed === 'fast');
+    const enabled = armed && attemptsReady && !busy;
+    const onStart = press(() => runner.blockStart(), true);
+    if (isChoiceTrial(next.condition) || block?.kind === 'choice') {
+      return (
+        <HowToCard
+          session={session}
+          headerRight={headerRight}
+          enabled={enabled}
+          notices={notices}
+          onStart={onStart}
+          onSitting={(sitting) => runner.setSitting(sitting)}
+        />
+      );
+    }
     return (
-      <Screen
-        title={blockTitle}
+      <BlockIntro
+        session={session}
+        planned={next}
+        auto={auto}
         headerRight={headerRight}
-        testId="screen-session"
-        footer={
-          <Button
-            size="xl"
-            block
-            testId="btn-block-start"
-            onClick={() => {
-              if (tap.tooSoon()) return;
-              unlockAudio();
-              speak([s.common.hands[hand], s.common.orientations[orientation].label]);
-              setView({ kind: 'ready' });
-            }}
-          >
-            {s.session.intro.start}
-          </Button>
-        }
-      >
-        {/* the notices come right under the hand, above the figure: below it they sat under the
-            sticky Start button on common phone screens */}
-        <section class="stack session-center" data-testid="block-intro">
-          <div style={{ width: '100%' }}>
-            <ProgressBar value={(pos.position - 1) / pos.count} label={blockTitle} right={progressRight} />
-          </div>
-          {newHand && <p class="new-hand">{s.session.intro.newHand}</p>}
-          <span class={`hand-badge hand-badge-lg hand-${hand}`}>{s.common.hands[hand]}</span>
-          {block?.kind === 'odd' && (
-            <Notice kind="info" testId="intro-odd">
-              {s.session.intro.odd}
-            </Notice>
-          )}
-          {block?.kind === 'free' && (
-            <Notice kind="info" testId="intro-free">
-              {s.session.intro.free}
-            </Notice>
-          )}
-          {needsSafety ? (
-            <Notice kind="warn" testId="intro-safety">
-              {s.common.safety}
-            </Notice>
-          ) : (
-            <p class="muted small" data-testid="intro-safety">
-              {s.common.safety}
-            </p>
-          )}
-          <div class="intro-figure">
-            <PhoneFigure orientation={orientation} hand={hand} size={220} />
-          </div>
-          <p class="session-hold">{s.common.holdWith(hand)}</p>
-          <h2>{s.common.orientations[orientation].label}</h2>
-          <p class="session-sub">{s.common.orientations[orientation].how}</p>
-          <p>{s.common.movementSummary}</p>
-          {session.simulated !== st.settings.simulate && <Notice kind="info">{s.session.simMismatch}</Notice>}
-        </section>
-      </Screen>
-    );
-  }
-
-  if (view.kind === 'review') {
-    return (
-      <Screen title={trialTitle} testId="screen-session">
-        <TrialReview record={view.record} busy={busy} onDecide={(d) => void decide(d)} />
-      </Screen>
+        enabled={enabled}
+        notices={notices}
+        progress={progress}
+        minutes={minutes}
+        onStart={onStart}
+      />
     );
   }
 
@@ -1082,17 +1188,7 @@ export function SessionScreen() {
         headerRight={headerRight}
         testId="screen-session"
         footer={
-          <Button
-            size="xl"
-            block
-            disabled={view.saving}
-            testId="btn-retry"
-            onClick={() => {
-              if (tap.tooSoon()) return;
-              unlockAudio();
-              setView({ kind: 'ready' });
-            }}
-          >
+          <Button size="xl" block disabled={view.saving} testId="btn-retry" onClick={press(() => runner.retryFailed())}>
             {view.saving ? s.session.saving : s.session.failed.retry}
           </Button>
         }
@@ -1107,12 +1203,13 @@ export function SessionScreen() {
     );
   }
 
-  // ready: the instruction of the next trial. The four rows come first and are compact, so that on
-  // common phone screens (360×640, 390×664) all of them stay above the sticky Ready button; the
+  // ready (tap mode): the instruction of the next trial. The four rows come first and are compact, so
+  // that on common phone screens (360×640, 390×664) all of them stay above the sticky Ready button; the
   // figure follows, small, and only on tall screens (session.css). A denial notice goes on top: with
   // it the trial cannot start anyway.
   const c = next.condition;
   const trialsInBlock = block?.trials.length ?? 1;
+  const attemptN = runner.nextAttempt(next.trial_index);
   return (
     <Screen
       title={trialTitle}
@@ -1120,26 +1217,22 @@ export function SessionScreen() {
       className="session-ready"
       testId="screen-session"
       footer={
-        <Button size="xl" block disabled={!attemptOk || busy} testId="btn-ready" onClick={onReady}>
-          {attemptOk ? s.session.ready.ready : s.session.ready.preparing}
+        <Button size="xl" block disabled={!attemptsReady || busy} testId="btn-ready" onClick={press(() => runner.ready())}>
+          {attemptsReady ? s.session.ready.ready : s.session.ready.preparing}
         </Button>
       }
     >
       <section class="stack trial-ready" data-testid="trial-ready">
         <ProgressBar
-          value={total > 0 ? done / total : 0}
+          value={progress.total > 0 ? progress.done / progress.total : 0}
           label={s.session.trialInBlock(next.trial_in_block + 1, trialsInBlock)}
           right={progressRight}
         />
         <div class="instruction-head">
-          <span class={`hand-badge hand-${c.hand}`}>{s.common.hands[c.hand]}</span>
-          {attempt && attemptOk && attempt.n > 1 && <span class="badge">{s.session.attempt(attempt.n)}</span>}
+          <span class={`hand-badge hand-${c.hand}`}>{isChoiceTrial(c) ? s.session.live.anyHand : s.common.hands[c.hand]}</span>
+          {attemptsReady && attemptN > 1 && <span class="badge">{s.session.attempt(attemptN)}</span>}
         </div>
-        {view.kind === 'ready' && view.notice === 'permission_denied' && (
-          <Notice kind="error" testId="ready-permission-denied">
-            {permissionDeniedText(s.session.ready.permissionDenied, st.device)}
-          </Notice>
-        )}
+        {deniedNotice}
         <div class="instruction">
           <InstructionRow testId="instr-phone" label={s.session.ready.phone} value={s.common.orientations[c.orientation].label} />
           <InstructionRow

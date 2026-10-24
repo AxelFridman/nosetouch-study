@@ -1,7 +1,8 @@
 /**
  * Accuracy of the ONLINE segmentation (online_v1, run by the real TrialController) against the
  * simulator's ground truth, for several base parameter sets. Nothing in src/ is changed: every set is
- * passed as the session's base params and each trial gets resolveParams(base, condition), as in the app.
+ * passed as the session's base params and each trial gets resolveParams(base, condition), as in the app
+ * (the 'v1' set then lowers the slow onset floors back to protocol 1.0.0's 15 / 0.3).
  *
  * For N trials per (speed × variant × platform) cell (3 × 10 × 2 = 60 cells): a random simulated
  * participant (model.randomSimParticipant: 88% right-handed), a random hand, grip (all 10 orientation
@@ -13,11 +14,13 @@
  *   end cue lag = timing.end_detected_ms − truth.end_t (when the participant hears the end beep)
  * Gross errors: |onset error| > 100 ms, |end error| > 300 ms. Also: status counts, detection rate
  * (status complete with onset and end), GO time (pre-cue data), data kept after the true arrival
- * (stop − truth end), trial length; false starts ('false_start' behaviour: one anticipatory twitch
- * 800 ms after the start), 'no_move' trials, and a hold-still stress group (tremor × 2) per platform.
+ * (stop − truth end), trial length, and the return of the arm (protocol 2.0.0 records it after the
+ * end: return_onset_ms / return_end_ms); false starts ('false_start' behaviour: one anticipatory
+ * twitch still_hold_ms + 200 ms after the start, i.e. inside each set's foreperiod), 'no_move'
+ * trials, and a hold-still stress group (tremor × 2) per platform.
  *
  * Usage: npx tsx scripts/evalSegmentation.ts [--n 30] [--seed 7] [--out scripts/out/segmentation_eval.md]
- *          [--sets default,candidate,...|all]   (default: DEFAULT_SETS below; 'all' adds the exploration sets)
+ *          [--sets default,v1,...|all]   (default: DEFAULT_SETS below; 'all' adds the exploration sets)
  * Prints the summary tables and writes every table (also the per-cell ones) as Markdown.
  *
  * IMPLEMENTED BY: simulation agent.
@@ -38,38 +41,58 @@ interface ParamSet {
   name: string;
   note: string;
   params: SegmentationParams;
+  /** per-trial params from the base (default: protocol.resolveParams, as the app does) */
+  resolve?: (base: SegmentationParams, c: TrialCondition) => SegmentationParams;
 }
 
 const D = DEFAULT_SEGMENTATION_PARAMS;
-const CANDIDATE: Partial<SegmentationParams> = {
+
+/** Protocol 1.0.0's base parameters (constants.ts before 2.0.0): no return_cap_ms, so no return recording. */
+const { return_cap_ms: _returnCap, ...D_NO_RETURN } = D;
+const V1_BASE: SegmentationParams = {
+  ...D_NO_RETURN,
+  still_gyro_dps: 15,
+  still_acc_ms2: 0.35,
   still_hold_ms: 600,
   foreperiod_min_ms: 500,
   foreperiod_max_ms: 1200,
-  end_sustain_ms: 500,
+  end_gyro_dps: 20,
+  end_acc_ms2: 0.45,
+  end_sustain_ms: 300,
+  max_wait_ms: 6000,
+  max_movement_ms: 8000,
   post_roll_ms: 1000,
 };
 
+/** Protocol 1.0.0's overrides = 2.0.0's with the slow onset floors lowered back to 15 deg/s / 0.3 m/s². */
+function resolveV1(base: SegmentationParams, c: TrialCondition): SegmentationParams {
+  const p = resolveParams(base, c);
+  if (c.speed !== 'slow') return p;
+  return { ...p, onset_gyro_min_dps: Math.min(p.onset_gyro_min_dps, 15), onset_acc_min_ms2: Math.min(p.onset_acc_min_ms2, 0.3) };
+}
+
 const ALL_SETS: ParamSet[] = [
-  { name: 'default', note: 'DEFAULT_SEGMENTATION_PARAMS (constants.ts)', params: { ...D } },
+  { name: 'default', note: 'DEFAULT_SEGMENTATION_PARAMS (constants.ts, protocol 2.0.0)', params: { ...D } },
   {
-    name: 'candidate',
-    note: 'still_hold 600, foreperiod 500–1200, end_sustain 500, post_roll 1000',
-    params: { ...D, ...CANDIDATE },
-  },
-  {
-    name: 'cand+fp1500',
-    note: 'candidate with foreperiod 500–1500 and post_roll 1200 (research protocol: ≥ 1.5 s of data before GO and after the end)',
-    params: { ...D, ...CANDIDATE, foreperiod_max_ms: 1500, post_roll_ms: 1200 },
+    name: 'v1',
+    note:
+      'protocol 1.0.0: still 15 / 0.35 / 600, foreperiod 500–1200, end 20 / 0.45 / 300, max_wait 6000, max_movement 8000, ' +
+      'post_roll 1000, no return recording; slow onset floors 15 / 0.3',
+    params: V1_BASE,
+    resolve: resolveV1,
   },
   // ── exploration (select with --sets) ──
-  { name: 'cand+sustain300', note: 'candidate with the default end_sustain 300', params: { ...D, ...CANDIDATE, end_sustain_ms: 300 } },
-  { name: 'cand+still10', note: 'candidate with still_gyro 10, still_acc 0.25', params: { ...D, ...CANDIDATE, still_gyro_dps: 10, still_acc_ms2: 0.25 } },
-  { name: 'cand+end30', note: 'candidate with end_gyro 30, end_acc 0.6 (slow keeps its 10 / 0.25 override)', params: { ...D, ...CANDIDATE, end_gyro_dps: 30, end_acc_ms2: 0.6 } },
-  { name: 'cand+smooth25', note: 'candidate with smoothing 25 ms', params: { ...D, ...CANDIDATE, smoothing_ms: 25 } },
-  { name: 'cand+sustain700', note: 'candidate with end_sustain 700', params: { ...D, ...CANDIDATE, end_sustain_ms: 700 } },
+  {
+    name: 'v2+v1slow',
+    note: 'protocol 2.0.0 base with the protocol 1.0.0 slow onset floors (15 / 0.3)',
+    params: { ...D },
+    resolve: resolveV1,
+  },
+  { name: 'v2+wait6000', note: 'protocol 2.0.0 with max_wait 6000', params: { ...D, max_wait_ms: 6000 } },
+  { name: 'v2+cap5000', note: 'protocol 2.0.0 with return_cap 5000', params: { ...D, return_cap_ms: 5000 } },
 ];
 
-const DEFAULT_SETS = ['default', 'candidate', 'cand+fp1500', 'cand+sustain300', 'cand+still10'];
+const DEFAULT_SETS = ['default', 'v1'];
 let PARAM_SETS: ParamSet[] = ALL_SETS.filter((s) => DEFAULT_SETS.includes(s.name));
 
 // ───────────────────────────── trial simulation ─────────────────────────────
@@ -101,11 +124,17 @@ interface TrialEval {
   afterArrivalMs: number | null;
   falseStarts: number;
   twitched: boolean; // the simulated false start happened (before GO)
+  /** the return of the arm (protocol 2.0.0): recorded onset / end, and the true return start (record time) */
+  returnOnsetMs: number | null;
+  returnEndMs: number | null;
+  trueReturnMs: number | null;
+  endDetectedMs: number | null;
 }
 
 const SILENT = { play() {} };
 
-async function runTrial(spec: TrialSpec, base: SegmentationParams): Promise<TrialEval> {
+async function runTrial(spec: TrialSpec, set: ParamSet): Promise<TrialEval> {
+  const base = set.params;
   const rng = makeRng(spec.seed);
   const drawn = randomSimParticipant(rng);
   const participant = spec.shaky ? { ...drawn, style: { ...drawn.style, tremor_dps: 2 * drawn.style.tremor_dps } } : drawn;
@@ -130,6 +159,8 @@ async function runTrial(spec: TrialSpec, base: SegmentationParams): Promise<Tria
     behavior: spec.behavior,
     startTime: 1000,
     baseEpochMs: 1_790_000_000_000,
+    // the twitch comes inside this set's foreperiod (the hold is met still_hold_ms after the start)
+    anticipationAfterMs: base.still_hold_ms + 200,
   });
   const ctrl = createTrialController({
     source,
@@ -145,7 +176,7 @@ async function runTrial(spec: TrialSpec, base: SegmentationParams): Promise<Tria
       attempt: 1,
     },
     condition,
-    params: resolveParams(base, condition),
+    params: (set.resolve ?? resolveParams)(base, condition),
     calibration: null, // only used for detected.rotation_*, not for the segmentation
     rng: makeRng(fpSeed),
     appVersion: 'eval',
@@ -171,6 +202,10 @@ async function runTrial(spec: TrialSpec, base: SegmentationParams): Promise<Tria
     afterArrivalMs: endT !== null && rec.outcome.status === 'complete' ? tm.stop_ms - endT : null,
     falseStarts: tm.false_starts,
     twitched: tr.false_start_t !== null && tr.false_start_t !== undefined,
+    returnOnsetMs: tm.return_onset_ms ?? null,
+    returnEndMs: tm.return_end_ms ?? null,
+    trueReturnMs: rel(tr.return_t ?? null),
+    endDetectedMs: tm.end_detected_ms,
   };
 }
 
@@ -431,9 +466,9 @@ async function main(): Promise<void> {
   const shSpecs = behaviorSpecs('normal', 2 * n, seed, true);
   const started = Date.now();
 
-  const run = async (list: TrialSpec[], params: SegmentationParams): Promise<TrialEval[]> => {
+  const run = async (list: TrialSpec[], set: ParamSet): Promise<TrialEval[]> => {
     const rows: TrialEval[] = [];
-    for (const s of list) rows.push(await runTrial(s, params));
+    for (const s of list) rows.push(await runTrial(s, set));
     return rows;
   };
   const results: TrialEval[][] = [];
@@ -442,10 +477,10 @@ async function main(): Promise<void> {
   const shResults: TrialEval[][] = [];
   for (const ps of PARAM_SETS) {
     const t1 = Date.now();
-    results.push(await run(specs, ps.params));
-    fsResults.push(await run(fsSpecs, ps.params));
-    nmResults.push(await run(nmSpecs, ps.params));
-    shResults.push(await run(shSpecs, ps.params));
+    results.push(await run(specs, ps));
+    fsResults.push(await run(fsSpecs, ps));
+    nmResults.push(await run(nmSpecs, ps));
+    shResults.push(await run(shSpecs, ps));
     const total = specs.length + fsSpecs.length + nmSpecs.length + shSpecs.length;
     console.log(`${ps.name}: ${total} trials in ${((Date.now() - t1) / 1000).toFixed(1)} s`);
   }
@@ -459,7 +494,9 @@ async function main(): Promise<void> {
       `${shSpecs.length} tremor × 2 trials). ` +
       'The same simulated trials are replayed for every parameter set. Errors are online − truth in ms (negative = the detector is early). ' +
       'Onset truth = movement start, end truth = phone reaches the nose. Every trial runs with resolveParams(base, condition), so the ' +
-      'slow/fast/pause/jerky overrides of protocol.ts apply on top of each base set. Android-like trials are Chromium-quantised.',
+      'slow/fast/pause/jerky overrides of protocol.ts apply on top of each base set (the v1 set lowers the slow onset floors back to ' +
+      '15 / 0.3). Android-like trials are Chromium-quantised. The simulated participant brings the arm back out 250–450 ms after ' +
+      'the end cue (0.8–1.2 s); "trial length" includes that return wherever the set records it (return_cap_ms).',
   );
   md.push('');
   md.push('## Parameter sets');
@@ -495,13 +532,41 @@ async function main(): Promise<void> {
   md.push('');
   md.push(table(groupHeader(), groupRows(results, VARIANTS.map((v) => ({ label: v, filter: (r: TrialEval) => r.spec.variant === v })))));
   md.push('');
+  md.push('## Return of the arm (complete normal trials)');
+  md.push('');
+  md.push(
+    'Protocol 2.0.0 keeps recording after the end until the arm is back out and still (or return_cap_ms after the end was ' +
+      'confirmed): timing.return_onset_ms / return_end_ms. "onset error" = recorded return onset − true start of the return.',
+  );
+  md.push('');
+  md.push(
+    table(
+      ['set', 'complete', 'return onset recorded', 'return end recorded', 'return onset err ms (median · p95|e|)', 'end cue → stop (median)'],
+      PARAM_SETS.map((p, k) => {
+        const done = results[k].filter((r) => r.status === 'complete');
+        const withOnset = done.filter((r) => r.returnOnsetMs !== null);
+        const err = errStats(withOnset.map((r) => (r.trueReturnMs === null ? null : (r.returnOnsetMs as number) - r.trueReturnMs)));
+        const tail = done.map((r) => (r.endDetectedMs === null ? null : r.stopMs - r.endDetectedMs)).filter((x): x is number => x !== null);
+        return [
+          p.name,
+          String(done.length),
+          pct(withOnset.length, done.length),
+          pct(done.filter((r) => r.returnEndMs !== null).length, done.length),
+          err.n ? `${fmt0(err.median)} · ${fmt0(err.p95abs)}` : '–',
+          `${fmt0(quantile(tail.sort((a, b) => a - b), 0.5))} ms`,
+        ];
+      }),
+    ),
+  );
+  md.push('');
   md.push('## False starts and no-move trials');
   md.push('');
   md.push(
-    'false_start: the simulated participant twitches 800 ms after the trial starts (before the earliest possible GO with every set). ' +
-      '"counted" = share of those twitches with timing.false_starts ≥ 1 (the controller cancelled the pending GO, played the error ' +
-      'cue and restarted the hold-still); the rest were taken as still_lost or not noticed. The simulated twitch is deliberately ' +
-      'large (≈ 3.8 m/s² step), so this checks the handling, not the sensitivity, of the false-start detector.',
+    'false_start: the simulated participant twitches still_hold_ms + 200 ms after the trial starts (inside the foreperiod of every ' +
+      'set, before its earliest possible GO). "counted" = share of those twitches with timing.false_starts ≥ 1 (the controller ' +
+      'cancelled the pending GO, played the error cue and restarted the hold-still); the rest were taken as silent losses of ' +
+      'stillness or not noticed. The simulated twitch is deliberately large (≈ 3.8 m/s² step), so this checks the handling, not ' +
+      'the sensitivity, of the false-start detector.',
   );
   md.push('');
   md.push(

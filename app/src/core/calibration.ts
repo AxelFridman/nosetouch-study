@@ -32,14 +32,46 @@
  *  engineGravitySign(engine): the sign the browser engine is known to report: webkit (every iOS
  *    browser) −1, blink / gecko +1, 'unknown' / absent → null (no expectation: either sign is accepted).
  *    A flat sign that contradicts it most likely means the phone lay screen-DOWN (|z| ≈ |g| either way).
- *  buildCalibration(...): assembles the CalibrationResult. gyro_bias_dps = flat.rr_mean only when the
- *    flat window was still AND gave a gravity sign (a hand on the phone or a phone still settling
- *    measures motion, not bias); otherwise null. With `engine`, a flat sign that contradicts the
- *    engine expectation is kept but noted (FLAT_SIGN_CONTRADICTS_ENGINE).
+ *  buildCalibration(...): assembles the CalibrationResult (method 'guided_v1': the calibration screen).
+ *    gyro_bias_dps = flat.rr_mean only when the flat window was still AND gave a gravity sign (a hand
+ *    on the phone or a phone still settling measures motion, not bias); otherwise null. With
+ *    `engine`, a flat sign that contradicts the engine expectation is kept but noted
+ *    (FLAT_SIGN_CONTRADICTS_ENGINE).
  *
- * IMPLEMENTED BY: sensors agent.
+ * IMPLICIT CALIBRATION (method 'implicit_v1', protocol 2.0.0: no table, no tilt step, zero extra time):
+ *  implicitCalibration(performedAt): what createSession stores: every measured field null, notes [],
+ *    axis_check null.
+ *  preGoWindow(trial): the trial's own hold before GO, i.e. the stored motion samples with
+ *    still_ms − still_hold_ms ≤ t ≤ go_ms (still_hold_ms of the trial's resolved parameters).
+ *  withUprightHold(cal, trial, engine): fills an implicit calibration from the first COMPLETE
+ *    upright_toward trial whose pre-GO window is still (poseStats.still) and that was not detected in
+ *    another grip (detected.orientation_match === false: auto-rejected and re-run, it is no upright
+ *    hold): upright = poseStats(window);
+ *    |accg_y| > 7 → gravity_sign = sign(accg_y), upright_check 'ok' when that sign matches the engine
+ *    prior (or there is none: unknown engine / simulation), else 'inverted' + note
+ *    UPRIGHT_SIGN_CONTRADICTS_ENGINE; |accg_y| ≤ 7 → 'unclear', sign stays null. gravity_magnitude =
+ *    |mean accg| when within 8.6–11.0. A window that is not still changes nothing (the next upright
+ *    trial is tried). Never touches gyro_bias_dps (an in-hand hold measures tremor, not the
+ *    gyroscope's bias) nor axis_check (the analysis infers the rate mapping from the trials).
+ *    Anything else (another method, already measured, not upright, not complete) → `cal` itself.
+ *  detectionCalibration(cal, engine, performedAt): the calibration the ONLINE grip classification
+ *    uses: the stored sign when it is trusted, else the engine prior (a sign noted as contradicting
+ *    the engine, or contradicting it at all, is distrusted; an unknown sign falls back to the prior).
+ *    Returns `cal` itself whenever the sign would not change; no calibration → a stand-in carrying
+ *    only the engine's sign (null without an engine prior). Never stored.
+ *
+ * IMPLEMENTED BY: sensors agent (implicit_v1 helpers: session UI agent).
  */
-import type { AxisCheck, CalibrationResult, DeviceInfo, Euler, MotionSample, PoseStats, Vec3 } from './types';
+import type {
+  AxisCheck,
+  CalibrationResult,
+  DeviceInfo,
+  Euler,
+  MotionSample,
+  PoseStats,
+  TrialRecord,
+  Vec3,
+} from './types';
 
 /** Thresholds of the calibration checks (exported so the calibration screen can explain them). */
 export const CALIBRATION_LIMITS = {
@@ -394,5 +426,126 @@ export function buildCalibration(parts: {
     gyro_bias_dps: biasUsable ? (parts.flat?.rr_mean ?? null) : null,
     notes,
     axis_check: axis,
+    method: 'guided_v1',
+  };
+}
+
+// ───────────────────────────── implicit calibration (implicit_v1) ─────────────────────────────
+
+/** Calibration note: the sign read from the first still upright hold contradicts the browser engine. */
+export const UPRIGHT_SIGN_CONTRADICTS_ENGINE = 'upright_sign_contradicts_engine';
+
+/** The calibration createSession stores when no calibration screen ran (see the module doc). */
+export function implicitCalibration(performedAt: string): CalibrationResult {
+  return {
+    method: 'implicit_v1',
+    performed_at: performedAt,
+    flat: null,
+    upright: null,
+    gravity_sign: null,
+    gravity_magnitude: null,
+    upright_check: null,
+    gyro_bias_dps: null,
+    notes: [],
+    axis_check: null,
+  };
+}
+
+/** The trial's hold before GO as motion samples (t relative to the trial's t0); [] without still/GO. */
+export function preGoWindow(trial: TrialRecord): MotionSample[] {
+  const still = trial.timing.still_ms;
+  const go = trial.timing.go_ms;
+  const hold = trial.segmentation?.params?.still_hold_ms;
+  if (typeof still !== 'number' || typeof go !== 'number' || typeof hold !== 'number') return [];
+  const from = still - hold;
+  const m = trial.streams.motion;
+  const out: MotionSample[] = [];
+  for (let i = 0; i < m.t.length; i++) {
+    const t = m.t[i];
+    if (t < from) continue;
+    if (t > go) break;
+    const ax = m.acc_x[i];
+    const ay = m.acc_y[i];
+    const az = m.acc_z[i];
+    const gx = m.accg_x[i];
+    const gy = m.accg_y[i];
+    const gz = m.accg_z[i];
+    const ra = m.rr_alpha[i];
+    const rb = m.rr_beta[i];
+    const rg = m.rr_gamma[i];
+    out.push({
+      t,
+      ts: m.ts[i] ?? null,
+      acc: ax !== null && ay !== null && az !== null ? [ax, ay, az] : null,
+      accg: gx !== null && gy !== null && gz !== null ? [gx, gy, gz] : null,
+      rr: ra !== null && rb !== null && rg !== null ? { alpha: ra, beta: rb, gamma: rg } : null,
+      interval: null,
+    });
+  }
+  return out;
+}
+
+/** Fills an implicit calibration from the pre-GO hold of the first still upright trial (module doc). */
+export function withUprightHold(
+  cal: CalibrationResult | null,
+  trial: TrialRecord,
+  engine: Engine,
+): CalibrationResult | null {
+  if (!cal || cal.method !== 'implicit_v1' || cal.upright !== null) return cal;
+  if (trial.outcome.status !== 'complete' || trial.condition.orientation !== 'upright_toward') return cal;
+  // detected in another grip (the hands-free flow rejects and re-runs it): not an upright hold
+  if (trial.detected?.orientation_match === false) return cal;
+  const window = preGoWindow(trial);
+  if (window.length === 0) return cal;
+  const upright = poseStats(window);
+  if (!upright.still) return cal; // the hand moved during the hold: try the next upright trial
+  const y = upright.accg_mean[1];
+  const magnitude = norm(upright.accg_mean);
+  let gravity_sign: 1 | -1 | null = null;
+  let upright_check: CalibrationResult['upright_check'] = 'unclear';
+  const notes = [...cal.notes];
+  if (Number.isFinite(y) && Math.abs(y) > L.upright_min_y) {
+    gravity_sign = y > 0 ? 1 : -1;
+    const expected = engineGravitySign(engine);
+    upright_check = expected === null || expected === gravity_sign ? 'ok' : 'inverted';
+    if (upright_check === 'inverted') notes.push(UPRIGHT_SIGN_CONTRADICTS_ENGINE);
+  }
+  return {
+    ...cal,
+    upright,
+    gravity_sign,
+    gravity_magnitude: magnitude >= L.gravity_min && magnitude <= L.gravity_max ? magnitude : null,
+    upright_check,
+    notes,
+  };
+}
+
+/** The calibration the online grip classification uses (module doc). Never stored. */
+export function detectionCalibration(
+  cal: CalibrationResult | null,
+  engine: Engine,
+  performedAt: string,
+): CalibrationResult | null {
+  const engineSign = engineGravitySign(engine);
+  if (cal) {
+    const distrusted =
+      cal.notes.includes(FLAT_SIGN_CONTRADICTS_ENGINE) ||
+      cal.notes.includes(UPRIGHT_SIGN_CONTRADICTS_ENGINE) ||
+      (cal.gravity_sign !== null && engineSign !== null && cal.gravity_sign !== engineSign);
+    const sign = cal.gravity_sign !== null && !distrusted ? cal.gravity_sign : engineSign;
+    return sign === cal.gravity_sign ? cal : { ...cal, gravity_sign: sign };
+  }
+  if (engineSign === null) return null;
+  // no calibration at all: a detection-only stand-in that carries just the engine's sign
+  return {
+    performed_at: performedAt,
+    flat: null,
+    upright: null,
+    gravity_sign: engineSign,
+    gravity_magnitude: null,
+    upright_check: null,
+    gyro_bias_dps: null,
+    notes: [],
+    axis_check: null,
   };
 }

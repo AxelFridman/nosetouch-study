@@ -44,9 +44,25 @@ export type Variant =
   | 'lean_in'
   | 'chin'
   | 'forehead'
-  | 'jerky';
+  | 'jerky'
+  /** schema 1.2: touch the nose with the top edge of the phone, tilting it as it arrives */
+  | 'tilted_touch';
 export type Posture = 'standing' | 'sitting';
-export type ProtocolPreset = 'quick' | 'standard' | 'full' | 'custom';
+/** 'street' (schema 1.2, protocol 2.0.0): the ~5 minute participant visit in priority tiers (the default). */
+export type ProtocolPreset = 'quick' | 'standard' | 'full' | 'custom' | 'street';
+/**
+ * Kind of a planned block. 'choice' (schema 1.2): a single trial whose hand the participant picks and
+ * reports afterwards; the block's planned hand is only a placeholder.
+ */
+export type BlockKind = 'main' | 'odd' | 'free' | 'choice';
+/** schema 1.2: who decided the hand of a trial: the protocol ('instructed') or the participant ('reported'). */
+export type HandSource = 'instructed' | 'reported';
+/** schema 1.2: 'auto' = complete trials are accepted without a review screen; 'tap' = every trial is reviewed. */
+export type ReviewMode = 'auto' | 'tap';
+/** schema 1.2: 'ended_early' = the participant chose Finish before every non-optional block was done. */
+export type SessionStatus = 'in_progress' | 'completed' | 'abandoned' | 'ended_early';
+/** schema 1.2: guided_v1 = the calibration screen; implicit_v1 = derived from the first still upright trial. */
+export type CalibrationMethod = 'guided_v1' | 'implicit_v1';
 export type Language = 'en' | 'he';
 export type CueKind = 'ready' | 'go' | 'end' | 'error' | 'block_start';
 export type Sex = 'female' | 'male' | 'other' | 'prefer_not_to_say';
@@ -84,6 +100,12 @@ export interface TrialCondition {
   posture: Posture;
   /** repetition index of this exact condition within its block (0-based) */
   rep: number;
+  /**
+   * optional (schema 1.2; protocol 2.0.0 plans always set it): 'reported' for the trial of a 'choice'
+   * block, whose `hand` is replaced by the participant's answer after the trial; 'instructed' otherwise.
+   * Absent in older records = instructed.
+   */
+  hand_source?: HandSource;
 }
 
 export interface PlannedTrial {
@@ -95,10 +117,20 @@ export interface PlannedTrial {
 
 export interface PlannedBlock {
   block_index: number;
-  kind: 'main' | 'odd' | 'free';
+  kind: BlockKind;
   hand: Hand;
   orientation: OrientationId;
   trials: PlannedTrial[];
+  /**
+   * optional (schema 1.2; set on every block of a 'street' plan): priority tier, lower tiers run first.
+   * street: 0 choice, 1 basics, 2 sideways, 3 variety, 4 bonus. Absent for the other presets.
+   */
+  tier?: number;
+  /**
+   * optional (schema 1.2; set on every block of a 'street' plan): true = bonus block, run only when the
+   * participant opts in at the checkpoint; a session is complete without it. Absent = false.
+   */
+  optional?: boolean;
 }
 
 export interface CustomProtocolSpec {
@@ -139,7 +171,13 @@ export interface SegmentationParams {
   min_movement_ms: number; // an end cannot be declared before onset + this
   max_wait_ms: number; // no onset within this after GO → 'no_movement'
   max_movement_ms: number; // movement still going after this → 'too_long'
-  post_roll_ms: number; // keep recording this long after the end is confirmed
+  post_roll_ms: number; // keep recording at least this long after the end is confirmed
+  /**
+   * optional (schema 1.2; DEFAULT_SEGMENTATION_PARAMS always has it): after the end is confirmed, keep
+   * recording through the return of the arm (return movement, then stillness) for at most this long.
+   * Read by the trial controller only; the online segmenter ignores it.
+   */
+  return_cap_ms?: number;
 }
 
 export interface Baseline {
@@ -259,6 +297,8 @@ export interface CalibrationResult {
   notes: string[];
   /** optional (schema 1.1): empirical rotationRate axis/sign/unit check from a tilt gesture */
   axis_check?: AxisCheck | null;
+  /** optional (schema 1.2): how the calibration was obtained. Absent = 'guided_v1'. */
+  method?: CalibrationMethod;
 }
 
 /**
@@ -291,7 +331,7 @@ export interface SessionRecord {
   started_at: string;
   updated_at: string;
   ended_at: string | null;
-  status: 'in_progress' | 'completed' | 'abandoned';
+  status: SessionStatus;
   participant: ParticipantProfile; // snapshot, already redacted per StudyConfig
   device: DeviceInfo;
   capabilities: SensorCapabilities;
@@ -312,6 +352,8 @@ export interface SessionRecord {
     audio: boolean;
     speech: boolean;
     segmentation_params: SegmentationParams; // base params (per-trial overrides are stored in each trial)
+    /** optional (schema 1.2; the v2 app always writes it): how trials were accepted. Absent = 'tap'. */
+    review_mode?: ReviewMode;
   };
   progress: {
     next_trial_index: number; // index into the flattened plan of the next trial to run
@@ -349,6 +391,8 @@ export interface OrientationStream {
   compass: (number | null)[];
   absolute: boolean | null;
   ts_first_raw: number | null;
+  /** optional (schema 1.2): iOS webkitCompassAccuracy (deg; negative = invalid), one entry per sample */
+  compass_accuracy?: (number | null)[];
 }
 
 export interface QuaternionStream {
@@ -361,12 +405,42 @@ export interface QuaternionStream {
   frequency_hz: number;
 }
 
-export interface TouchRecord {
+/**
+ * Contact details of the touch whose clientX/clientY are stored (schema 1.2, all optional in records):
+ * Touch.radiusX / radiusY (CSS px), force (0..1; 0 where not measured), rotationAngle (deg), and the
+ * position normalised by the viewport (x_norm = clientX / innerWidth, y_norm = clientY / innerHeight).
+ */
+export interface TouchDetails {
+  radius_x: number | null;
+  radius_y: number | null;
+  force: number | null;
+  rotation_angle: number | null;
+  x_norm: number | null;
+  y_norm: number | null;
+}
+
+export interface TouchRecord extends Partial<TouchDetails> {
   t: number;
   type: 'start' | 'end' | 'cancel';
   n: number;
   x: number | null;
   y: number | null;
+}
+
+/** schema 1.2: a screen orientation change during the trial (t relative to t0, like every stream). */
+export interface ScreenEventRecord {
+  t: number;
+  type: string | null; // screen.orientation.type after the change
+  angle: number | null; // screen.orientation.angle after the change (deg)
+}
+
+/** schema 1.2: Generic Sensor API Magnetometer readings, µT in the device frame. */
+export interface MagnetometerStream {
+  t: number[];
+  x: (number | null)[];
+  y: (number | null)[];
+  z: (number | null)[];
+  frequency_hz: number;
 }
 
 export interface CueRecord {
@@ -386,6 +460,10 @@ export interface TrialTiming {
   first_touch_ms: number | null;
   foreperiod_ms: number | null;
   false_starts: number;
+  /** optional (schema 1.2; the v2 app always writes it): start of the return movement after the end; null = not observed */
+  return_onset_ms?: number | null;
+  /** optional (schema 1.2; the v2 app always writes it): still again after the return; null = not observed */
+  return_end_ms?: number | null;
 }
 
 export interface TrialDetected {
@@ -407,6 +485,10 @@ export interface TrialQuality {
   rotation_available: boolean;
   hidden_during: boolean;
   warnings: string[];
+  /** optional (schema 1.2): samples in streams.quaternion_abs */
+  n_quaternion_abs?: number;
+  /** optional (schema 1.2): samples in streams.orientation_abs */
+  n_orientation_abs?: number;
 }
 
 export interface TrialOutcome {
@@ -443,6 +525,15 @@ export interface TrialRecord {
     quaternion: QuaternionStream | null;
     touches: TouchRecord[];
     cues: CueRecord[];
+    // ── optional (schema 1.2; best effort, the v2 app writes them where the browser offers them) ──
+    /** AbsoluteOrientationSensor (magnetometer-fused, Earth-referenced); null when no sample */
+    quaternion_abs?: QuaternionStream | null;
+    /** 'deviceorientationabsolute' events (Chrome Android); null when no event */
+    orientation_abs?: OrientationStream | null;
+    /** screen orientation changes during the trial */
+    screen_events?: ScreenEventRecord[];
+    /** Magnetometer readings where exposed (usually behind a browser flag); null otherwise */
+    magnetometer?: MagnetometerStream | null;
   };
 }
 
@@ -512,12 +603,29 @@ export interface OrientationSample {
   gamma: number | null;
   absolute: boolean | null;
   compass: number | null;
+  /** schema 1.2: iOS webkitCompassAccuracy (deg; negative = invalid); undefined/null where absent */
+  compass_accuracy?: number | null;
 }
 
 export interface QuaternionSample {
   t: number;
   q: [number, number, number, number]; // x, y, z, w
   sensor: 'RelativeOrientationSensor' | 'AbsoluteOrientationSensor';
+}
+
+/** schema 1.2: one Magnetometer reading (µT, device frame), source clock. */
+export interface MagnetometerSample {
+  t: number;
+  x: number | null;
+  y: number | null;
+  z: number | null;
+}
+
+/** schema 1.2: screen orientation after a 'change' event, source clock. */
+export interface ScreenSample {
+  t: number;
+  type: string | null;
+  angle: number | null;
 }
 
 export interface SensorError {
@@ -528,7 +636,16 @@ export interface SensorError {
 export interface SensorListener {
   onMotion(s: MotionSample): void;
   onOrientation(s: OrientationSample): void;
+  /** RelativeOrientationSensor readings (sensor 'RelativeOrientationSensor') */
   onQuaternion?(s: QuaternionSample): void;
+  /** schema 1.2: 'deviceorientationabsolute' events (absolute = true) → streams.orientation_abs */
+  onOrientationAbs?(s: OrientationSample): void;
+  /** schema 1.2: AbsoluteOrientationSensor readings (sensor 'AbsoluteOrientationSensor') → streams.quaternion_abs */
+  onQuaternionAbs?(s: QuaternionSample): void;
+  /** schema 1.2: Magnetometer readings → streams.magnetometer */
+  onMagnetometer?(s: MagnetometerSample): void;
+  /** schema 1.2: screen orientation 'change' events → streams.screen_events */
+  onScreen?(s: ScreenSample): void;
   onError?(e: SensorError): void;
 }
 
@@ -555,7 +672,12 @@ export interface CueSink {
   say?(text: string, lang: Language): void;
 }
 
-export type TrialPhase = 'waiting_still' | 'foreperiod' | 'armed' | 'moving' | 'post_roll' | 'done';
+/**
+ * 'returning' (v2): after the end is confirmed and post_roll_ms has passed, the recording continues
+ * while the participant brings the arm back out (until stillness after a return movement, or
+ * return_cap_ms after end_detected).
+ */
+export type TrialPhase = 'waiting_still' | 'foreperiod' | 'armed' | 'moving' | 'post_roll' | 'returning' | 'done';
 
 export type TrialMessage =
   | 'hold_still'
@@ -566,7 +688,11 @@ export type TrialMessage =
   | 'done'
   | 'no_movement'
   | 'too_long'
-  | 'sensor_stalled';
+  | 'sensor_stalled'
+  /** v2: stretch the arm out again (after the end cue, or before GO while awaiting the return) */
+  | 'return_arm'
+  /** v2 grip gate: the phone is held in a different known grip than instructed; GO is withheld */
+  | 'wrong_grip';
 
 export interface TrialLiveState {
   phase: TrialPhase;
@@ -605,6 +731,19 @@ export interface TrialControllerOptions {
   getScreenOrientation?: () => { type: string | null; angle: number | null };
   /** true if document is currently hidden; injected so core stays DOM-free */
   isHidden?: () => boolean;
+  /**
+   * v2 chained trials: stillness only counts (GO can be scheduled) after a return movement has been
+   * seen in this trial, because the previous trial's recording ended before the arm was back out.
+   * Default false.
+   */
+  awaitReturn?: boolean;
+  /** play the 'ready' cue at the start of the trial. Default true; chained trials pass false. */
+  readyCue?: boolean;
+  /**
+   * v2 grip gate: at 'still', withhold GO (message 'wrong_grip') while the gravity direction confidently
+   * matches a different known grip than the instructed one. Default false; never applies to 'free'.
+   */
+  gripGate?: boolean;
 }
 
 /** Local outbox entry for the upload queue (IndexedDB). */

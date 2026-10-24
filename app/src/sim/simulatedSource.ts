@@ -1,24 +1,38 @@
 /**
- * A SensorSource that plays a simulated participant performing the instructed trial.
+ * A SensorSource that plays a simulated participant performing the instructed trial — exactly the
+ * planned condition, except in street's 'choice' trial (condition.hand_source 'reported'), where
+ * the participant uses their own hand and the natural upright grip (model.performedCondition;
+ * exposed as source.performed).
  *
  * Behaviour timeline (source clock):
  *  - from start: holding the phone at p0 (extended arm) with physiological tremor (≈ 7–12 Hz,
  *    style.tremor_dps) plus slow postural sway, and sensor white noise; still enough to satisfy the
  *    default hold-still criterion (smoothed |ω| ≈ 2–4 deg/s, |a_lin| ≈ 0.05–0.15 m/s²).
+ *    opts.startAtNose (a chained trial that starts before the arm is back out, i.e. awaitReturn):
+ *    the phone starts still at the nose (the end pose of the planned path) and the participant
+ *    returns it to p0 (reverse path, the same 0.8–1.2 s as below) 300–800 ms after start
+ *    (truth.initial_return_t), then holds still there.
  *  - notifyCue('go', t): movement onset at t + reaction (style.reaction_ms ± 25%).
- *    behavior 'false_start': once the participant has been still for 800 ms (the default
- *    still_hold_ms 500 + 300 ms, i.e. inside the foreperiod, before the earliest possible GO), it
- *    makes a small abrupt anticipatory jerk (12 mm forward + 6° pitch, 250 ms, acceleration step
- *    ≈ 3.8 m/s² at its start so the segmenter classifies it as a false start rather than
- *    'still_lost'), then returns to stillness; a GO arriving before that cancels it.
+ *    behavior 'false_start': once the participant has been still for FALSE_START_AFTER_STILL_MS
+ *    = 600 ms (opts.anticipationAfterMs overrides it; protocol 2.0.0: still_hold_ms 400 + 200 ms,
+ *    i.e. inside the foreperiod, before the earliest possible GO at 400 + 400 ms), it makes a small
+ *    abrupt anticipatory jerk (12 mm forward + 6° pitch, 250 ms, acceleration step ≈ 3.8 m/s² at its
+ *    start, so it exceeds even the 30 deg/s / 0.6 m/s² false-start floors of the trial controller),
+ *    then returns to stillness; a GO arriving before that cancels it.
+ *    behavior 'sway': at the same moment a slow posture shift instead (7° pitch over 500 ms, peak
+ *    ≈ 26 deg/s, ≈ 22–28 deg/s smoothed; no translation): it breaks the 20 deg/s hold-still
+ *    criterion but stays below the 30 deg/s / 0.6 m/s² false-start floors, so the controller
+ *    restarts the hold SILENTLY (no error cue, not counted).
  *    behavior 'no_move': ignores GO. behavior 'too_slow': the movement is stretched to 20 s and a
  *    continuous circular wobble (≈ 45 deg/s) is superimposed — a slow drift alone would never
  *    cross the onset thresholds, the wobble guarantees onset AND no end (→ 'too_long').
  *  - movement per planMovement; at s = 1 a short contact transient (60 ms biphasic pulse along the
  *    body's forward axis — device ∓z for screen toward/away — ≤ 3 m/s² for fast movements); then
  *    holds at the nose with tremor.
- *  - notifyCue('end', t): after 250–450 ms (and never before the phone has arrived) starts
- *    returning the arm (reverse minimum jerk along the same path, 0.8 s).
+ *  - notifyCue('end', t): after 250–450 ms (opts.returnDelayMs overrides it: a participant who
+ *    lingers at the nose; never before the phone has arrived) starts returning the arm (reverse
+ *    minimum jerk along the same path, 0.8–1.2 s) and then holds still at p0 (truth.return_t /
+ *    return_end_t).
  *  - mode 'realtime': setInterval at the platform rate, t = performance.now(); 'offline': start()
  *    synchronously loops virtual time (from opts.startTime, default 1000 ms) until stop() is called
  *    or opts.maxDurationMs (default 60000) elapses, then resolves. In realtime mode maxDurationMs
@@ -31,7 +45,11 @@
  * beta = x, gamma = y); acc_available false → acc null;
  * quaternion true → onQuaternion events (RelativeOrientationSensor, own 60 Hz schedule);
  * deviceorientation events right after every motion event (absolute: false, compass null — not
- * modelled); ts = t − 0.3…2 ms dispatch latency, and sensor values are evaluated at ts; handler
+ * modelled); platform.absolute_orientation (Chrome Android) → also onQuaternionAbs
+ * (AbsoluteOrientationSensor, 0.3 ms after each relative quaternion; needs platform.quaternion) and
+ * onOrientationAbs ('deviceorientationabsolute', 0.2 ms after each deviceorientation event, absolute
+ * true), both heading-referenced, with their own fusion-noise stream; no magnetometer and no screen
+ * rotation events (the simulated page never rotates); ts = t − 0.3…2 ms dispatch latency, and sensor values are evaluated at ts; handler
  * times jitter by N(0, jitter_ms) (clamped to ±40% of the period); single drops and rare 3–10
  * sample stalls with total probability ≈ drop_prob. event.interval: Android/Chrome reports 16 (ms),
  * iOS/WebKit reports CoreMotion's update interval in SECONDS (float32 1/60 ≈ 0.0166667).
@@ -42,8 +60,10 @@
  * opts.noise === false switches off every stochastic part except the movement plan itself (sensor
  * noise, gyro bias, tremor/sway, timing jitter/latency spread, drops) — for exact tests — and with
  * it the quantisation (a measurement artefact, not part of the movement).
- * Random streams (plan, timing, tremor, sensor noise, quaternion timing) are seeded separately
- * from opts.seed, so turning noise off never changes the movement draws.
+ * Random streams (plan, timing, tremor, sensor noise, quaternion timing, and since protocol 2.0.0
+ * the return/tilt/start-at-nose draws and the absolute streams' fusion noise) are seeded separately
+ * from opts.seed, so turning noise off never changes the movement draws, and the v2 additions did
+ * not change any earlier draw.
  *
  * IMPLEMENTED BY: simulation agent.
  */
@@ -77,6 +97,7 @@ import {
   gaussian,
   gripMatrix,
   minJerk,
+  performedCondition,
   planMovement,
   simRng,
   type MovementPlan,
@@ -86,6 +107,7 @@ import {
 
 /**
  * normal: performs the instructed movement after GO. false_start: one anticipatory movement before GO.
+ * sway: one slow posture shift before GO that breaks stillness but is no false start.
  * no_move: holds still forever (with tremor). too_slow: movement lasting 20 s.
  * static: phone lying motionless (no tremor, tiny sensor noise only) in the grip orientation of the
  *         condition, e.g. flat_up for the "phone on a table" calibration.
@@ -93,7 +115,7 @@ import {
  *       start tilts 45° about the device y axis (right edge down; 0.8 s), holds 0.6 s, tilts back
  *       (0.8 s). Ignores cues. truth.onset_t / end_t = start / end of the gesture.
  */
-export type SimBehavior = 'normal' | 'false_start' | 'no_move' | 'too_slow' | 'static' | 'tilt';
+export type SimBehavior = 'normal' | 'false_start' | 'sway' | 'no_move' | 'too_slow' | 'static' | 'tilt';
 
 export interface SimSourceOptions {
   mode: 'realtime' | 'offline';
@@ -107,6 +129,16 @@ export interface SimSourceOptions {
   maxDurationMs?: number;
   /** false → noise-free signals (no sensor noise/bias, tremor, timing jitter or drops). Default true. */
   noise?: boolean;
+  /** the phone starts at the nose and is brought back out 300–800 ms after start (see the module doc) */
+  startAtNose?: boolean;
+  /** delay of the return after the 'end' cue (ms); default 250–450 drawn per source */
+  returnDelayMs?: number;
+  /**
+   * behaviour 'false_start' / 'sway': how long after the start of the hold (the start, or the end of a
+   * startAtNose return) the anticipation happens (ms); default FALSE_START_AFTER_STILL_MS. Lets an
+   * evaluation of other parameter sets put it inside their own foreperiod.
+   */
+  anticipationAfterMs?: number;
 }
 
 export interface SimTruth {
@@ -116,23 +148,39 @@ export interface SimTruth {
   behavior: SimBehavior;
   /** start of the anticipatory jerk (behavior 'false_start'), null if none happened/planned */
   false_start_t?: number | null;
+  /** start of the posture shift (behavior 'sway'), null if none happened/planned */
+  sway_t?: number | null;
   /** start of the return movement after the 'end' cue */
   return_t?: number | null;
+  /** the return reaches p0 (return_t + its 0.8–1.2 s duration) */
+  return_end_t?: number | null;
+  /** startAtNose: start of the return from the nose before the trial's own movement */
+  initial_return_t?: number | null;
 }
 
 export interface SimulatedSource extends SensorSource {
   readonly truth: SimTruth;
   /** the movement this source performs (drawn at creation) */
   readonly plan: MovementPlan;
+  /** the condition the participant performs (model.performedCondition of opts.condition) */
+  readonly performed: TrialCondition;
 }
 
-/** Time the participant must have been still before the false-start jerk (ms). */
-export const FALSE_START_AFTER_STILL_MS = 800;
+/** Time the participant must have been still before the false-start jerk or the sway (ms). */
+export const FALSE_START_AFTER_STILL_MS = 600;
 const FALSE_START_MS = 250;
 const FALSE_START_PUSH_M = 0.012;
 const FALSE_START_PITCH_DEG = 6;
+/** 'sway': a 7° pitch over 500 ms (minimum jerk peak 1.875·7/0.5 ≈ 26 deg/s), kept afterwards */
+export const SWAY_DEG = 7;
+export const SWAY_MS = 500;
 const CONTACT_MS = 60;
-const RETURN_MS = 800;
+/** Duration of the return of the arm (uniform, drawn per source). */
+export const RETURN_MIN_MS = 800;
+export const RETURN_MAX_MS = 1200;
+/** startAtNose: the return from the nose starts this long after start (uniform). */
+export const INITIAL_RETURN_MIN_MS = 300;
+export const INITIAL_RETURN_MAX_MS = 800;
 const TOO_SLOW_MS = 20000;
 const WOBBLE_DEG = 6;
 const WOBBLE_HZ = 1.2;
@@ -250,10 +298,22 @@ export function createSimulatedSource(opts: SimSourceOptions): SimulatedSource {
   const tremorRng = simRng(deriveSeed(opts.seed, 2));
   const noiseRng = simRng(deriveSeed(opts.seed, 3));
   const quatRng = simRng(deriveSeed(opts.seed, 4));
+  // protocol 2.0.0 additions: their own streams, so the draws above are what they always were
+  const auxRng = simRng(deriveSeed(opts.seed, 5));
+  const absRng = simRng(deriveSeed(opts.seed, 6));
+  const returnMs = RETURN_MIN_MS + (RETURN_MAX_MS - RETURN_MIN_MS) * auxRng();
+  const tiltedTouchDeg = 30 + 10 * auxRng();
+  const initialReturnDelayMs = INITIAL_RETURN_MIN_MS + (INITIAL_RETURN_MAX_MS - INITIAL_RETURN_MIN_MS) * auxRng();
 
-  const plan = planMovement(P, opts.condition, planRng);
+  const performed = performedCondition(P, opts.condition);
+  const plan = planMovement(P, performed, planRng, { tiltedTouchDeg });
   const reactionMs = P.style.reaction_ms * (1 + 0.25 * (2 * planRng() - 1));
-  const returnDelayMs = 250 + 200 * planRng();
+  const drawnReturnDelayMs = 250 + 200 * planRng();
+  const returnDelayMs =
+    typeof opts.returnDelayMs === 'number' && Number.isFinite(opts.returnDelayMs) && opts.returnDelayMs >= 0
+      ? opts.returnDelayMs
+      : drawnReturnDelayMs;
+  const startAtNose = opts.startAtNose === true && (behavior === 'normal' || behavior === 'false_start' || behavior === 'sway' || behavior === 'no_move');
   const h = plan.h;
   const jf = plan.nondominant ? P.style.nondominant_jitter : 1;
   const moveMs = behavior === 'too_slow' ? TOO_SLOW_MS : plan.duration_s * 1000;
@@ -272,7 +332,10 @@ export function createSimulatedSource(opts: SimSourceOptions): SimulatedSource {
     end_t: null,
     behavior,
     false_start_t: null,
+    sway_t: null,
     return_t: null,
+    return_end_t: null,
+    initial_return_t: null,
   };
 
   let startT = opts.startTime ?? 1000;
@@ -284,6 +347,8 @@ export function createSimulatedSource(opts: SimSourceOptions): SimulatedSource {
   let arriveT: number | null = null;
   let returnT: number | null = null;
   let fsT: number | null = null;
+  let swayT: number | null = null;
+  let initReturnT: number | null = null;
 
   // offline default epoch: the start of the virtual timeline corresponds to "now"
   const baseEpochMs = opts.baseEpochMs ?? Date.now() - startT;
@@ -304,10 +369,17 @@ export function createSimulatedSource(opts: SimSourceOptions): SimulatedSource {
       const ang = TILT_DEG * DEG * (up - down);
       return { R: ang === 0 ? staticR : mMul(staticR, mExp([0, ang, 0])), a: [0, 0, 0] };
     }
+    if (initReturnT !== null && t < initReturnT + returnMs) {
+      // startAtNose: at the nose until initReturnT, then the reverse path back to p0
+      const m = minJerk((t - initReturnT) / returnMs);
+      const d = returnMs / 1000;
+      const st = plan.path(1 - m.u, -m.du / d, -m.ddu / (d * d));
+      return { R: st.R, a: st.a };
+    }
     if (onsetT === null || t <= onsetT) return { R: plan.grip, a: [0, 0, 0] };
     if (returnT !== null && t > returnT) {
-      const m = minJerk((t - returnT) / RETURN_MS);
-      const d = RETURN_MS / 1000;
+      const m = minJerk((t - returnT) / returnMs);
+      const d = returnMs / 1000;
       const st = plan.path(1 - m.u, -m.du / d, -m.ddu / (d * d));
       return { R: st.R, a: st.a };
     }
@@ -347,6 +419,12 @@ export function createSimulatedSource(opts: SimSourceOptions): SimulatedSource {
       const s2 = Math.sin((Math.PI * tau) / T) ** 2;
       a[2] -= ((FALSE_START_PUSH_M * 2 * Math.PI * Math.PI) / (T * T)) * Math.cos((2 * Math.PI * tau) / T);
       rv[0] += FALSE_START_PITCH_DEG * DEG * s2;
+      rotate = true;
+    }
+
+    if (swayT !== null && t > swayT) {
+      // slow posture shift: a pitch that stays (minimum jerk, no translation)
+      rv[0] += SWAY_DEG * DEG * minJerk((t - swayT) / SWAY_MS).u;
       rotate = true;
     }
 
@@ -407,14 +485,17 @@ export function createSimulatedSource(opts: SimSourceOptions): SimulatedSource {
     return { t, ts, acc, accg, rr, interval };
   }
 
-  function earthPose(ts: number): Mat3 {
+  /** Earth-frame pose with fusion noise; the absolute streams draw their noise from absRng. */
+  function earthPose(ts: number, rng: () => number = noiseRng): Mat3 {
     const RE = mMul(R_EB, poseAt(ts).R);
+    if (!noise) return RE;
     // fusion noise as a tiny earth-frame rotation keeps the angles inside the W3C ranges
-    return noise ? mMul(mExp(gauss3(0.05 * DEG)), RE) : RE;
+    const sd = 0.05 * DEG;
+    return mMul(mExp([gaussian(rng) * sd, gaussian(rng) * sd, gaussian(rng) * sd]), RE);
   }
 
-  function orientationSample(t: number, ts: number): OrientationSample {
-    const e = eulerZXYFromMat(earthPose(ts));
+  function orientationSample(t: number, ts: number, absolute = false): OrientationSample {
+    const e = eulerZXYFromMat(earthPose(ts, absolute ? absRng : noiseRng));
     if (quantize) {
       // like Chromium: no re-wrapping, so alpha can read 360.0 (beta 180.0, gamma 90.0) at the edges
       const m = CHROMIUM_ROUNDING.euler_deg;
@@ -422,12 +503,16 @@ export function createSimulatedSource(opts: SimSourceOptions): SimulatedSource {
       e.beta = roundToMultiple(e.beta, m);
       e.gamma = roundToMultiple(e.gamma, m);
     }
-    return { t, ts, alpha: e.alpha, beta: e.beta, gamma: e.gamma, absolute: false, compass: null };
+    return { t, ts, alpha: e.alpha, beta: e.beta, gamma: e.gamma, absolute, compass: null };
   }
 
-  function quaternionSample(t: number): QuaternionSample {
-    const q = quatFromMat(earthPose(t));
-    return { t, q: quantize ? roundQuaternionLikeChromium(q) : q, sensor: 'RelativeOrientationSensor' };
+  function quaternionSample(t: number, absolute = false): QuaternionSample {
+    const q = quatFromMat(earthPose(t, absolute ? absRng : noiseRng));
+    return {
+      t,
+      q: quantize ? roundQuaternionLikeChromium(q) : q,
+      sensor: absolute ? 'AbsoluteOrientationSensor' : 'RelativeOrientationSensor',
+    };
   }
 
   // ── timing (drops/stalls use a fixed number of draws per tick to keep streams aligned) ──
@@ -464,6 +549,8 @@ export function createSimulatedSource(opts: SimSourceOptions): SimulatedSource {
     const phase = noise ? periodMs * (0.2 + 0.6 * timeRng()) : periodMs / 2;
     const qPhase = noise ? periodMs * quatRng() : periodMs / 4;
     const wantQuat = pf.quaternion && typeof listener.onQuaternion === 'function';
+    const wantQuatAbs = pf.quaternion && pf.absolute_orientation === true && typeof listener.onQuaternionAbs === 'function';
+    const wantOrientationAbs = pf.absolute_orientation === true && typeof listener.onOrientationAbs === 'function';
 
     interface Tick {
       k: number;
@@ -487,13 +574,17 @@ export function createSimulatedSource(opts: SimSourceOptions): SimulatedSource {
 
     let tick = makeTick(0);
     let stage: 'motion' | 'orientation' = 'motion';
-    let q = wantQuat ? makeQ(0) : null;
+    let q = wantQuat || wantQuatAbs ? makeQ(0) : null;
     while (!stopped) {
       const tTick = stage === 'motion' ? tick.tm : tick.to;
       if (q && q.t <= tTick) {
         if (q.t > limit) break;
         vt = q.t;
-        if (!q.dropped) listener.onQuaternion?.(quaternionSample(q.t));
+        if (!q.dropped) {
+          if (wantQuat) listener.onQuaternion?.(quaternionSample(q.t));
+          // the absolute sensor reads at the same instant (same sensor fusion pass in Chrome)
+          if (wantQuatAbs && !stopped) listener.onQuaternionAbs?.(quaternionSample(q.t, true));
+        }
         q = makeQ(q.j + 1);
         continue;
       }
@@ -503,7 +594,10 @@ export function createSimulatedSource(opts: SimSourceOptions): SimulatedSource {
         if (!tick.dropped) listener.onMotion(motionSample(tick.tm, tick.tm - tick.latM));
         stage = 'orientation';
       } else {
-        if (!tick.dropped) listener.onOrientation(orientationSample(tick.to, tick.to - tick.latO));
+        if (!tick.dropped) {
+          listener.onOrientation(orientationSample(tick.to, tick.to - tick.latO));
+          if (wantOrientationAbs && !stopped) listener.onOrientationAbs?.(orientationSample(tick.to, tick.to - tick.latO, true));
+        }
         tick = makeTick(tick.k + 1);
         stage = 'motion';
       }
@@ -514,6 +608,8 @@ export function createSimulatedSource(opts: SimSourceOptions): SimulatedSource {
   function runRealtime(listener: SensorListener): void {
     const drop = makeDropper(timeRng);
     const wantQuat = pf.quaternion && typeof listener.onQuaternion === 'function';
+    const wantQuatAbs = pf.quaternion && pf.absolute_orientation === true && typeof listener.onQuaternionAbs === 'function';
+    const wantOrientationAbs = pf.absolute_orientation === true && typeof listener.onOrientationAbs === 'function';
     timer = setInterval(() => {
       if (stopped) return;
       const t = performance.now();
@@ -525,9 +621,15 @@ export function createSimulatedSource(opts: SimSourceOptions): SimulatedSource {
       listener.onMotion(motionSample(t, t - latency(timeRng)));
       if (stopped) return;
       const to = performance.now();
-      listener.onOrientation(orientationSample(to, to - latency(timeRng)));
-      if (stopped || !wantQuat) return;
-      listener.onQuaternion?.(quaternionSample(performance.now()));
+      const lo = latency(timeRng);
+      listener.onOrientation(orientationSample(to, to - lo));
+      if (stopped) return;
+      if (wantOrientationAbs) listener.onOrientationAbs?.(orientationSample(to, to - lo, true));
+      if (stopped) return;
+      const tq = performance.now();
+      if (wantQuat) listener.onQuaternion?.(quaternionSample(tq));
+      if (stopped) return;
+      if (wantQuatAbs) listener.onQuaternionAbs?.(quaternionSample(tq, true));
     }, periodMs);
   }
 
@@ -536,15 +638,31 @@ export function createSimulatedSource(opts: SimSourceOptions): SimulatedSource {
     clock,
     truth,
     plan,
+    performed,
     start(listener: SensorListener): Promise<void> {
       if (started) return Promise.reject(new Error('simulated source: start() called twice'));
       started = true;
       if (stopped) return Promise.resolve();
       if (mode === 'realtime') startT = performance.now();
       vt = startT;
+      // the hold that the anticipation interrupts starts once the arm is out (after a startAtNose return)
+      let stillFrom = startT;
+      if (startAtNose) {
+        initReturnT = startT + initialReturnDelayMs;
+        truth.initial_return_t = initReturnT;
+        stillFrom = initReturnT + returnMs;
+      }
+      const anticipation =
+        typeof opts.anticipationAfterMs === 'number' && Number.isFinite(opts.anticipationAfterMs) && opts.anticipationAfterMs >= 0
+          ? opts.anticipationAfterMs
+          : FALSE_START_AFTER_STILL_MS;
       if (behavior === 'false_start') {
-        fsT = startT + FALSE_START_AFTER_STILL_MS;
+        fsT = stillFrom + anticipation;
         truth.false_start_t = fsT;
+      }
+      if (behavior === 'sway') {
+        swayT = stillFrom + anticipation;
+        truth.sway_t = swayT;
       }
       if (behavior === 'tilt') {
         truth.onset_t = startT + TILT_START_MS;
@@ -575,7 +693,11 @@ export function createSimulatedSource(opts: SimSourceOptions): SimulatedSource {
           fsT = null;
           truth.false_start_t = null;
         }
-        if (behavior === 'normal' || behavior === 'false_start' || behavior === 'too_slow') {
+        if (swayT !== null && swayT > t) {
+          swayT = null;
+          truth.sway_t = null;
+        }
+        if (behavior === 'normal' || behavior === 'false_start' || behavior === 'sway' || behavior === 'too_slow') {
           onsetT = t + reactionMs;
           arriveT = onsetT + moveMs;
           truth.onset_t = onsetT;
@@ -585,6 +707,7 @@ export function createSimulatedSource(opts: SimSourceOptions): SimulatedSource {
         if (returnT !== null || arriveT === null) return;
         returnT = Math.max(t + returnDelayMs, arriveT + 150);
         truth.return_t = returnT;
+        truth.return_end_t = returnT + returnMs;
       }
     },
   };

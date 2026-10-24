@@ -100,6 +100,8 @@ export function TextInput(props: {
   maxLength?: number;
   inputMode?: 'text' | 'email' | 'url' | 'numeric' | 'decimal';
   autoComplete?: string;
+  /** phone keyboards: 'words' capitalises names */
+  autoCapitalize?: 'off' | 'none' | 'sentences' | 'words' | 'characters';
   testId?: string;
 }) {
   return (
@@ -112,13 +114,17 @@ export function TextInput(props: {
       maxLength={props.maxLength}
       inputMode={props.inputMode}
       autoComplete={props.autoComplete ?? 'off'}
+      autoCapitalize={props.autoCapitalize}
       onInput={(e) => props.onInput((e.currentTarget as HTMLInputElement).value)}
       data-testid={props.testId}
     />
   );
 }
 
-/** Numeric input that reports null when empty/invalid. */
+/**
+ * Numeric input that reports null when empty/invalid. inputMode picks the phone keyboard: 'numeric'
+ * (digits only, e.g. an age) or 'decimal' (default: digits and a decimal separator).
+ */
 export function NumberInput(props: {
   id?: string;
   value: number | null;
@@ -127,6 +133,7 @@ export function NumberInput(props: {
   max?: number;
   step?: number;
   placeholder?: string;
+  inputMode?: 'numeric' | 'decimal';
   testId?: string;
 }) {
   return (
@@ -134,7 +141,7 @@ export function NumberInput(props: {
       id={props.id}
       class="input"
       type="number"
-      inputMode="decimal"
+      inputMode={props.inputMode ?? 'decimal'}
       value={props.value ?? ''}
       min={props.min}
       max={props.max}

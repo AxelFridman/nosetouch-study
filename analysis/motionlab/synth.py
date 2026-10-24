@@ -26,6 +26,15 @@ post_roll_ms after the end cue, exactly like the app's trial controller. Values 
 (constants.ts ROUNDING) BEFORE segmentation, so re-running online_v1 on a stored record reproduces its
 ``segmentation`` block exactly. Sessions carry schema-1.1 fields: ``device.engine`` and a calibration
 ``axis_check`` whose verdict matches platform.rr_mapping.
+Protocol 2.0.0 (``preset='street'``, schema 1.2): the plan is ``build_street_plan``, an exact port of
+protocol.ts (same seed -> same plan, the app's mulberry32 / mixSeed / Fisher-Yates); the profile is the short
+one (name, age, sex, handedness, phone hand, height; no EHI); the calibration is the app's implicit_v1 (from
+the pre-GO hold of the first still upright trial; no table, no tilt, no gyro bias); trials are auto-accepted
+('auto_accept', or 'auto_reject:orientation' and re-run), the choice trial reports the participant's phone
+hand, and the recording continues through the return of the arm (``v2=True`` in ``simulate_trial``: back to
+the start pose 250-450 ms after the end cue in 0.8-1.2 s, until still again or return_cap_ms) with
+``timing.return_onset_ms`` / ``return_end_ms``, touch contact details and, on Android, the absolute
+orientation streams.
 """
 from __future__ import annotations
 
@@ -38,19 +47,171 @@ from typing import Any
 import numpy as np
 
 from .conventions import (
-    DEFAULT_SEGMENTATION_PARAMS, FIXED_ORIENTATIONS, GRAVITY, GRIP_MATRICES, ORIENTATIONS, ROUNDING,
-    device_to_rotation_rate, mirror_orientation, resolve_params, rotation_from_gravity, tilt_change_deg,
+    APP_PROTOCOL_VERSION, DEFAULT_SEGMENTATION_PARAMS, FIXED_ORIENTATIONS, GRAVITY, GRIP_MATRICES, ORIENTATIONS,
+    ROUNDING, SCHEMA_VERSION, device_to_rotation_rate, engine_gravity_sign, mirror_orientation, resolve_params,
+    rotation_from_gravity, tilt_change_deg,
 )
 from .preprocess import matrix_to_euler, matrix_to_quaternion, quantize_like_chrome, rate_stats, rotvec_to_matrix
 from .segment import OnlineSegmenterV1, iter_motion_samples, run_online_v1
 
-SCHEMA_VERSION = '1.1.0'
-APP_VERSION = 'motionlab-synth-0.1.0'
-PROTOCOL_VERSION = '1.0.0'
+APP_VERSION = 'motionlab-synth-0.2.0'
+#: protocol_version of 'street' sessions (= constants.ts PROTOCOL_VERSION).
+PROTOCOL_VERSION = APP_PROTOCOL_VERSION
+#: protocol_version of the sessions of the legacy presets below ('tiny', 'small', ...): they contain
+#: screen-away grips, which only protocol 1.0.0 asked for.
+LEGACY_PROTOCOL_VERSION = '1.0.0'
 ID_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'
-SPEED_FACTOR = {'natural': 1.0, 'fast': 0.55, 'slow': 2.6}
+#: Movement duration factor per speed. slow 1.7 (was 2.6): the pilot's slow approaches peaked at >= 50 deg/s
+#: and took about twice the natural time; at 2.6 this model peaked at ~33 deg/s, near the protocol 2.0.0 slow
+#: onset floor (25 deg/s), and online_v1 missed a quarter of them (60/80); 1.7 peaks at ~44 deg/s (median)
+#: and is detected 80/80 (1.8: ~42 deg/s, 80/80).
+SPEED_FACTOR = {'natural': 1.0, 'fast': 0.55, 'slow': 1.7}
 _EHI_SCORE = {'always_right': 100, 'usually_right': 50, 'both': 0, 'usually_left': -50, 'always_left': -100}
 _HORIZON_MS = 30000.0
+#: protocol 2.0.0 return of the arm (spec v2 section 3): a return movement is |w| > 45 deg/s or
+#: |a| > 1.5 m/s^2 (smoothed) for >= 100 ms; then still (still_gyro_dps / still_acc_ms2) for still_hold_ms.
+RETURN_GYRO_DPS = 45.0
+RETURN_ACC_MS2 = 1.5
+RETURN_SUSTAIN_MS = 100.0
+#: consent version of protocol 2.0.0 sessions (config.json consent_version).
+CONSENT_VERSION_V2 = '2026-10-v2'
+
+
+# ───────────────────────────── port of util.ts / protocol.ts: the 'street' plan ─────────────────────────────
+
+_U32 = 0xFFFFFFFF
+#: "PLAN" in ASCII: salt of the plan's random stream (protocol.ts PLAN_SALT).
+PLAN_SALT = 0x504C414E
+
+
+def _imul(a: int, b: int) -> int:
+    """JavaScript Math.imul on uint32 bit patterns: the low 32 bits of the product."""
+    return (a * b) & _U32
+
+
+def mulberry32(seed: int) -> Any:
+    """Port of util.makeRng (mulberry32): a uint32-seeded PRNG returning floats in [0, 1), bit-exact."""
+    state = [int(seed) & _U32]
+
+    def rng() -> float:
+        state[0] = (state[0] + 0x6D2B79F5) & _U32
+        t = state[0]
+        t = _imul(t ^ (t >> 15), t | 1)
+        t ^= (t + _imul(t ^ (t >> 7), t | 61)) & _U32
+        return ((t ^ (t >> 14)) & _U32) / 4294967296.0
+
+    return rng
+
+
+def mix_seed(seed: int, salt: int) -> int:
+    """Port of util.mixSeed (murmur3 finalizer of seed ^ imul(salt, golden ratio)), bit-exact."""
+    h = ((int(seed) & _U32) ^ _imul(int(salt) & _U32, 0x9E3779B9)) & _U32
+    h = _imul(h ^ (h >> 16), 0x85EBCA6B)
+    h = _imul(h ^ (h >> 13), 0xC2B2AE35)
+    return (h ^ (h >> 16)) & _U32
+
+
+def js_shuffle(items: Any, rng: Any) -> list[Any]:
+    """Port of util.shuffle (Fisher-Yates from the end; a new list)."""
+    out = list(items)
+    for i in range(len(out) - 1, 0, -1):
+        j = min(i, int(math.floor(rng() * (i + 1))))
+        out[i], out[j] = out[j], out[i]
+    return out
+
+
+#: protocol.ts STREET_VARIETY_POOL / STREET_ALWAYS_CELL as (speed, start_position, variant).
+STREET_VARIETY_POOL: tuple[tuple[str, str, str], ...] = (
+    ('natural', 'shoulder', 'standard'), ('natural', 'center', 'standard'), ('natural', 'natural', 'curved'),
+    ('natural', 'natural', 'pause'), ('natural', 'natural', 'twist'), ('natural', 'natural', 'elbow_high'),
+    ('natural', 'natural', 'bent_start'), ('natural', 'natural', 'lean_in'), ('natural', 'natural', 'jerky'),
+)
+STREET_ALWAYS_CELL: tuple[str, str, str] = ('natural', 'natural', 'tilted_touch')
+STREET_TIER3_DRAWN = 3
+STREET_BONUS_DRAWN = 2
+
+
+def resolve_first_hand(seed: int, first_hand: str | None = None) -> str:
+    """protocol.resolveFirstHand: the override, else seed bit 0 (1 -> left)."""
+    if first_hand in ('left', 'right'):
+        return str(first_hand)
+    return 'left' if int(seed) & 1 else 'right'
+
+
+def street_sideways(seed: int) -> tuple[str, str]:
+    """protocol.streetSideways: (S, S') = (top_left_toward, top_right_toward), swapped when seed bit 1 is set."""
+    if ((int(seed) & _U32) >> 1) & 1:
+        return 'top_right_toward', 'top_left_toward'
+    return 'top_left_toward', 'top_right_toward'
+
+
+def _materialize(specs: list[tuple[int | None, str, str, str, list[tuple[str, str, str]]]], posture: str,
+                 rng: Any) -> list[dict[str, Any]]:
+    """protocol.materialize: shuffle each block's cells in block order, number trials, count reps."""
+    blocks: list[dict[str, Any]] = []
+    ti = 0
+    for bi, (tier, kind, hand, orientation, cells) in enumerate(specs):
+        seen: dict[tuple[str, str, str], int] = {}
+        trials = []
+        for j, c in enumerate(js_shuffle(cells, rng)):
+            rep = seen.get(c, 0)
+            seen[c] = rep + 1
+            cond = {'hand': hand, 'orientation': orientation, 'speed': c[0], 'start_position': c[1], 'variant': c[2],
+                    'posture': posture, 'rep': rep, 'hand_source': 'reported' if kind == 'choice' else 'instructed'}
+            trials.append({'trial_index': ti, 'block_index': bi, 'trial_in_block': j, 'condition': cond})
+            ti += 1
+        block: dict[str, Any] = {'block_index': bi, 'kind': kind}
+        if tier is not None:
+            block.update(tier=tier, optional=tier == 4)
+        block.update(hand=hand, orientation=orientation, trials=trials)
+        blocks.append(block)
+    return blocks
+
+
+def build_street_plan(seed: int, posture: str = 'standing', first_hand: str | None = None) -> list[dict[str, Any]]:
+    """The 'street' plan of protocol 2.0.0, an exact port of protocol.buildPlan({preset: 'street'}): the same
+    seed gives the same blocks, tiers, cells and trial order as the app (a test pins TS-generated plans).
+
+    13 blocks / 39 trials (9 required blocks, 29 trials; 4 optional bonus blocks, 10 trials): tier 0 the
+    choice trial (hand reported after it), tier 1 upright x both hands (natural, natural, fast, slow), tier 2
+    both sideways grips x both hands (natural, natural, fast), tier 3 four variety cells per hand
+    (tilted_touch + 3 drawn from STREET_VARIETY_POOL), tier 4 (optional) upright (natural, fast, natural)
+    and the 2 next variety cells. A = first hand (seed bit 0), S = first sideways grip (seed bit 1).
+    """
+    rng = mulberry32(mix_seed(seed, PLAN_SALT))
+    a = resolve_first_hand(seed, first_hand)
+    b = 'left' if a == 'right' else 'right'
+    s1, s2 = street_sideways(seed)
+    drawn = js_shuffle(STREET_VARIETY_POOL, rng)
+    variety = [STREET_ALWAYS_CELL, *drawn[:STREET_TIER3_DRAWN]]
+    bonus = drawn[STREET_TIER3_DRAWN:STREET_TIER3_DRAWN + STREET_BONUS_DRAWN]
+    n, f, s = ('natural', 'natural', 'standard'), ('fast', 'natural', 'standard'), ('slow', 'natural', 'standard')
+    U = 'upright_toward'
+    side = [n, n, f]
+    specs = [
+        (0, 'choice', a, 'free', [n]),
+        (1, 'main', a, U, [n, n, f, s]), (1, 'main', b, U, [n, n, f, s]),
+        (2, 'main', b, s1, side), (2, 'main', a, s1, side), (2, 'main', a, s2, side), (2, 'main', b, s2, side),
+        (3, 'odd', b, U, variety), (3, 'odd', a, U, variety),
+        (4, 'main', a, U, [n, f, n]), (4, 'main', b, U, [n, f, n]), (4, 'odd', b, U, bonus), (4, 'odd', a, U, bonus),
+    ]
+    return _materialize(specs, posture, rng)
+
+
+#: protocol.estimateMinutes: seconds per trial by speed, +2 s to read a non-default start / variant, 6 s per
+#: block change, 40 s of onboarding; over the non-optional, non-empty blocks; rounded to 0.5 min.
+_TRIAL_SECONDS = {'fast': 5.5, 'natural': 6.5, 'slow': 10.0}
+
+
+def estimate_minutes(plan: list[dict[str, Any]]) -> float:
+    blocks = [b for b in plan if b.get('optional') is not True and b.get('trials')]
+    sec = 40.0 + max(0, len(blocks) - 1) * 6.0
+    for blk in blocks:
+        for t in blk['trials']:
+            c = t['condition']
+            read = 2.0 if (c.get('start_position') != 'natural' or c.get('variant') != 'standard') else 0.0
+            sec += _TRIAL_SECONDS.get(c.get('speed'), _TRIAL_SECONDS['natural']) + read
+    return math.floor(sec / 60.0 * 2.0 + 0.5) / 2.0  # JS Math.round (halves up)
 
 
 # ───────────────────────────── small utilities ─────────────────────────────
@@ -402,6 +563,8 @@ def _movement(participant: SynthParticipant, condition: dict[str, Any], orientat
     elif variant == 'elbow_high':
         pitch = -25.0
         arc *= 1.5
+    elif variant == 'tilted_touch':
+        pitch += 35.0  # the top edge meets the nose: the phone arrives tilted ~35 deg about its x axis
     T = participant.duration_natural_s * SPEED_FACTOR.get(speed, 1.0) * draws['T_f']
     if not dominant:
         T *= participant.nondominant_slowdown
@@ -456,6 +619,10 @@ def _draws(rng: np.random.Generator, n_max: int, platform: SynthPlatform) -> dic
         'acc_noise': rng.normal(size=(n_max, 3)),
         'gyro_noise': rng.normal(size=(n_max, 3)),
         'ori_noise': rng.normal(size=(n_max, 3)),
+        # protocol 2.0.0 additions (drawn last, so the draws above stay those of earlier versions)
+        'ret_delay_u': float(rng.random()),  # return of the arm: 250-450 ms after the end cue
+        'ret_dur_u': float(rng.random()),  # lasting 0.8-1.2 s
+        'touch_u': rng.random(size=4),  # nose contact: radius, force, position jitter
     }
     return d
 
@@ -503,26 +670,45 @@ def simulate_trial(
     t0_perf_ms: float = 15000.0,
     t0_epoch_ms: float = 1_790_000_000_000.0,
     gravity_sign_for_detection: int | None = None,
+    free_orientation: str | None = None,
+    grip_tilt: bool = True,
+    v2: bool = False,
+    screen_wh: tuple[float, float] | None = None,
 ) -> tuple[dict[str, Any], TrialTruth]:
     """One schema-valid TrialRecord plus its ground truth.
 
     behavior: 'normal' | 'no_move' (ignores GO -> no_movement) | 'too_slow' (20 s movement -> too_long).
     noise: scales sensor noise, tremor, timing jitter and sample drops (0 = exact signals).
+    free_orientation: the grip actually used when the instructed orientation is 'free' (default: a random
+    fixed orientation; the street choice trial uses 'upright_toward', the natural grip).
+    grip_tilt: False holds the phone exactly in the grip (no random tilt of up to 10 deg), e.g. to compare
+    a trial with its screen-flipped twin (a tilt does not commute with the flip).
+    v2: a protocol 2.0.0 / schema 1.2 trial (see the module docstring): the recording continues through the
+    return of the arm (timing.return_onset_ms / return_end_ms), touches carry contact details (radius,
+    force, angle, normalised position on ``screen_wh``), Android adds the absolute orientation streams
+    (quality.n_quaternion_abs / n_orientation_abs), and the outcome is auto-accepted ('auto_accept'; an
+    orientation mismatch is 'auto_reject:orientation', not accepted).
     """
     rng = np.random.default_rng(seed)
     hz = platform.hz
     n_max = int(_HORIZON_MS / (1000.0 / hz)) + 2
     draws = _draws(rng, n_max, platform)
+    if not grip_tilt:
+        draws['tilt'] = np.zeros(3)
     ids = dict(ids or {})
     hand = condition['hand']
     instructed = condition['orientation']
     if instructed == 'free':
-        base = FIXED_ORIENTATIONS[draws['free_choice']]
-        actual = base if hand == 'right' else mirror_orientation(base)
+        if free_orientation is not None:
+            actual = free_orientation
+        else:
+            base = FIXED_ORIENTATIONS[draws['free_choice']]
+            actual = base if hand == 'right' else mirror_orientation(base)
     else:
         actual = instructed
     p = dict(resolve_params(params or DEFAULT_SEGMENTATION_PARAMS, condition))
     mv = _movement(participant, condition, actual, draws, noise)
+    outward_s = mv.duration_s  # the phone reaches the nose (a v2 return segment is appended later)
     if behavior == 'too_slow':
         mv.segments = [(0.0, 20.0, 0.0, 1.0)]
         mv.wobble_hz = 1.0
@@ -592,7 +778,17 @@ def simulate_trial(
     status = 'complete'
     end_ev = run.event('end')
     fail_ev = run.event('no_movement') or run.event('too_long')
-    if end_ev is not None:
+    return_onset = return_end = None
+    if end_ev is not None and v2 and math.isfinite(t_on):
+        # protocol 2.0.0: the arm goes back out 250-450 ms after the end cue (0.8-1.2 s); the samples before
+        # it are unchanged, so the online segmentation (ended at the end cue) is too
+        delay_ms = 250.0 + 200.0 * draws['ret_delay_u']
+        t_ret = (end_ev['detected_t'] + delay_ms - t_on) / 1000.0
+        mv.segments = [*mv.segments, (t_ret, t_ret + 0.8 + 0.4 * draws['ret_dur_u'], 1.0, 0.0)]
+        full = build(t_on)
+        t_list = full['t']
+        n, return_onset, return_end = _return_stop(full, end_ev['detected_t'], p, platform)
+    elif end_ev is not None:
         target = end_ev['detected_t'] + p['post_roll_ms']
         n = next((k + 1 for k in range(n_all) if t_list[k] >= target), n_all)
     elif fail_ev is not None:
@@ -644,14 +840,26 @@ def simulate_trial(
         cues.append({'t': _r(end_detected, 2), 'kind': 'end'})
     else:
         cues.append({'t': _r(fail_ev['t'], 2), 'kind': 'error'})
-    true_end = (t_on + mv.duration_s * 1000.0) if math.isfinite(t_on) else None
+    true_end = (t_on + outward_s * 1000.0) if math.isfinite(t_on) else None
     touches = []
     first_touch = None
+    lift = (return_onset if return_onset is not None else stop_ms - 50.0)  # the phone leaves the nose
+    nose_on_screen = condition.get('variant') != 'tilted_touch'  # tilted_touch: the top edge meets the nose
     if (status == 'complete' and ORIENTATIONS[actual]['screen'] == 'toward' and true_end is not None
-            and true_end + 30.0 < stop_ms - 60.0):
+            and nose_on_screen and true_end + 30.0 < min(lift, stop_ms - 60.0)):
         first_touch = _r(true_end + 30.0, 2)
         touches = [{'t': first_touch, 'type': 'start', 'n': 1, 'x': 187.5, 'y': 400.0},
-                   {'t': _r(stop_ms - 50.0, 2), 'type': 'end', 'n': 0, 'x': 187.5, 'y': 400.0}]
+                   {'t': _r(min(lift, stop_ms - 50.0), 2), 'type': 'end', 'n': 0, 'x': 187.5, 'y': 400.0}]
+        if v2:  # schema 1.2 contact details (the nose: an ellipse of ~1-2 cm, no force on Android)
+            u = draws['touch_u']
+            w_css, h_css = screen_wh or ((390.0, 844.0) if platform.name == 'ios' else (412.0, 915.0))
+            x = round(float(w_css / 2 + (u[2] - 0.5) * 40.0), 2)
+            y = round(float(0.45 * h_css + (u[3] - 0.5) * 60.0), 2)
+            rad = round(8.0 + 12.0 * float(u[0]), 2)
+            details = {'radius_x': rad, 'radius_y': round(rad * 1.2, 2),
+                       'force': 0.0 if platform.name == 'android' else round(0.1 + 0.5 * float(u[1]), 3),
+                       'rotation_angle': 0.0, 'x_norm': round(x / w_css, 4), 'y_norm': round(y / h_css, 4)}
+            touches = [{**tch, 'x': x, 'y': y, **details} for tch in touches]
     res = run.result
     on_i, en_i = res['onset_index'], res['end_index']
     timing = {
@@ -663,13 +871,22 @@ def simulate_trial(
         'stop_ms': stop_ms, 'first_touch_ms': first_touch,
         'foreperiod_ms': _r(fp, 2) if fp is not None else None, 'false_starts': 0,
     }
+    if v2:  # schema 1.2: written by the v2 app for every trial (null = the return was not observed)
+        timing['return_onset_ms'] = return_onset
+        timing['return_end_ms'] = return_end
     # detected rotation (orientationDetect port) on the raw accg, with the session's gravity sign
     gs = platform.gravity_sign if gravity_sign_for_detection is None else gravity_sign_for_detection
     screen_hint = ORIENTATIONS[instructed]['screen']
     base_g = (res['baseline'] or {}).get('gravity')
     G = np.column_stack([np.asarray([np.nan if v is None else v for v in mc[k]], dtype=float)
                          for k in ('accg_x', 'accg_y', 'accg_z')])
-    tail = G[t_arr >= stop_ms - 200.0]
+    if v2 and timing['end_ms'] is not None and end_detected is not None:
+        # the v2 app: the mean accg AT THE NOSE (end_ms ... end_detected_ms), the recording goes on through
+        # the return of the arm (trialController.ts)
+        tail = G[(t_arr >= timing['end_ms']) & (t_arr <= end_detected)]
+    else:
+        tail = G[t_arr >= stop_ms - 200.0]  # the last END_GRAVITY_WINDOW_MS before the stop
+    tail = tail[np.isfinite(tail).all(axis=1)]
     end_g = tail.mean(axis=0).tolist() if len(tail) else None
     rot_start = rotation_from_gravity(base_g, gs, screen_hint)
     rot_end = rotation_from_gravity(end_g, gs, screen_hint)
@@ -696,8 +913,30 @@ def simulate_trial(
             return ('landscape-primary', 90.0) if v[0] > 0 else ('landscape-secondary', 270.0)
         return 'portrait-primary', 0.0
 
-    s0, s1 = screen_of(base_g), screen_of(end_g)
+    stop_g = end_g
+    if v2:  # screen.type_end is read when the recording stops (after the return of the arm)
+        last = G[t_arr >= stop_ms - 200.0]
+        last = last[np.isfinite(last).all(axis=1)]
+        stop_g = last.mean(axis=0).tolist() if len(last) else None
+    s0, s1 = screen_of(base_g), screen_of(stop_g)
     seg_out = dict(res)  # stored unrounded: this IS the port's output
+    outcome = {'status': status, 'accepted': status == 'complete', 'participant_flag': None, 'note': None}
+    streams: dict[str, Any] = {'motion': motion, 'orientation': ori, 'quaternion': quat, 'touches': touches, 'cues': cues}
+    if v2:
+        # hands-free flow (review_mode 'auto'): a complete trial whose grip matches is accepted at once; a
+        # mismatching grip is saved as rejected and re-run
+        if status == 'complete':
+            ok = detected['orientation_match'] is not False
+            outcome.update(accepted=ok, note='auto_accept' if ok else 'auto_reject:orientation')
+        streams['screen_events'] = []
+        abs_ok = platform.name == 'android' and quat is not None  # Chrome Android: AbsoluteOrientationSensor
+        streams['quaternion_abs'] = ({**quat, 't': _round_list(t_arr + 0.3, ROUNDING['time']),
+                                      'sensor': 'AbsoluteOrientationSensor'} if abs_ok else None)
+        streams['orientation_abs'] = ({**ori, 't': _round_list(t_arr + 0.6, ROUNDING['time']), 'absolute': True}
+                                      if abs_ok else None)
+        streams['magnetometer'] = None  # behind a browser flag: practically never exposed
+        quality['n_quaternion_abs'] = n if abs_ok else 0
+        quality['n_orientation_abs'] = n if abs_ok else 0
     record = {
         'record_type': 'trial', 'schema_version': SCHEMA_VERSION, 'app_version': APP_VERSION,
         'trial_id': ids.get('trial_id') or make_id(np.random.default_rng(seed + 7_777_777)),
@@ -708,23 +947,85 @@ def simulate_trial(
         'block_index': int(ids.get('block_index', 0)), 'trial_index': int(ids.get('trial_index', 0)),
         'trial_in_block': int(ids.get('trial_in_block', 0)), 'attempt': int(ids.get('attempt', 1)),
         'simulated': True, 'condition': dict(condition),
-        'outcome': {'status': status, 'accepted': status == 'complete', 'participant_flag': None, 'note': None},
+        'outcome': outcome,
         'timing': timing, 'segmentation': seg_out, 'detected': detected, 'quality': quality,
         'screen': {'type_start': s0[0], 'angle_start': s0[1], 'type_end': s1[0], 'angle_end': s1[1]},
-        'streams': {'motion': motion, 'orientation': ori, 'quaternion': quat, 'touches': touches, 'cues': cues},
+        'streams': streams,
     }
     truth = TrialTruth(
         trial_id=record['trial_id'], hand=hand, orientation=actual, behavior=behavior, go_ms=go_t,
-        onset_ms=t_on if math.isfinite(t_on) else None, end_ms=true_end, duration_s=mv.duration_s,
+        onset_ms=t_on if math.isfinite(t_on) else None, end_ms=true_end, duration_s=outward_s,
         yaw_net_deg=mv.h * mv.yaw,
     )
     return record, truth
 
 
+def _return_stop(full: dict[str, Any], end_detected: float, p: dict[str, float],
+                 platform: SynthPlatform) -> tuple[int, float | None, float | None]:
+    """(number of samples recorded, return_onset_ms, return_end_ms) of a protocol 2.0.0 trial.
+
+    After the end cue the app records at least post_roll_ms, then until a return movement (smoothed |w| >
+    45 deg/s or |a| > 1.5 m/s^2 held 100 ms: its first sample = return_onset_ms) followed by stillness
+    (|w| < still_gyro_dps and |a| < still_acc_ms2 held still_hold_ms: its first sample = return_end_ms), or
+    return_cap_ms after the end cue (onset and / or end stay null). Smoothing: the online segmenter's EMA
+    (smoothing_ms) of |rotationRate| and of |acc| (|accg| - g when the platform gives no acc).
+    """
+    t = np.asarray(full['t'], dtype=float)
+    rr = np.column_stack([np.asarray([np.nan if v is None else v for v in c], dtype=float) for c in full['rr']])
+    g_raw = np.nan_to_num(np.linalg.norm(rr, axis=1))
+    if platform.acc_available:
+        a = np.column_stack([np.asarray([np.nan if v is None else v for v in c], dtype=float) for c in full['acc']])
+        a_raw = np.nan_to_num(np.linalg.norm(a, axis=1))
+    else:
+        ag = np.column_stack([np.asarray([np.nan if v is None else v for v in c], dtype=float) for c in full['accg']])
+        a_raw = np.abs(np.nan_to_num(np.linalg.norm(ag, axis=1)) - GRAVITY)
+    tau = float(p.get('smoothing_ms', 40.0))
+    gs, as_ = np.empty_like(g_raw), np.empty_like(a_raw)
+    gs[0], as_[0] = g_raw[0], a_raw[0]
+    for k in range(1, t.size):
+        c = 1.0 - math.exp(-max(0.0, t[k] - t[k - 1]) / tau) if tau > 0 else 1.0
+        gs[k] = gs[k - 1] + c * (g_raw[k] - gs[k - 1])
+        as_[k] = as_[k - 1] + c * (a_raw[k] - as_[k - 1])
+    min_stop = end_detected + float(p.get('post_roll_ms', 500.0))
+    cap = end_detected + float(p.get('return_cap_ms', 3000.0))
+    onset = end = None
+    run0: float | None = None
+    for k in np.flatnonzero(t > end_detected):
+        tk = float(t[k])
+        if tk >= cap:
+            break
+        if onset is None:
+            moving = gs[k] > RETURN_GYRO_DPS or as_[k] > RETURN_ACC_MS2
+            run0 = (run0 if run0 is not None else tk) if moving else None
+            if run0 is not None and tk - run0 >= RETURN_SUSTAIN_MS:
+                onset, run0 = run0, None
+            continue
+        still = gs[k] < p['still_gyro_dps'] and as_[k] < p['still_acc_ms2']
+        run0 = (run0 if run0 is not None else tk) if still else None
+        if run0 is not None and tk - run0 >= p['still_hold_ms'] and tk >= min_stop:
+            end = run0
+            return int(k) + 1, onset, end
+    stop = max(min_stop, cap)  # not observed within return_cap_ms: the recording stops at the cap
+    n = next((k + 1 for k in range(t.size) if t[k] >= stop), t.size)
+    return n, onset, None
+
+
 # ───────────────────────────── profiles / sessions / datasets ─────────────────────────────
 
 
-def make_profile(p: SynthParticipant, created_epoch_ms: float) -> dict[str, Any]:
+def make_profile(p: SynthParticipant, created_epoch_ms: float, *, short: bool = False) -> dict[str, Any]:
+    """ParticipantProfile. ``short``: the protocol 2.0.0 profile (full name in ``nickname``, age, sex,
+    dominant hand, usual phone hand, height): every removed field is written as null (EHI, phone model,
+    phone case) or false (arm_issue: the consent covers it), never omitted, as the v2 app does."""
+    if short:
+        return {
+            'participant_id': p.participant_id, 'nickname': f'Synthetic {p.participant_id}',
+            'age_years': int(p.age_years), 'sex': p.sex, 'handedness_self': p.handedness,
+            'ehi_sf': None, 'ehi_lq': None, 'ehi_class': None,
+            'phone_hand': p.dominant if p.handedness != 'ambidextrous' else 'both',
+            'height_cm': float(p.height_cm), 'arm_issue': False, 'phone_model': None, 'phone_case': None,
+            'created_at': iso_time(created_epoch_ms), 'updated_at': iso_time(created_epoch_ms),
+        }
     d = p.dominant
     if p.handedness == 'ambidextrous':
         sf = {'writing': f'usually_{d}', 'throwing': 'both', 'toothbrush': 'both', 'spoon': f'usually_{d}'}
@@ -788,6 +1089,89 @@ def _calibration(platform: SynthPlatform, epoch_ms: float, include_sign: bool, n
     return cal
 
 
+#: Still window of a PoseStats (calibration.ts CALIBRATION_LIMITS) and the implicit sign threshold.
+_POSE_STILL_ACCG_SD = 0.25
+_POSE_STILL_RR_SD = 3.0
+_POSE_STILL_MIN_N = 20
+_IMPLICIT_MIN_Y = 7.0
+UPRIGHT_SIGN_CONTRADICTS_ENGINE = 'upright_sign_contradicts_engine'
+
+
+def pose_stats(motion: dict[str, Any], t_from: float, t_to: float) -> dict[str, Any]:
+    """Port of calibration.poseStats over the motion samples with t_from <= t <= t_to: means and
+    POPULATION SDs of accg / acc / rr; still = n >= 20, every accg SD < 0.25 m/s^2 and every rr SD < 3 deg/s."""
+    t = np.asarray(motion['t'], dtype=float)
+    sel = (t >= t_from) & (t <= t_to)
+
+    def rows(keys: tuple[str, str, str]) -> np.ndarray:
+        M = np.column_stack([np.asarray([np.nan if v is None else v for v in motion[k]], dtype=float)[sel] for k in keys])
+        return M[np.isfinite(M).all(axis=1)]
+
+    G = rows(('accg_x', 'accg_y', 'accg_z'))
+    A = rows(('acc_x', 'acc_y', 'acc_z'))
+    W = rows(('rr_alpha', 'rr_beta', 'rr_gamma'))
+    ts = t[sel]
+
+    def ms(M: np.ndarray) -> tuple[list[float], list[float]]:
+        return ([float(x) + 0.0 for x in M.mean(axis=0)], [float(x) for x in M.std(axis=0)]) if len(M) else ([0.0] * 3, [0.0] * 3)
+
+    gm, gsd = ms(G)
+    am, _ = ms(A)
+    wm, wsd = ms(W)
+    still = len(G) >= _POSE_STILL_MIN_N and all(s < _POSE_STILL_ACCG_SD for s in gsd) and (
+        len(W) == 0 or all(s < _POSE_STILL_RR_SD for s in wsd))
+    euler = (lambda v: {'alpha': v[0], 'beta': v[1], 'gamma': v[2]})
+    return {
+        'n': int(len(G)), 'duration_ms': float(ts.max() - ts.min()) if ts.size > 1 else 0.0,
+        'accg_mean': gm, 'accg_sd': gsd, 'acc_mean': am if len(A) else None,
+        'rr_mean': euler(wm) if len(W) else None, 'rr_sd': euler(wsd) if len(W) else None, 'still': bool(still),
+    }
+
+
+def implicit_calibration(trials: list[dict[str, Any]], *, engine: str | None, performed_at: str) -> dict[str, Any]:
+    """The app's implicit_v1 calibration (protocol 2.0.0 spec, section 5) from a session's trials.
+
+    The first complete upright_toward trial (in trial order) whose pre-GO window (still_ms - still_hold_ms ...
+    go_ms) is still gives ``upright`` = its PoseStats; |accg_y| > 7 sets ``gravity_sign`` = sign(y) and
+    ``upright_check`` 'ok' when it matches the engine expectation (webkit -1, blink / gecko +1; any sign for
+    an unknown engine), else 'inverted' + note 'upright_sign_contradicts_engine'; |y| <= 7 gives 'unclear';
+    ``gravity_magnitude`` = |mean accg| when within 8.6-11.0. No flat window, no gyro bias (a hand-held mean
+    is tremor), no axis_check (the analysis infers the mapping from the closure of the trials).
+    """
+    cal: dict[str, Any] = {
+        'method': 'implicit_v1', 'performed_at': performed_at, 'flat': None, 'upright': None, 'gravity_sign': None,
+        'gravity_magnitude': None, 'upright_check': None, 'gyro_bias_dps': None, 'notes': [], 'axis_check': None,
+    }
+    exp = engine_gravity_sign(engine)
+    for t in sorted(trials, key=lambda r: (r['trial_index'], r['attempt'])):
+        tm = t['timing']
+        if (t['condition'].get('orientation') != 'upright_toward' or t['outcome']['status'] != 'complete'
+                or tm.get('still_ms') is None or tm.get('go_ms') is None):
+            continue
+        hold = float(((t.get('segmentation') or {}).get('params') or {}).get('still_hold_ms',
+                                                                           DEFAULT_SEGMENTATION_PARAMS['still_hold_ms']))
+        ps = pose_stats(t['streams']['motion'], float(tm['still_ms']) - hold, float(tm['go_ms']))
+        if not ps['still']:
+            continue
+        cal['upright'] = ps
+        g = np.asarray(ps['accg_mean'], dtype=float)
+        mag = float(np.linalg.norm(g))
+        cal['gravity_magnitude'] = mag if 8.6 <= mag <= 11.0 else None
+        y = float(g[1])
+        if abs(y) > _IMPLICIT_MIN_Y:
+            sign = 1 if y > 0 else -1
+            cal['gravity_sign'] = sign
+            if exp is None or exp == sign:
+                cal['upright_check'] = 'ok'
+            else:
+                cal['upright_check'] = 'inverted'
+                cal['notes'].append(UPRIGHT_SIGN_CONTRADICTS_ENGINE)
+        else:
+            cal['upright_check'] = 'unclear'
+        break
+    return cal
+
+
 def make_session(
     participant: SynthParticipant,
     platform: SynthPlatform,
@@ -799,32 +1183,50 @@ def make_session(
     n_attempts: int,
     n_accepted: int,
     ended_epoch_ms: float,
-    calibration: str = 'ok',  # ok | no_sign | no_axis_check | missing
+    calibration: str = 'ok',  # ok | no_sign | no_axis_check | missing | implicit
     seed: int = 0,
     spec: dict[str, Any] | None = None,
     noise: float = 1.0,
+    preset: str = 'custom',
+    profile: str = 'full',
+    trials: list[dict[str, Any]] | None = None,
+    status: str = 'completed',
+    next_trial_index: int | None = None,
 ) -> dict[str, Any]:
+    """SessionRecord. calibration 'implicit' derives the app's implicit_v1 calibration from ``trials``
+    (:func:`implicit_calibration`); preset 'street' writes a protocol 2.0.0 session (estimateMinutes of the
+    plan, review_mode 'auto', consent 2026-10-v2, protocol.custom null like the app for every preset but
+    'custom'); profile 'short' the protocol 2.0.0 profile."""
     n_planned = sum(len(b['trials']) for b in plan)
+    street = preset == 'street'
     spec = spec or {}
-    custom = {
+    custom = None if street else {
         'orientations': list(spec.get('orientations') or ['upright_toward']),
         'speeds': list(spec.get('speeds') or ['natural']),
         'start_positions': list(spec.get('start_positions') or ['natural']),
         'reps': int(spec.get('reps', 1)), 'odd_variants': list(spec.get('odd_variants') or []), 'include_free': False,
     }
-    cal = None if calibration == 'missing' else _calibration(
-        platform, started_epoch_ms + 30_000, calibration in ('ok', 'no_axis_check'), noise,
-        axis_check=calibration != 'no_axis_check')
+    if calibration == 'missing':
+        cal = None
+    elif calibration == 'implicit':
+        cal = implicit_calibration(trials or [], engine=platform.engine, performed_at=iso_time(started_epoch_ms))
+    else:
+        cal = _calibration(platform, started_epoch_ms + 30_000, calibration in ('ok', 'no_axis_check'), noise,
+                           axis_check=calibration != 'no_axis_check')
     rs = {'duration_ms': 3000.0, 'motion_hz': platform.hz, 'orientation_hz': platform.hz,
           'quaternion_hz': platform.hz if platform.quaternion else None, 'motion_dt_ms_median': 1000.0 / platform.hz,
           'motion_dt_ms_p95': 1000.0 / platform.hz + 1.0, 'acc_available': platform.acc_available,
           'accg_available': True, 'rotation_available': True, 'interval_raw': None}
+    settings: dict[str, Any] = {'language': 'en', 'audio': True, 'speech': False,
+                                'segmentation_params': dict(DEFAULT_SEGMENTATION_PARAMS)}
+    if street:
+        settings['review_mode'] = 'auto'
     return {
         'record_type': 'session', 'schema_version': SCHEMA_VERSION, 'app_version': APP_VERSION,
         'session_id': session_id, 'participant_id': participant.participant_id, 'study_code': study_code,
         'started_at': iso_time(started_epoch_ms), 'updated_at': iso_time(ended_epoch_ms),
-        'ended_at': iso_time(ended_epoch_ms), 'status': 'completed',
-        'participant': make_profile(participant, started_epoch_ms - 60_000),
+        'ended_at': iso_time(ended_epoch_ms), 'status': status,
+        'participant': make_profile(participant, started_epoch_ms - 60_000, short=profile == 'short'),
         'device': _device(platform),
         'capabilities': {
             'secure_context': True, 'device_motion': True, 'device_orientation': True,
@@ -835,15 +1237,17 @@ def make_session(
         },
         'calibration': cal,
         'protocol': {
-            'preset': 'custom', 'protocol_version': PROTOCOL_VERSION, 'seed': int(seed) % (2 ** 32),
-            'posture': 'standing', 'first_hand': plan[0]['hand'] if plan else 'right',
-            'n_planned_trials': n_planned, 'estimated_minutes': round(n_planned * 9 / 60 * 2) / 2 + 1.0,
+            'preset': preset, 'protocol_version': PROTOCOL_VERSION if street else LEGACY_PROTOCOL_VERSION,
+            'seed': int(seed) % (2 ** 32), 'posture': plan[0]['trials'][0]['condition']['posture'] if plan else 'standing',
+            'first_hand': plan[0]['hand'] if plan else 'right', 'n_planned_trials': n_planned,
+            'estimated_minutes': estimate_minutes(plan) if street else round(n_planned * 9 / 60 * 2) / 2 + 1.0,
             'custom': custom, 'plan': plan,
         },
-        'settings': {'language': 'en', 'audio': True, 'speech': False,
-                     'segmentation_params': dict(DEFAULT_SEGMENTATION_PARAMS)},
-        'progress': {'next_trial_index': n_planned, 'n_attempts': n_attempts, 'n_accepted': n_accepted},
-        'consent': {'version': '2026-10-v1', 'accepted_at': iso_time(started_epoch_ms - 30_000)},
+        'settings': settings,
+        'progress': {'next_trial_index': n_planned if next_trial_index is None else int(next_trial_index),
+                     'n_attempts': n_attempts, 'n_accepted': n_accepted},
+        'consent': {'version': CONSENT_VERSION_V2 if street else '2026-10-v1',
+                    'accepted_at': iso_time(started_epoch_ms - 30_000)},
         'timezone_offset_min': -180, 'simulated': True, 'notes': None,
     }
 
@@ -861,6 +1265,118 @@ class SynthDataset:
         return pd.DataFrame([asdict(t) for t in self.truth.values()]).set_index('trial_id')
 
 
+#: outcome notes of the protocol 2.0.0 app (app/src/app/sessionFlow.ts).
+AUTO_ACCEPT_NOTE = 'auto_accept'
+AUTO_REJECT_ORIENTATION_NOTE = 'auto_reject:orientation'
+REDO_REQUESTED_NOTE = 'redo_requested'
+HAND_UNSURE_NOTE = 'hand_unsure'
+#: seconds between two chained trials (automatic advance) and for a block intro (one tap), protocol 2.0.0.
+_STREET_TRIAL_GAP_MS = 1500.0
+_STREET_BLOCK_GAP_MS = 6000.0
+
+
+def make_street_session(
+    participant: SynthParticipant,
+    platform: SynthPlatform,
+    *,
+    session_id: str,
+    study_code: str,
+    plan_seed: int,
+    rng: np.random.Generator,
+    id_rng: np.random.Generator,
+    choice_rng: np.random.Generator,
+    started_epoch_ms: float,
+    noise: float = 1.0,
+    failure_rate: float = 0.0,
+    calibration: str = 'implicit',
+    bonus_fraction: float = 0.5,
+    ended_early_fraction: float = 0.0,
+    redo_rate: float = 0.0,
+    choice_unsure_fraction: float = 0.0,
+    posture: str = 'standing',
+) -> tuple[dict[str, Any], list[dict[str, Any]], dict[str, TrialTruth], float]:
+    """One protocol 2.0.0 'street' visit as the v2 app records it: (SessionRecord, trials, truth, end epoch).
+
+    Plan = :func:`build_street_plan` (``plan_seed`` is stored as protocol.seed, so the stored seed rebuilds
+    the plan). Every trial is a schema 1.2 trial (``simulate_trial(v2=True)``): auto-accepted ('auto_accept')
+    when complete and the grip matches; a grip mismatch ('auto_reject:orientation') or a failure
+    (``failure_rate``: no movement / too long) is saved not accepted and the same planned trial re-runs.
+    The choice trial (tier 0): the participant uses the hand they usually hold the phone in, upright, and
+    reports it: condition.hand = that hand, hand_source 'reported', note null (the app's final copy after
+    the hand question); "not sure" (``choice_unsure_fraction``): not accepted, participant_flag
+    'other_problem', note 'hand_unsure', the planned placeholder hand, never re-run. ``redo_rate``: an
+    accepted trial is revoked from the pause sheet ('redo_requested', not accepted) and re-run.
+    Bonus blocks (tier 4, optional) only with probability ``bonus_fraction``; with ``ended_early_fraction``
+    the participant presses Finish after a random non-optional block: status 'ended_early'. The session
+    carries the short profile, review_mode 'auto' and (default) the implicit_v1 calibration the app derives
+    from the trials. Random draws: trial seeds / failures from ``rng`` (like :func:`make_dataset`), trial
+    ids from ``id_rng``, the participant's choices (bonus, stop, unsure, redo) from ``choice_rng``.
+    """
+    plan = build_street_plan(plan_seed, posture)
+    required = [b for b in plan if b.get('optional') is not True]
+    do_bonus = bool(choice_rng.random() < bonus_fraction)
+    stop_after = None
+    if choice_rng.random() < ended_early_fraction and len(required) > 1:
+        stop_after = int(choice_rng.integers(0, len(required) - 1))  # the last block done (never the last one)
+    unsure = bool(choice_rng.random() < choice_unsure_fraction)
+    blocks = required[:stop_after + 1] if stop_after is not None else (plan if do_bonus else required)
+    reported = participant.dominant  # the hand they usually hold the phone in (make_profile short: phone_hand)
+    t_epoch = started_epoch_ms + 60_000.0  # after the welcome / profile screens
+    perf = 20_000.0
+    trials: list[dict[str, Any]] = []
+    truth: dict[str, TrialTruth] = {}
+    n_acc = 0
+    next_index = 0
+    for bi, blk in enumerate(blocks):
+        if bi:
+            perf += _STREET_BLOCK_GAP_MS
+            t_epoch += _STREET_BLOCK_GAP_MS
+        choice = blk['kind'] == 'choice'
+        for pt in blk['trials']:
+            attempt = 1
+            while True:
+                tseed = int(rng.integers(0, 2 ** 31 - 1))
+                fail = attempt == 1 and failure_rate > 0 and rng.random() < failure_rate
+                behavior = ('no_move' if rng.random() < 0.5 else 'too_slow') if fail else 'normal'
+                cond = dict(pt['condition'])
+                if choice:
+                    cond['hand'] = reported
+                ids = {'trial_id': make_id(id_rng), 'session_id': session_id, 'participant_id': participant.participant_id,
+                       'study_code': study_code, 'block_index': pt['block_index'], 'trial_index': pt['trial_index'],
+                       'trial_in_block': pt['trial_in_block'], 'attempt': attempt}
+                rec, tr = simulate_trial(participant, platform, cond, seed=tseed, ids=ids, noise=noise, behavior=behavior,
+                                         t0_perf_ms=perf, t0_epoch_ms=t_epoch, v2=True,
+                                         free_orientation='upright_toward' if choice else None)
+                out = rec['outcome']
+                done = False
+                if choice and out['status'] == 'complete':
+                    done = True  # the hand question follows; a choice trial is never re-run after it
+                    if unsure:
+                        rec['condition']['hand'] = pt['condition']['hand']  # the plan's placeholder stays
+                        out.update(accepted=False, participant_flag='other_problem', note=HAND_UNSURE_NOTE)
+                    else:
+                        out.update(accepted=True, participant_flag=None, note=None)
+                elif out['accepted'] and redo_rate > 0 and choice_rng.random() < redo_rate:
+                    out.update(accepted=False, participant_flag=None, note=REDO_REQUESTED_NOTE)
+                trials.append(rec)
+                truth[rec['trial_id']] = tr
+                dur = rec['timing']['stop_ms']
+                perf += dur + _STREET_TRIAL_GAP_MS
+                t_epoch += dur + _STREET_TRIAL_GAP_MS
+                if out['accepted']:
+                    n_acc += 1
+                if out['accepted'] or done:
+                    next_index = pt['trial_index'] + 1
+                    break
+                attempt += 1
+    status = 'ended_early' if stop_after is not None else 'completed'
+    sess = make_session(participant, platform, plan, session_id=session_id, study_code=study_code,
+                        started_epoch_ms=started_epoch_ms, n_attempts=len(trials), n_accepted=n_acc,
+                        ended_epoch_ms=t_epoch, calibration=calibration, seed=plan_seed, noise=noise, preset='street',
+                        profile='short', trials=trials, status=status, next_trial_index=next_index)
+    return sess, trials, truth, t_epoch
+
+
 def make_dataset(
     n_participants: int = 6,
     *,
@@ -876,16 +1392,29 @@ def make_dataset(
     dominance_asymmetry: bool = True,
     participant_overrides: dict[str, Any] | None = None,
     platform_overrides: dict[str, dict[str, Any]] | None = None,
-    calibration: str = 'ok',
+    calibration: str | None = None,
+    bonus_fraction: float = 0.5,
+    ended_early_fraction: float = 0.0,
+    redo_rate: float = 0.0,
+    choice_unsure_fraction: float = 0.0,
 ) -> SynthDataset:
     """A complete multi-participant dataset (sessions + every attempt, failures redone once).
 
     platforms alternate per participant; ``platform_overrides`` {'android': {'quantize': True}, ...}
     changes SynthPlatform fields per platform. calibration: 'ok' | 'no_sign' | 'no_axis_check' |
-    'missing' for every session (``calibration_missing_fraction`` drops it for a random share).
+    'missing' | 'implicit' for every session (``calibration_missing_fraction`` drops it for a random
+    share); None = 'implicit' for preset 'street', else 'ok'.
+    preset 'street' (protocol 2.0.0, see :func:`make_street_session`): the street plan of the session seed,
+    the short profile, schema 1.2 trials (v2) with auto-accept, the choice trial reported; the street-only
+    options draw per participant: ``bonus_fraction`` do the 4 optional bonus blocks, ``ended_early_fraction``
+    stop after a random non-optional block (status 'ended_early'), ``choice_unsure_fraction`` answer the
+    hand question "not sure"; ``redo_rate`` per accepted trial: "Redo last movement" from the pause sheet.
     """
     rng = np.random.default_rng(seed)
-    spec = PRESETS[preset] if isinstance(preset, str) else preset
+    street = preset == 'street'
+    spec = None if street else (PRESETS[preset] if isinstance(preset, str) else preset)
+    if calibration is None:
+        calibration = 'implicit' if street else 'ok'
     ds = SynthDataset()
     epoch = start_epoch_ms
     for k in range(n_participants):
@@ -896,6 +1425,21 @@ def make_dataset(
         part = random_participant(prng, left_fraction=left_fraction, **over)
         pname = platforms[k % len(platforms)]
         plat = default_platform(pname, prng, **((platform_overrides or {}).get(pname) or {}))
+        if street:
+            sess, trials, truth, t_epoch = make_street_session(
+                part, plat, session_id=make_id(prng), study_code=study_code, plan_seed=(seed * 1000 + k) % 2 ** 32,
+                rng=rng, id_rng=prng, choice_rng=np.random.default_rng([seed, k, 2]), started_epoch_ms=epoch + 60_000,
+                noise=noise, failure_rate=failure_rate,
+                calibration='missing' if prng.random() < calibration_missing_fraction else calibration,
+                bonus_fraction=bonus_fraction, ended_early_fraction=ended_early_fraction, redo_rate=redo_rate,
+                choice_unsure_fraction=choice_unsure_fraction)
+            ds.participants.append(sess['participant'])
+            ds.sessions.append(sess)
+            ds.trials.extend(trials)
+            ds.truth.update(truth)
+            ds.sim_participants.append(part)
+            epoch = t_epoch + 3_600_000
+            continue
         first_hand = 'right' if (k % 2 == 0) else 'left'
         plan = build_plan(spec, first_hand=first_hand)
         session_id = make_id(prng)

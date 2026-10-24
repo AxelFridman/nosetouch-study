@@ -4,7 +4,8 @@ mirror-consistency check (docs/05 section 6).
 
 Schemes (``make_splits``):
   'stratified_group_kfold'  StratifiedGroupKFold over participant_id (5 folds, shuffled with ``seed``),
-                 stratified on a participant stratum (default ehi_class x platform) - the development CV
+                 stratified on a participant stratum (default handedness_self x platform; protocol 2.0.0
+                 profiles have no EHI) - the development CV
   'group_kfold'  GroupKFold over participant_id (default 5 folds, fewer if there are fewer participants)
   'loso'         leave-one-subject-out
   'orientation'  leave-one-ORIENTATION-out, crossed with subject folds: test = (orientation o, subjects of
@@ -34,10 +35,16 @@ from sklearn.model_selection import GroupKFold, LeaveOneGroupOut, StratifiedGrou
 from .conventions import mirror_pair
 from .models import p_right
 
+#: Subgroup variables of the error table. ehi_class stays for protocol 1.0.0 data (null, i.e. 'unknown', in
+#: protocol 2.0.0 profiles); hand_is_phone_hand compares the hand with the one the participant usually holds
+#: the phone in; hand_source separates the street choice trials (hand chosen freely and reported) from the
+#: instructed ones.
 SUBGROUP_COLUMNS: tuple[str, ...] = (
     'sex', 'handedness_self', 'ehi_class', 'age_band', 'orientation', 'speed', 'start_position', 'variant',
-    'platform', 'hand', 'hand_is_dominant',
+    'platform', 'hand', 'hand_is_dominant', 'hand_is_phone_hand', 'hand_source',
 )
+#: Participant stratum of the stratified CV (EHI is not collected from protocol 2.0.0 on).
+DEFAULT_STRATA: tuple[str, ...] = ('handedness_self', 'platform')
 SCHEMES: tuple[str, ...] = ('stratified_group_kfold', 'group_kfold', 'loso', 'orientation', 'platform')
 
 
@@ -220,6 +227,8 @@ def cross_validate(
     n_boot: int = 0,
     seed: int = 0,
     splits: Sequence[Split] | None = None,
+    X_screen_flip: pd.DataFrame | None = None,
+    augment_screen_flip: bool = False,
 ) -> CVResult:
     """Out-of-fold predictions for every test trial of a subject-disjoint scheme.
 
@@ -227,6 +236,10 @@ def cross_validate(
     X_mirror: features of the mirrored trials (same index) -> out-of-fold p(mirror(x)) for the mirror-
     consistency check. augment_mirror: also train on the mirrored TRAINING trials with flipped labels
     (the copies stay in their participant's training fold; test trials are always real).
+    X_screen_flip: features of the screen-flipped trials (``extract_features(..., screen_flip=True)``,
+    same index; rows of trials that have no flipped copy may be missing or have ``qc_ok`` != 1).
+    augment_screen_flip: also train on the screen-flipped TRAINING trials, labels unchanged (the hand
+    does not change); never tested on: screen-away accuracy is never reported from synthetic trials.
     In the 'orientation' scheme a trial is tested once per subject fold of its orientation (once in total).
     ``splits`` overrides the scheme (they are still checked for subject leakage).
     """
@@ -234,6 +247,14 @@ def cross_validate(
     g = np.asarray(groups)
     if X_mirror is not None:
         X_mirror = X_mirror.reindex(X.index)
+    flip_ok = None
+    if augment_screen_flip:
+        if X_screen_flip is None:
+            raise ValueError('augment_screen_flip needs X_screen_flip')
+        X_screen_flip = X_screen_flip.reindex(X.index)
+        flip_ok = np.array(X_screen_flip.notna().any(axis=1), dtype=bool)  # a copy: to_numpy() may be read-only
+        if 'qc_ok' in X_screen_flip.columns:
+            flip_ok = flip_ok & np.array(pd.to_numeric(X_screen_flip['qc_ok'], errors='coerce').fillna(0) == 1, dtype=bool)
     if splits is None:
         splits = make_splits(scheme, g, orientations=orientations, platforms=platforms, strata=strata,
                              n_splits=n_splits, seed=seed)
@@ -248,16 +269,24 @@ def cross_validate(
         if np.unique(ytr).size < 2:
             continue
         Xtr = X.iloc[s.train]
+        y_real = ytr
         if augment_mirror and X_mirror is not None:
             Xtr = pd.concat([Xtr, X_mirror.iloc[s.train]])
-            ytr = np.concatenate([ytr, 1 - ytr])
+            ytr = np.concatenate([ytr, 1 - y_real])
+        n_flip = 0
+        if flip_ok is not None:
+            tr_flip = s.train[flip_ok[s.train]]  # training trials only, those with a usable flipped copy
+            n_flip = int(tr_flip.size)
+            Xtr = pd.concat([Xtr, X_screen_flip.iloc[tr_flip]])
+            ytr = np.concatenate([ytr, yv[tr_flip]])
         model = _fit(factory, Xtr, ytr)
         p[s.test] = p_right(model, X.iloc[s.test])
         if X_mirror is not None:
             pm[s.test] = p_right(model, X_mirror.iloc[s.test])
         fold[s.test] = s.label
         m = binary_metrics(yv[s.test], p[s.test])
-        frows.append({'fold': s.label, 'n_train': int(s.train.size), 'n_test': int(s.test.size),
+        frows.append({'fold': s.label, 'n_train': int(s.train.size), 'n_train_fitted': int(len(Xtr)),
+                      'n_train_screen_flipped': n_flip, 'n_test': int(s.test.size),
                       'n_test_participants': int(len(set(g[s.test].tolist()))), **m})
     done = np.isfinite(p)
     oof = pd.DataFrame({'fold': fold, 'participant_id': g, 'y_true': yv, 'p_right': p}, index=X.index)
@@ -395,7 +424,12 @@ def analysis_set(
     """(mask over ``trials`` rows, table of how many attempts each rule removes) for the analysis set.
 
     simulated: 'exclude' applies S1 (real-data analyses), 'include' keeps simulated trials (pipeline
-    tests), 'only' keeps only them. require_calibration: also drop sessions without a calibration.
+    tests), 'only' keeps only them.
+    require_calibration: apply rule S3, redefined for protocol 2.0.0 as "gravity sign supported": drop the
+    sessions whose gravity sign NOTHING supports (``gravity_sign_source == 'default'``: no calibrated sign,
+    no known engine, no confident trial vote), whose chiral features are a coin flip. (Protocol 1.0.0
+    required a calibration object; every protocol 2.0.0 session has an implicit one, so that rule would
+    say nothing.) The source comes from ``trials['gravity_sign_source']`` or, without it, from ``sessions``.
     The table counts, per rule, the attempts failing it and the attempts still in after it (sequential).
     """
     rules = dict(PRIMARY_RULES if rules is None else rules)
@@ -403,9 +437,14 @@ def analysis_set(
         rules = {'S1 not simulated': lambda d: ~_b(d, 'simulated', False), **rules}
     elif simulated == 'only':
         rules = {'S1 simulated only': lambda d: _b(d, 'simulated', False), **rules}
-    if require_calibration and sessions is not None and 'calibration_present' in sessions.columns:
-        cal = dict(zip(sessions['session_id'], sessions['calibration_present'].astype('boolean').fillna(False).astype(bool)))
-        rules['S3 calibration present'] = lambda d: d['session_id'].map(cal).fillna(False).astype(bool)
+    if require_calibration:
+        if 'gravity_sign_source' in trials.columns:
+            rules['S3 gravity sign supported'] = lambda d: d['gravity_sign_source'].fillna('default') != 'default'
+        elif sessions is not None and 'gravity_sign_source' in sessions.columns:
+            src = dict(zip(sessions['session_id'], sessions['gravity_sign_source']))
+            rules['S3 gravity sign supported'] = lambda d: d['session_id'].map(src).fillna('default') != 'default'
+        else:
+            raise ValueError('rule S3 needs the gravity_sign_source column (trials or sessions of a Dataset)')
     keep = pd.Series(True, index=trials.index)
     rows = []
     for name, rule in rules.items():
@@ -454,8 +493,10 @@ def modeling_table(features: pd.DataFrame, trials: pd.DataFrame, *, accepted_onl
     return features.loc[ids], meta.loc[ids].reset_index()
 
 
-def participant_strata(meta: pd.DataFrame, columns: Sequence[str] = ('ehi_class', 'platform')) -> np.ndarray:
-    """Per-trial participant stratum string (e.g. 'right|ios'), the stratification variable of the CV."""
+def participant_strata(meta: pd.DataFrame, columns: Sequence[str] = DEFAULT_STRATA) -> np.ndarray:
+    """Per-trial participant stratum string (e.g. 'right|ios'), the stratification variable of the CV.
+    Default: self-reported handedness x platform (``DEFAULT_STRATA``); pass ('ehi_class', 'platform') for the
+    protocol 1.0.0 stratification."""
     parts = [meta[c].astype(object).where(meta[c].notna(), 'unknown').astype(str) for c in columns if c in meta.columns]
     if not parts:
         return np.asarray(['all'] * len(meta), dtype=object)
@@ -476,12 +517,16 @@ def evaluate_models(
     augment_mirror: bool = False,
     n_boot: int = 0,
     seed: int = 0,
-    strata_columns: Sequence[str] = ('ehi_class', 'platform'),
+    strata_columns: Sequence[str] = DEFAULT_STRATA,
+    X_screen_flip: pd.DataFrame | None = None,
+    augment_screen_flip: bool = False,
 ) -> dict[str, CVResult]:
     """Run :func:`cross_validate` for several model factories on the SAME splits.
 
     meta: rows aligned with X (``modeling_table``), with y_right, participant_id and, for the schemes that
-    need them, orientation / platform and the strata columns.
+    need them, orientation / platform and the strata columns (default handedness_self x platform).
+    X_screen_flip / augment_screen_flip: screen-away augmentation of the training folds (see
+    :func:`cross_validate`).
     """
     y = meta['y_right'].astype(int).to_numpy()
     g = meta['participant_id'].to_numpy()
@@ -492,7 +537,8 @@ def evaluate_models(
     out = {}
     for name, fac in factories.items():
         out[name] = cross_validate(fac, X, y, g, scheme=scheme, splits=splits, X_mirror=X_mirror,
-                                   augment_mirror=augment_mirror, name=name, n_boot=n_boot, seed=seed)
+                                   augment_mirror=augment_mirror, name=name, n_boot=n_boot, seed=seed,
+                                   X_screen_flip=X_screen_flip, augment_screen_flip=augment_screen_flip)
     return out
 
 
