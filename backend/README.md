@@ -4,7 +4,8 @@ The collector app uploads every record (one `SessionRecord` or `TrialRecord`) as
 
 | Option | Use it for | Status |
 |---|---|---|
-| [Google Apps Script](google-apps-script/README.md) (`google-apps-script/`) | Data collection: the default | Implemented and tested (`app/tests/appsScript.test.ts`) |
+| [Heroku upload service](heroku/README.md) (`heroku/`) | The v2 study: live uploads into Postgres (`json_post`), admin page, exports for `analysis/scripts/pull_live.py` | Implemented and tested (`backend/heroku/tests`, run with its own venv) |
+| [Google Apps Script](google-apps-script/README.md) (`google-apps-script/`) | Data collection without a server of your own | Implemented and tested (`app/tests/appsScript.test.ts`) |
 | [Local receiver](../server/README.md) (`server/receiver.py`) | Development, and lab sessions whose data should stay on a laptop | Implemented and tested (`server/test_receiver.py`) |
 | Firestore, Supabase, Cloudflare Worker + D1 | Alternatives if Google Drive is not acceptable to the ethics committee | Not implemented; trade-offs below |
 | `"mode": "none"` | Before approval, self-tests, or if the committee rejects cloud storage | Built in: participants export a file from the Done screen |
@@ -27,9 +28,9 @@ How the app talks to each kind of server:
 
 Firestore and Supabase expect their own authentication headers or SDKs, so using them needs a new upload mode in `app/src/core/uploader.ts`.
 
-## Option 1 (default): Google Apps Script web app
+## Option 1: Google Apps Script web app
 
-A script in a dedicated Google account receives the uploads, writes one JSON file per record into a private Drive folder and logs a row per upload in an index spreadsheet. Setup: [google-apps-script/README.md](google-apps-script/README.md).
+The v2 study uploads to the Heroku service instead ([heroku/README.md](heroku/README.md)); Apps Script remains the option that needs no server of your own. A script in a dedicated Google account receives the uploads, writes one JSON file per record into a private Drive folder and logs a row per upload in an index spreadsheet. Setup: [google-apps-script/README.md](google-apps-script/README.md).
 
 - **Pros.** Free, no credit card, no inactivity pausing, about 15 GB of storage (the study needs about 0.25 GB per 100 participants with a `standard` session). The data are plain files that you download as a zip or sync with Drive for desktop. No client SDK, and the whole backend is one commented file of about 730 lines.
 - **Cons.** About 30 simultaneous executions per account, so lab bursts must be spread out ([quotas](https://developers.google.com/apps-script/guides/services/quotas)). Errors outside the script's own handling reach the phone as "Failed to fetch". A consumer account offers no choice of data region. The script needs the full Drive scope, which is why it should run in an account used for nothing else.

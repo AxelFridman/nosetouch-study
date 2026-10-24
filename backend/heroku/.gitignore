@@ -1,0 +1,14 @@
+# local environment and caches (never deployed: deploy.sh leaves them out too)
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+# local SQLite databases (SQLITE_PATH) and their WAL files: participant data
+*.db
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3
+# secrets
+.env
+*.env

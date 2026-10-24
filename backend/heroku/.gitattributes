@@ -1,0 +1,5 @@
+# Heroku reads these on Linux: keep LF line endings even in a Windows checkout.
+*.sh text eol=lf
+Procfile text eol=lf
+.python-version text eol=lf
+requirements*.txt text eol=lf
