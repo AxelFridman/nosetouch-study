@@ -1,0 +1,26 @@
+# Settings shared by the report's asset step (scripts/make_assets.py, to be written; docs/09 M6) and
+# the deck builder (presentation/build_deck.py). Paths are relative to this file.
+
+[predictor]
+# The one canonical predictor link: every QR code (report, PI sheet, deck) is generated from it.
+url = "https://axelfridman.github.io/nosetouch-study/?predict=1"
+
+[runs]
+# analysis/reports/<run>/ folders the assets are generated from. They are git-ignored and exist only
+# on the machine that ran the analysis; the names below are the planned ones (docs/09 section 4.8).
+qa = "../analysis/reports/qa_live"
+cv = "../analysis/reports/cv_deploy"
+ablations = "../analysis/reports/ablations"
+locked_test = "../analysis/reports/locked_test"
+pi_session = "../analysis/reports/pi_session"
+model = "../app/src/predict/models/lr-chiral-d1-v1.json"
+
+[main]
+# The model and evaluation scheme the headline numbers (main/*) come from.
+model = "logreg_chiral_ix"
+scheme = "stratified_group_kfold"
+
+[build]
+# "draft": missing inputs become grey boxes and a watermark marks synthetic or missing data.
+# "final": the guards of docs/09 D33 abort the build instead.
+mode = "draft"

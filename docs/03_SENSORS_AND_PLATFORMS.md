@@ -110,6 +110,8 @@ Participant-facing handling that the platform research called for, and its statu
 
 ## 4. Calibration procedure
 
+**App 0.2.0 (protocol 2.0.0) has no calibration step.** Participants on the street could not lay the phone on a table, so the session stores an implicit calibration (`method: implicit_v1`) filled from the still pre-GO hold of the first complete upright trial: its `PoseStats` as `upright`, the sign of `accg_y` as `gravity_sign` when \|`accg_y`\| > 7 m/s², and `upright_check` against the engine prior (note `upright_sign_contradicts_engine` on a contradiction); no flat window, so no gyro bias, and no tilt step, so no `axis_check` ([02, section 4.5](02_DATA_SCHEMA.md#45-calibration-calibrationresult)). The analysis confirms the sign with the engine and the trial votes and infers the rotationRate mapping from the movements themselves ([section 5](#5-normalisation-layer-for-analysis)). The guided procedure below (`method: guided_v1`, or absent) is what app 0.1.0 recorded, the pilot included.
+
 Calibration measures the conventions of the participant's phone and browser instead of assuming them. Three reasons: the accelerometer sign differs by engine, and a future WebKit change could flip it silently; the `rotationRate` field-to-axis mapping changed in the spec in 2019, and other wrappers still disagree (Expo's iOS DeviceMotion maps alpha to z, [section 7.3](#73-pitfalls-if-going-native)); and Chrome reported rad/s until Chrome 66. Results go to `session.calibration` ([02, section 4.5](02_DATA_SCHEMA.md#45-calibration-calibrationresult)). The math is in `core/calibration.ts`; all inputs are raw samples.
 
 | Step | Participant does | Output | Expected |
@@ -138,7 +140,9 @@ Only the two mappings that browsers have actually used are tested. A tilt excite
 
 ## 5. Normalisation layer for analysis
 
-Raw records are never modified. Every analysis applies one versioned normalisation step (`norm_v1`) before computing any feature, and every derived dataset records that version. [`analysis/motionlab/conventions.py`](../analysis/motionlab/conventions.py) implements it (`resolve_gravity_sign`, `trial_gravity_vote`, `normalize_acceleration`, `device_signals`). This section is the specification that code must match.
+Raw records are never modified. Every analysis applies one versioned normalisation step (`norm_v2`; `norm_v1` before protocol 2.0.0) before computing any feature, and every derived dataset records that version (`qc_norm_version`). [`analysis/motionlab/conventions.py`](../analysis/motionlab/conventions.py) implements it (`session_normalization`, `resolve_gravity_sign`, `trial_gravity_vote`, `infer_rate_mapping`, `normalize_acceleration`, `device_signals`); [`analysis/README.md`](../analysis/README.md#normalisation-rules-norm_v2) documents it in full. This section is the specification that code must match.
+
+`norm_v2` differs from `norm_v1` in three rules, all needed because protocol 2.0.0 sessions carry only an implicit calibration: (1) the engine expectation confirmed by the trial votes is a sign source of its own (`engine_vote`, not flagged; [5.2](#52-gravity-sign-resolution)); (2) a session without a definite `axis_check` gets the rotationRate mapping its trials' gravity closure supports (below); (3) no gyro bias is subtracted without a trusted calibration bias (on the pilot, subtracting the in-hand pre-GO mean worsened the median gravity closure from 1.6° to 2.7°).
 
 ### 5.1 Rules
 
@@ -147,7 +151,7 @@ Raw records are never modified. Every analysis applies one versioned normalisati
 | Accelerometer sign | `acc_*`, `accg_*`, `segmentation.baseline.gravity`, calibration vectors | Multiply every component by the session's resolved sign `s` ([5.2](#52-gravity-sign-resolution)) | W3C convention: face-up `f_z` = +9.81, accg at rest points up |
 | Gyroscope axes | `rr_alpha`, `rr_beta`, `rr_gamma` | Map by `calibration.axis_check.verdict` (table below) | `w_x`, `w_y`, `w_z` about device x, y, z |
 | Gyroscope units | | `units == 'rad_per_s'`: multiply by 180/π. All current browsers report deg/s | deg/s |
-| Gyroscope bias (optional) | `calibration.gyro_bias_dps` | Map like the rates, then subtract before integrating (1 deg/s of bias integrates to 1° per second). Use it only when the flat window was still (`calibration.flat.still`) and the bias norm is below 3 deg/s; otherwise use the mean rate of the 400 ms before GO if its norm is below 3 deg/s, else subtract nothing | |
+| Gyroscope bias (optional) | `calibration.gyro_bias_dps` | Map like the rates, then subtract before integrating (1 deg/s of bias integrates to 1° per second). Use it only when the flat window was still (`calibration.flat.still`) and the bias norm is below 3 deg/s; otherwise subtract nothing (`norm_v2`: a hand-held pre-GO mean is tremor, not bias; `norm_v1` subtracted the mean rate of the 400 ms before GO when its norm was below 3 deg/s) | |
 | Time | `t`, `ts`, `interval_raw` | `t` is the sample clock; `ts` (plus `ts_first_raw`) only for checks; `interval_raw` never | ms since t0 |
 | Orientation angles, compass, `screen.angle_*` | | Not used for features or axis remapping | metadata |
 
@@ -157,7 +161,9 @@ Raw records are never modified. Every analysis applies one versioned normalisati
 | `w3c_inverted` | −`rr_alpha` | −`rr_beta` | −`rr_gamma` |
 | `legacy` | `rr_beta` | `rr_gamma` | `rr_alpha` |
 | `legacy_inverted` | −`rr_beta` | −`rr_gamma` | −`rr_alpha` |
-| `unclear`, `null` or absent (schema 1.0) | as `w3c`, flagged `axis_unverified` | | |
+| `unclear`, `null` or absent (schema 1.0, implicit calibration) | the closure check below; failing that, as `w3c`, flagged `axis_unverified` | | |
+
+*Closure check* (`infer_rate_mapping`, run on up to 16 complete trials of every session without a definite verdict). For each candidate mapping (the four verdicts, in deg/s and rad/s) the rest gravity before the movement is propagated through the movement with the gyroscope and compared with the rest gravity at the nose. The candidate with the smallest session median is applied (source `closure`) when it closes below 3°, below half the runner-up and over at least 8 trials; otherwise W3C deg/s is assumed and flagged. The accelerometer sign does not matter here, because both rest windows flip together. On the pilot the check picked W3C (1.8° against 4.9° for the runner-up), in agreement with its tilt check.
 
 The mirror augmentation of [05](05_MODELING_PLAN.md) operates on these normalised x/y/z signals: a ↦ (−a_x, a_y, a_z), w ↦ (w_x, −w_y, −w_z).
 
@@ -165,12 +171,14 @@ The mirror augmentation of [05](05_MODELING_PLAN.md) operates on these normalise
 
 | Step | Source | Used when | Marked |
 |---|---|---|---|
-| 1 | `calibration.gravity_sign` | it is +1 or −1, unless the trial votes clearly contradict it (≥ 5 votes, ≥ 80% against): then the vote sign replaces it | `calibration`. Flag for review when `upright_check == 'inverted'` or when it differs from the engine expectation. A sign replaced by the votes gets source `inferred`, a warning and the detail "calibration sign overridden by the trial votes" |
-| 2 | Trial vote | no calibrated sign; ≥ 3 votes with ≥ 80% agreement | `inferred` (warning) |
-| 3 | Engine expectation: `webkit` −1, `blink` / `gecko` +1 | no calibration and no confident vote | `engine` (warning). Implemented in `motionlab.conventions.resolve_gravity_sign` (the order is configurable) |
-| 4 | +1 | nothing else | `default` (warning); exclude the session from accelerometer-based chirality features |
+| 1 | `calibration.gravity_sign` of a guided calibration (`method` `guided_v1` or absent) | it is +1 or −1, unless the trial votes clearly contradict it (≥ 5 votes, ≥ 80% against): then the vote sign replaces it | `calibration`. Flag for review when `upright_check == 'inverted'` or when it differs from the engine expectation. A sign replaced by the votes gets source `inferred`, a warning and the detail "calibration sign overridden by the trial votes" |
+| 2 | Engine expectation (`webkit` −1, `blink` / `gecko` +1) confirmed by a confident trial vote | the engine is known and the vote agrees; the upright trials vote alone when they are confident | `engine_vote`, not flagged: the normal case of protocol 2.0.0. An implicit calibration's sign is one of these votes, never a source of its own; when it contradicts the result the session is flagged |
+| 3 | Trial vote | no calibrated sign; ≥ 3 votes with ≥ 80% agreement | `inferred` (warning; a disagreement with the engine is named) |
+| 4 | Engine expectation alone | no calibration and no confident vote | `engine` (warning). The order of steps 3 and 4 is configurable in `motionlab.conventions.resolve_gravity_sign` |
+| 5 | The implicit calibration's sign | nothing above | `implicit` (warning) |
+| 6 | +1 | nothing else | `default` (warning); exclude the session from accelerometer-based chirality features (rule S3, [02 section 12](02_DATA_SCHEMA.md#12-data-quality-and-exclusion-rules)) |
 
-Trial vote: for each trial with a fixed instructed orientation, compare the raw `segmentation.baseline.gravity` with the expected "up" direction of that orientation ([02, section 3](02_DATA_SCHEMA.md#3-coordinate-frames)). The vote is the sign of the cosine, counted only when \|cos\| ≥ cos 45° and \|g\| ≥ 0.3 g. `free` trials do not vote.
+Trial vote: for each trial with a fixed instructed orientation, compare the raw `segmentation.baseline.gravity` with the expected "up" direction of that orientation ([02, section 3](02_DATA_SCHEMA.md#3-coordinate-frames)). The vote is the sign of the cosine, counted only when \|cos\| ≥ cos 45° and \|g\| ≥ 0.3 g. `free` trials do not vote. The upright trials are preferred when they are confident on their own: a flipped sign turns `top_left` into `top_right`, so sideways votes confound the sign with a grip mix-up, while upright votes cannot.
 
 Why this matters: a global sign flip of the accelerometer is an improper transformation, while the gyroscope stays as it is. Every chirality quantity that combines both (net yaw about gravity ∫ω·ĝ, (v × a)·ĝ, ω·â, det[a(t), a(t+τ), ĝ]) changes sign, which is exactly what the other hand looks like ([05](05_MODELING_PLAN.md)).
 

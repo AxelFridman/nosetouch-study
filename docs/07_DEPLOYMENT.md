@@ -43,7 +43,7 @@ Open <http://localhost:5173/?sim=1>. The built-in simulator plays a participant.
 |---|---|
 | `npm run typecheck` | Checks the TypeScript types. |
 | `npm test` | Runs the unit tests (Vitest). |
-| `npm run e2e` | Playwright drives the full participant flow in simulation mode, in a Pixel 7 viewport, and starts the dev server itself. The first time, run `npx playwright install chromium`. |
+| `npm run e2e` | Playwright drives the participant journeys in simulation mode, headless and silent (`e2e/fixtures.ts`, `--mute-audio`), in a Pixel 7 viewport, and starts the dev server itself (about 5 minutes). The first time, run `npx playwright install chromium`. |
 | `npm run build` | Typechecks, then builds for production into `app/dist/`. |
 | `npm run preview` | Serves `app/dist/` on port 4173 on all network interfaces, with the service worker. |
 | `npm run synth -- …` | Generates a synthetic dataset through the real recording pipeline (see below). |
@@ -51,7 +51,7 @@ Open <http://localhost:5173/?sim=1>. The built-in simulator plays a participant.
 Synthetic dataset, in the same folder layout as the backend:
 
 ```powershell
-npm run synth -- --participants 12 --preset standard --seed 42 --left-fraction 0.3 --out ../analysis/data/synthetic
+npm run synth -- --participants 12 --preset street --seed 42 --left-fraction 0.3 --out ../analysis/data/synthetic
 ```
 
 Optional flags are `--study synthetic-v1` and `--failure-rate 0.03` (`app/scripts/synth.ts`). Use the dataset to exercise the analysis kit (§7) before real data exist.

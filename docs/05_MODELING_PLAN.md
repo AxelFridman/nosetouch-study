@@ -33,7 +33,7 @@ Browsers deliver about 60 Hz on both platforms. Chromium uses a 60 Hz pump ([sou
 
 ## 2. Preprocessing pipeline
 
-Raw records are never modified. Each step is versioned (e.g. `norm_v1`), and the version string is stored with every derived table and model. Stage 3 can then refuse a model built with a different pipeline.
+Raw records are never modified. Each step is versioned (e.g. `norm_v2`), and the version string is stored with every derived table and model. Stage 3 can then refuse a model built with a different pipeline.
 
 | # | Step | Output | Why |
 |---|---|---|---|
@@ -44,19 +44,21 @@ Raw records are never modified. Each step is versioned (e.g. `norm_v1`), and the
 | 4 | Segmentation: online_v1 indices plus an offline consensus (§2.4) | onset, end, flags | The offline consensus is the analysis truth. |
 | 5 | Features (§4) and/or sequences | X | |
 
-### 2.1 Normalisation (`norm_v1`)
+### 2.1 Normalisation (`norm_v2`)
+
+`norm_v2` (protocol 2.0.0) replaced `norm_v1` because street sessions carry only an implicit calibration: no flat pose, no tilt step ([03 §4](03_SENSORS_AND_PLATFORMS.md#4-calibration-procedure)). Its three changes are marked below; the full rules are in [03 §5](03_SENSORS_AND_PLATFORMS.md#5-normalisation-layer-for-analysis) and [analysis/README.md](../analysis/README.md#normalisation-rules-norm_v2).
 
 | Quantity | Raw fields | Normalised | Rule |
 |---|---|---|---|
-| Specific force | `accg_x/y/z` | f = s · accg | s = `calibration.gravity_sign` (+1 = W3C, −1 = inverted), unless the trial votes clearly contradict it (≥ 5 votes, ≥ 80 % against): then the vote sign is used and the session flagged. If the calibrated sign is null, use a confident vote of the trial baselines, then the engine (`device.engine` `webkit` → −1, otherwise +1), and flag the session ([03 §5.2](03_SENSORS_AND_PLATFORMS.md#52-gravity-sign-resolution)). |
+| Specific force | `accg_x/y/z` | f = s · accg | s = the `gravity_sign` of a guided calibration (+1 = W3C, −1 = inverted), unless the trial votes clearly contradict it (≥ 5 votes, ≥ 80 % against): then the vote sign is used and the session flagged. **norm_v2:** otherwise the engine expectation (`device.engine` `webkit` → −1, otherwise +1) when a confident vote of the trial baselines confirms it (source `engine_vote`, not flagged: the normal protocol 2.0.0 case); then a confident vote alone, the engine alone, the implicit calibration's sign, and +1, each flagged ([03 §5.2](03_SENSORS_AND_PLATFORMS.md#52-gravity-sign-resolution)). |
 | Browser linear acceleration | `acc_x/y/z` | s · acc | QA only. When a phone has no linear-acceleration sensor, Chrome falls back to a crude high-pass filter ([source](https://github.com/chromium/chromium/blob/main/services/device/generic_sensor/linear_acceleration_fusion_algorithm_using_accelerometer.cc)). |
-| Angular velocity | `rr_alpha/beta/gamma` (deg/s) | ω = (x, y, z) in deg/s | Depends on `calibration.axis_check.verdict`: `w3c` → (alpha, beta, gamma); `legacy` → (beta, gamma, alpha); `*_inverted` → negate. If `units` is `rad_per_s`, multiply by 180/π. If the verdict is `unclear` or absent, assume `w3c` and flag the session (`axis_unverified`). |
-| Gyro bias | `calibration.gyro_bias_dps` | subtract, with the same mapping | Taken from the flat-on-table pose, which is true rest, but only when that window was still (`calibration.flat.still`) and the bias norm is below 3 deg/s. Otherwise the mean rate of the 400 ms before GO is used if its norm is below 3 deg/s. |
+| Angular velocity | `rr_alpha/beta/gamma` (deg/s) | ω = (x, y, z) in deg/s | Depends on `calibration.axis_check.verdict`: `w3c` → (alpha, beta, gamma); `legacy` → (beta, gamma, alpha); `*_inverted` → negate. If `units` is `rad_per_s`, multiply by 180/π. **norm_v2:** if the verdict is `unclear` or absent (every implicit calibration), the mapping whose gravity closure over the session's trials is decisive (< 3°, < half the runner-up, ≥ 8 trials); otherwise assume `w3c` and flag the session (`axis_unverified`). |
+| Gyro bias | `calibration.gyro_bias_dps` | subtract, with the same mapping | Taken from the flat-on-table pose, which is true rest, but only when that window was still (`calibration.flat.still`) and the bias norm is below 3 deg/s. **norm_v2:** otherwise nothing is subtracted; a hand-held pre-GO mean is tremor, not bias (on the pilot, subtracting it worsened the median gravity closure from 1.6° to 2.7°). `norm_v1` used the mean rate of the 400 ms before GO when its norm was below 3 deg/s. |
 | Time | `t` (handler time) | seconds | `t` is on the same clock as the cues. `ts` is a QA cross-check. Never use `interval_raw`: iOS reports it in seconds, Chrome reports a constant 16 and Firefox a constant 100 ([WebKit source](https://github.com/WebKit/WebKit/blob/main/Source/WebCore/platform/ios/DeviceMotionClientIOS.mm), [Chromium source](https://github.com/chromium/chromium/blob/main/third_party/blink/renderer/modules/device_orientation/device_motion_event_pump.cc)). |
 | Repeated samples | | drop | On iOS, drop exact 9-channel repeats: they are duplicated timer snapshots, and iOS values are unrounded. On Chrome, drop a repeat only while ‖ω‖ > 20 deg/s. **Rec.** |
 | iOS precision | WebKit values are unrounded | round raw `acc`/`accg` to 0.1 m/s² and `rr` to 0.1 deg/s | **Rec.** Evaluated as ablation A3 (`train_baseline.py --quantize ios`); off by default in norm_v1 until A3 decides. Chrome rounds to this grid ([platform_sensor_util.h](https://github.com/chromium/chromium/blob/main/services/device/generic_sensor/platform_sensor_util.h)). Without the rounding, a model can learn the platform from value granularity. |
 
-Why the sign step exists: WebKit forwards Core Motion's sign, so a face-up iPhone reads `accg_z` ≈ −9.81, while Android reads +9.81. rotationRate signs agree across the two platforms. Sources: [WebKit source](https://github.com/WebKit/WebKit/blob/main/Source/WebCore/platform/ios/WebCoreMotionManager.mm), [W3C list, 2014](https://lists.w3.org/Archives/Public/public-geolocation/2014Jul/0024.html), [re-measured on iPadOS in 2026](https://github.com/soroushdty/gaitscope/issues/96). The sign is measured from the flat pose and never inferred from the user agent. §3.3 explains why it cannot be recovered any other way.
+Why the sign step exists: WebKit forwards Core Motion's sign, so a face-up iPhone reads `accg_z` ≈ −9.81, while Android reads +9.81. rotationRate signs agree across the two platforms. Sources: [WebKit source](https://github.com/WebKit/WebKit/blob/main/Source/WebCore/platform/ios/WebCoreMotionManager.mm), [W3C list, 2014](https://lists.w3.org/Archives/Public/public-geolocation/2014Jul/0024.html), [re-measured on iPadOS in 2026](https://github.com/soroushdty/gaitscope/issues/96). Protocol 1.0.0 measured the sign from the flat pose. Protocol 2.0.0 has no flat pose: it uses the engine expectation (derived from the user agent) only when the measured trial baselines confirm it, and flags every other case. §3.3 explains why the sign cannot be recovered from the movements themselves.
 
 ### 2.2 Resampling (**Rec.**)
 
@@ -158,6 +160,15 @@ Raw iOS data are (−a, ω) relative to Android: the accelerometer is negated an
    - **Reading the result.** In field names, σ* is `acc_x` −, `rr_alpha` +, `rr_beta` −, `rr_gamma` −. If the winner is `rr_alpha` −, `rr_beta` +, `rr_gamma` −, the data follow the legacy alpha = z mapping.
    - **What it cannot do.** The check cannot see a global accelerometer sign, because both hands are recorded on the same phone. It does not replace the flat-pose calibration.
 
+### 3.6 Screen-away synthesis (protocol 2.0.0)
+
+Protocol 2.0.0 never asks for a screen-away grip (`*_away`): participants could not do them on the street. Because the PI's test conditions are unknown, the analysis synthesises them instead, by turning the phone 180° about its own y axis: F = diag(−1, 1, −1), and `GRIP_MATRICES[o_away] = GRIP_MATRICES[o_toward] · F`.
+
+- **Rule.** F is a proper rotation, so f, a and ω all map (x, y, z) ↦ (−x, y, −z) (W3C mapping: `acc_x`, `acc_z`, `accg_x`, `accg_z`, `rr_alpha`, `rr_gamma` negated); the orientation R ↦ R · F, i.e. quaternion (x, y, z, w) ↦ (−z, w, x, −y); the label `*_toward` ↦ `*_away`; touches cleared (the nose would meet the back of the phone); detected rotations and gravity votes unchanged; trial id + `-away`. Flipping twice is the identity, and the flip commutes with the mirror (§3.2).
+- **Code.** `conventions.flip_device_vectors` (the rule), `augment.screen_away_trial` (raw records), `features.prepare_trial(..., screen_flip=True)` (normalised signals), `evaluate.cross_validate(augment_screen_flip=True)` and `train_baseline.py --augment-screen-away` (training folds only; test trials are always real).
+- **What it changes.** The basic, invariant and chiral features of a flipped trial equal the original's, so `yaw_rule` and logistic regression on chiral features gain nothing; only models on device-frame signals (gradient boosting, sequence models) see new data.
+- **Limits.** It is not a real screen-away movement: wrist rotation, fingers, approach and contact differ, and the accelerometer's lever arm is not flipped (about 0.5 m/s² at natural speed, as for the mirror, §3.4). Use it to augment training data only, and never report screen-away accuracy from synthetic trials.
+
 ## 4. Features
 
 ### 4.1 Parity rule
@@ -235,12 +246,12 @@ The PI will test new people, so every split is subject-wise. Record-wise CV unde
 
 | Split | scikit-learn tool | Question answered |
 |---|---|---|
-| Development CV | `StratifiedGroupKFold(n_splits=5, shuffle=True)`, `groups=participant_id`, stratified on the participant stratum `ehi_class × platform`, repeated with 5 seeds | Expected accuracy on new people. |
+| Development CV | `StratifiedGroupKFold(n_splits=5, shuffle=True)`, `groups=participant_id`, stratified on the participant stratum `handedness_self × platform` (`evaluate.DEFAULT_STRATA`; protocol 2.0.0 collects no EHI, so `ehi_class × platform` only for older data), repeated with 5 seeds | Expected accuracy on new people. |
 | LOSO | `LeaveOneGroupOut()`, splitting with `groups=participant_id` | Per-participant accuracy distribution; handedness add-on. |
 | Nested tuning | `GridSearchCV(..., cv=GroupKFold(n_splits=4))` inside each outer training fold, `fit(X, y, groups=...)` | Unbiased hyperparameters. |
 | Leave-one-orientation-out | Outer subject-wise folds × one held-out orientation. Hold out mirror pairs (`top_left_*` with `top_right_*`) together, because mirroring one creates the other. | A new grip. |
 | Leave-one-platform-out | `LeaveOneGroupOut()`, splitting with `groups=device.platform` | iOS ↔ Android transfer. |
-| Leave-one-device-model-out | `LeaveOneGroupOut()`, splitting with `groups=device.model_hint` on Android and the participant's `phone_model` on iOS, where `model_hint` is only the device class (`iPhone` / `iPad`) or a hardware id in in-app browsers | A new phone model. |
+| Leave-one-device-model-out | `LeaveOneGroupOut()`, splitting with `groups=device.model_hint` on Android. On iOS `model_hint` is only the device class (`iPhone` / `iPad`) or a hardware id in in-app browsers, and protocol 2.0.0 no longer asks the phone model, so the proxy is the screen, `<family> <short>x<long>@<dpr>` (e.g. `iPhone 390x844@3`, `motionlab.io.device_model`), which groups iPhones of one size class | A new phone model. |
 | Locked test | About 20% of participants (§6.4) | The PI's scenario, run once. |
 
 ```python

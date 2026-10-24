@@ -1,0 +1,26 @@
+# LaTeX output: latexmk writes auxiliary files to build/ and the PDF next to main.tex.
+/build/
+/*.pdf
+*.aux
+*.bbl
+*.bcf
+*.blg
+*.fdb_latexmk
+*.fls
+*.log
+*.out
+*.run.xml
+*.synctex.gz
+*.toc
+*.xdv
+
+# Generated assets. They derive from participant data and this repository is public: keep them local.
+# Only the placeholders are tracked; hand-made figures go to figures/static/ (tracked).
+/figures/*
+!/figures/.gitkeep
+!/figures/static/
+/tables/*
+!/tables/.gitkeep
+
+# Python caches of scripts/
+__pycache__/

@@ -1,8 +1,8 @@
 # NoseTouch
 
-A person holds a smartphone with the arm fully extended in front of them and brings it in to touch their nose. Using only the phone's motion sensors, can we tell whether they used the left or the right hand? NoseTouch answers this in three stages: (1) a data-collection platform, (2) model building, (3) a predictor the PI can run on their own phone. This repository holds Stage 1. It contains a web app (PWA) that anyone can open on an iPhone or an Android phone without installing anything. The app records labelled trials with both hands, 10 phone orientations, 3 speeds, 3 start positions and 9 deliberately odd movement variants. The repository also has a free upload backend, a simulator that plays synthetic participants, and a Python starter kit for Stage 2. Start with the [project overview](docs/00_PROJECT_OVERVIEW.md).
+A person holds a smartphone with the arm fully extended in front of them and brings it in to touch their nose. Using only the phone's motion sensors, can we tell whether they used the left or the right hand? NoseTouch answers this in three stages: (1) a data-collection platform, (2) model building, (3) a predictor the PI can run on their own phone. This repository holds Stage 1. It contains a web app (PWA) that anyone can open on an iPhone or an Android phone without installing anything. Version 0.2.0 runs a hands-free visit of about 5 minutes (the `street` protocol): welcome and consent on one screen, a short profile, a How-to card with an animation, one free trial whose hand the participant reports, then blocks that chain the trials without taps — the most important conditions first, so stopping early loses little. It records labelled trials with both hands, upright and sideways grips with the screen facing the participant (never facing away: the analysis synthesises those), 3 speeds, 3 start positions and deliberately varied movements (each visit draws four of them, always including a tilted touch), plus every motion signal the browser offers and the return of the arm. The repository also has upload backends, a simulator that plays synthetic participants, and a Python starter kit for Stage 2. Start with the [project overview](docs/00_PROJECT_OVERVIEW.md).
 
-- **Status:** Stage 1. App 0.1.0, data schema 1.1.0, protocol 1.0.0. It has been tested with unit tests and the simulator but not yet on real phones or with participants. See [Status and limitations](#status-and-limitations).
+- **Status:** Stage 1. App 0.2.0, data schema 1.2.0, protocol 2.0.0. Version 0.1.0 was piloted once on the researcher's Android phone; 0.2.0 has been tested with unit tests and with end-to-end journeys of the simulated participant, not yet on real phones. See [Status and limitations](#status-and-limitations).
 - **Runs on:** any iOS browser (they all use WebKit), and Chrome or Samsung Internet on Android. The interface is in English and Hebrew.
 - **Data:** raw sensor streams at about 60 Hz, one JSON record per trial attempt, defined by [schema/records.schema.json](schema/records.schema.json).
 
@@ -16,13 +16,14 @@ app/                        Collector PWA (Vite + TypeScript + Preact)
   src/app/, src/ui/         Screens and UI components
   src/i18n/                 English and Hebrew strings; en/common.ts holds the exact participant instructions
   scripts/synth.ts          Synthetic dataset generator (runs the real recording pipeline)
-  tests/, e2e/              Vitest unit tests, Playwright end-to-end test
+  tests/, e2e/              Vitest unit tests; Playwright journeys of the simulated participant (headless, silent)
   public/config.json        Study configuration read at runtime (upload endpoint, consent version, ...)
-backend/                    Upload backends; google-apps-script/ is the default (Drive files + index Sheet)
+backend/                    Upload backends: heroku/ (live uploads into Postgres, admin page) and
+                            google-apps-script/ (Drive files + index Sheet)
 server/                     Local receiver (Python standard library only) for lab sessions and development
 analysis/                   Python starter kit: the motionlab package, scripts/, tests/
 schema/records.schema.json  The data contract (JSON Schema 2020-12)
-docs/                       Project documentation, 00 to 08
+docs/                       Project documentation, 00 to 09
 .github/workflows/          CI (ci.yml) and GitHub Pages deployment (deploy.yml)
 ```
 
@@ -38,7 +39,7 @@ npm install
 npm run dev
 ```
 
-Open <http://localhost:5173/?sim=1>. A built-in simulator plays the participant: it holds still, reacts to the GO beep, moves, and holds the phone at the nose. That lets the whole flow run without a phone: consent, profile, sensor check, calibration, a session, review and export. The app never remembers simulation mode between runs, and every record it produces carries `simulated: true`. Add `&lang=he` for Hebrew. Without `?sim=1`, a laptop has no motion sensors, so the sensor check cannot measure a motion rate.
+Open <http://localhost:5173/?sim=1>. A built-in simulator plays the participant: it holds still with the arm out, reacts to GO, brings the phone to the nose, holds it there and stretches the arm out again. That lets the whole visit run without a phone: welcome and consent, the profile, the How-to card, the free trial and its hand question, the hands-free blocks, the checkpoint, done and export (about 3 minutes). In simulation mode the app never beeps or speaks, never remembers simulation mode between runs, and marks every record `simulated: true`. Add `&lang=he` for Hebrew. Researchers: add `&setup=1` to pick another preset or a short custom session after the profile (also in Settings). Without `?sim=1`, a laptop has no motion sensors, so after the profile the app opens its sensor repair screen.
 
 ### (b) Run it on a phone
 
@@ -59,7 +60,7 @@ Motion sensors work only on HTTPS pages. On a plain `http://192.168.x.x` address
 
 ### (c) Collect data centrally
 
-By default the app uploads nothing (`"mode": "none"` in `app/public/config.json`). Records stay on the phone and can be exported from the Data screen. To collect data centrally:
+By default the app uploads nothing (`"mode": "none"` in `app/public/config.json`). Records stay on the phone and can be exported from the Data screen. The v2 study uploads live to [backend/heroku](backend/heroku/README.md), a small FastAPI service with Postgres on Heroku and an admin page, which the app reaches with upload mode `json_post` (`"endpoint": "https://<your-app>.herokuapp.com/api/ingest"`); its README covers deployment, the admin page and the export for the analysis kit (`analysis/scripts/pull_live.py`). Every saved trial and session update is sent at once, so a participant who stops early loses nothing. Without a server of your own, the free Google Apps Script backend works too:
 
 1. Set up the free Google Apps Script backend by following [backend/google-apps-script/README.md](backend/google-apps-script/README.md). In short, create the script from a dedicated Gmail account, paste `Code.gs` and `appsscript.json`, run `setup()`, and deploy it as a web app with "Execute as: Me" and "Who has access: Anyone".
 2. Point the app at the deployment in `app/public/config.json`:
@@ -80,10 +81,10 @@ The study key only filters spam. It is not a secret, because it ships in the pub
 
 ```bash
 cd app
-npm run synth -- --participants 12 --preset standard --out ../analysis/data/synthetic
+npm run synth -- --participants 12 --preset street --out ../analysis/data/synthetic --validate
 ```
 
-`synth` drives the real recording pipeline (protocol, simulated participant, `TrialController`, `TrialRecord`) and writes the same folder layout as the backend. It also accepts `--seed`, `--left-fraction` and `--validate`; see the header of `app/scripts/synth.ts`. Then:
+`synth` drives the real recording pipeline (protocol, simulated participant, `TrialController`, `TrialRecord`) and writes the same folder layout as the backend. `street` is the default preset and simulates whole v2 visits (implicit calibration, the reported hand of the choice trial, auto-accept with re-runs, the optional bonus). It also accepts `--seed`, `--left-fraction` and more; see the header of `app/scripts/synth.ts`. Then:
 
 ```bash
 cd ../analysis
@@ -103,12 +104,14 @@ cd app
 npm run typecheck
 npm test                          # Vitest unit tests (Node, no browser)
 npx playwright install chromium   # once
-npm run e2e                       # Playwright: a full participant journey in simulation mode
+npm run e2e                       # Playwright, headless: the simulated participant's journeys (about 5 minutes)
 cd ..
 python -m pytest analysis/tests server -q   # with the analysis venv active
 ```
 
-CI (`.github/workflows/ci.yml`) runs the typecheck, the unit tests and pytest on pushes to `main` and on pull requests. The deploy workflow also runs `npm test` before it publishes.
+`npm run e2e` covers a whole street visit (schema-checked export, timings printed), finishing early, the setup screen, the researchers' tap-review mode, live uploads (answered by the test itself, nothing leaves the computer), a whole visit in Hebrew, back and pause, resuming, double taps, small phone screens and sideways blocks in landscape. It never makes a sound: every spec runs through `e2e/fixtures.ts`, which replaces speech and Web Audio in the page, and Chromium starts with `--mute-audio`. Never run it headed. `SCREENS=1 npx playwright test e2e/screens.spec.ts` saves a screenshot of every screen. The Heroku upload service has its own tests (`backend/heroku`, see its README).
+
+CI (`.github/workflows/ci.yml`) runs the typecheck, the unit tests and pytest on pushes to `main` and on pull requests; it does not run the e2e journeys (`app/tests/e2eHarness.test.ts` checks their silence set-up instead). The deploy workflow also runs `npm test` before it publishes.
 
 ## Read this before touching the data
 
@@ -138,31 +141,31 @@ These four conventions decide whether left and right come out the right way roun
 
 ## Status and limitations
 
-**Implemented in 0.1.0:**
+**Implemented in 0.2.0 (the `street` visit, protocol 2.0.0):**
 
-- The collector PWA: consent with an 18+ gate, a profile with the Edinburgh short form, a sensor check, three-step calibration, the `quick`, `standard`, `full` and `custom` presets, and a trial runner with review, redo and problem flags. It also has data export and deletion, researcher settings and a live sandbox.
-- Offline storage with an upload queue.
-- The Apps Script backend and the local receiver.
-- The simulator and the synthetic generator.
-- The Python starter kit with baseline models.
-- CI, GitHub Pages deployment, and this documentation.
+- The participant path: welcome and consent on one screen (18+ and no arm or hand injury in one checkbox), a short profile (name, age, sex, dominant hand, usual phone hand, optional height), then the session. The sensor check opens only to repair a phone that cannot record; calibration is implicit (taken from the first still upright trial), so no table and no tilt step.
+- The hands-free session: How-to card with an animation, one free trial with the hand question, blocks of tiers 1–3 (upright, sideways, varied movements) whose trials chain without taps, a checkpoint with an optional bonus, a pause sheet (hold-to-pause, back button, redo, wrong hand, finish now) and a done screen with the live upload state and the participant code.
+- Every extra signal the browser offers: absolute orientation and its quaternion (Chrome Android), compass accuracy (iOS), magnetometer where exposed, screen rotations, touch size and force, and the return of the arm after each touch.
+- Live uploads after every record (`json_post` to the Heroku service, or Apps Script), names uploaded with the participants' consent.
+- For researchers: the setup screen with the `street`, `quick`, `standard`, `full` and `custom` presets (`?setup=1` or Settings), a tap-review mode for lab sessions, data export and deletion, settings and a live sandbox.
+- The simulator and the synthetic generator (whole street visits), the Python starter kit (schema 1.2.0, implicit calibration, screen-away synthesis), CI, GitHub Pages deployment and this documentation.
 
 **Not done yet:**
 
-- **Real-device verification.** So far everything has been tested only with unit tests and the simulator. The sign conventions, sample rates and touch behaviour must be confirmed on at least one iPhone and one Android phone (checklist in [03](docs/03_SENSORS_AND_PLATFORMS.md)).
-- **Ethics approval and participant data.** Do not collect data from anyone but yourself before approval ([Considerations](docs/06_CONSIDERATIONS.md)).
+- **Real-device verification of 0.2.0.** The hands-free chain, the implicit calibration and the new sensor streams have run only in the simulator. Check on at least one iPhone and one Android phone: the motion prompt on the Start tap, beeps after the block-intro tap (iOS plays audio only after a tap and stops it when the page is hidden), the screen staying on through a block (wake lock), sideways grips that rotate the page, and the sign conventions (checklist in [03](docs/03_SENSORS_AND_PLATFORMS.md)).
+- **Study details in `app/public/config.json`:** the upload endpoint and study key, and the researcher's contact (until it is filled in, the consent tells participants to contact the researcher who sent them the link). The Hebrew consent text has not yet been proofread by a native speaker.
 - **The phyphox experiment file** for the high-rate validation cohort.
-- **Stages 2 and 3.** Stage 2 has only the starter baselines. Stage 3 has only the `Predictor` interface in `app/src/core/predictor.ts`.
+- **Stages 2 and 3.** Stage 2 has only the starter baselines; the plan is [09](docs/09_STAGE2_3_PLAN.md). Stage 3 has only the `Predictor` interface in `app/src/core/predictor.ts`.
 
 **Known limitations:**
 
 - **Sample rate.** Web pages get at most about 60 Hz of motion data, and Chrome quantises the values. Higher rates need native apps, and iOS caps even native apps at 100 Hz ([Apple, WWDC23](https://developer.apple.com/videos/play/wwdc2023/10179)). The project uses phyphox as the high-rate reference instead of building a native app.
-- **Foreground only.** Recording works only in the foreground with the screen on. If the page is hidden during a trial, the trial is marked `interrupted`.
+- **Foreground only.** Recording works only in the foreground with the screen on. If the page is hidden during a trial, the trial stops and the session waits on its pause sheet; an attempt that had reached GO is kept as `interrupted`, an earlier one is discarded, and one that was already recording the return of the arm stays complete (warning `return_cut_short`).
 - **Safari storage.** Safari deletes a site's stored data after 7 days without use; Home Screen web apps are exempt ([WebKit](https://webkit.org/blog/10218/full-third-party-cookie-blocking-and-more/)). The app therefore uploads after every record and offers an export.
-- **Screen rotation on iOS.** iOS web pages cannot lock the screen orientation, so the display may rotate in landscape and upside-down trials. The data are unaffected, because the sensor frame is fixed to the device.
+- **Screen rotation on iOS.** iOS web pages cannot lock the screen orientation, so the display may rotate in sideways and upside-down trials. The data are unaffected, because the sensor frame is fixed to the device, and the rotations are recorded (`streams.screen_events`).
 - **Other browsers.**
   - Firefox for Android works but has been tested less.
   - Brave for Android has been reported to block motion sensors ([2021 report](https://community.brave.app/t/device-motion-data-accelerometer-gyro-not-available-on-android/292620)).
   - The app detects in-app browsers (Instagram, Facebook, ...) and asks the participant to open the link in Safari or Chrome.
-- **Public endpoint.** The upload endpoint is public by design. The backend validates records and caps their size. It never stores a rejected upload: it logs only metadata and identifiers in a `quarantine` sheet, at most 500 rows per day. Keep the Drive folder private.
+- **Public endpoint.** The upload endpoint is public by design. The backends validate records and cap their size. They never store a rejected upload: they log only metadata and identifiers (Heroku: `ingest_log`; Apps Script: a `quarantine` sheet), at most 500 refusals per day. Keep the database, the admin token and the Drive folder private: the records hold participants' names.
 - **Deploy branch.** The deploy workflow listens for pushes to `main`. If your default branch is `master`, rename it or edit the workflow.

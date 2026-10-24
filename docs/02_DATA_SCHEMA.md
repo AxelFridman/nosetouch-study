@@ -110,18 +110,18 @@ The field-name form assumes the W3C axis mapping. On a device whose `axis_check.
 | Field | Type | Null | Meaning |
 |---|---|---|---|
 | `record_type` | `"session"` | no | Discriminator |
-| `schema_version` | string `1.x.y` | no | Schema the record was written with (currently `1.1.0`) |
-| `app_version` | string | no | App release (`package.json` version, currently `0.1.0`) |
+| `schema_version` | string `1.x.y` | no | Schema the record was written with (currently `1.2.0`, [section 8](#8-versioning-policy)) |
+| `app_version` | string | no | App release (`package.json` version, currently `0.2.0`) |
 | `session_id` | UUID | no | Primary key |
 | `participant_id` | `P-XXXXXX` | no | Pseudonymous participant code |
 | `study_code` | Id | no | From `config.json` (default `nose-touch-v1`) |
 | `started_at`, `updated_at` | ISO time | no | Creation and last change; `updated_at` decides which copy is newest |
 | `ended_at` | ISO time | yes | `null` while `in_progress` |
-| `status` | `in_progress` / `completed` / `abandoned` | no | |
+| `status` | `in_progress` / `completed` / `ended_early` / `abandoned` | no | `completed`: every trial of the non-optional blocks is done (the bonus blocks never count). `ended_early` (schema 1.2): the participant tapped Finish before that |
 | `participant` | `ParticipantProfile` | no | Snapshot taken at session start, already redacted ([4.2](#42-participant-participantprofile)) |
 | `device` | `DeviceInfo` | no | [4.3](#43-device-deviceinfo) |
 | `capabilities` | `SensorCapabilities` | no | [4.4](#44-capabilities-sensorcapabilities) |
-| `calibration` | `CalibrationResult` | yes | `null` if calibration was skipped ([4.5](#45-calibration-calibrationresult)) |
+| `calibration` | `CalibrationResult` | yes | `null` if calibration was skipped in app 0.1.0. App 0.2.0 always writes one (`method: implicit_v1`, [4.5](#45-calibration-calibrationresult)) |
 | `protocol` | object | no | Plan of the session ([4.6](#46-protocol)) |
 | `settings` | object | no | [4.7](#47-settings-progress-consent) |
 | `progress` | object | no | [4.7](#47-settings-progress-consent) |
@@ -187,8 +187,11 @@ Feature detection plus a short rate measurement on the sensor-check screen.
 
 The procedure and its use are described in [03, section 4](03_SENSORS_AND_PLATFORMS.md#4-calibration-procedure). All vectors here are **raw** device-frame values (platform sign, rotationRate field names).
 
+Two methods exist (`method`, schema 1.2; absent = guided). **`guided_v1`** is the calibration screen of app 0.1.0 (table, upright and tilt steps), described by the rows below. **`implicit_v1`** (app 0.2.0, protocol 2.0.0) needs no extra step: the session starts with every field null, and the first complete `upright_toward` trial whose pre-GO window (`still_ms − still_hold_ms` to `go_ms`) was still, and whose grip was not detected as another one, fills it: `upright` = the `PoseStats` of that window; `gravity_sign` = sign(`accg_y`) when \|`accg_y`\| > 7 m/s²; `gravity_magnitude` = \|mean accg\| when it lies in 8.6–11.0 m/s²; `upright_check` = `ok` when the sign matches the engine prior (WebKit −1, Blink and Gecko +1; unknown engines and simulated sessions count as a match), else `inverted` with the note `upright_sign_contradicts_engine`, and `unclear` when the window was still but \|`accg_y`\| ≤ 7. A window that was not still leaves it for the next upright trial. `flat`, `gyro_bias_dps` (an in-hand mean is tremor, not bias) and `axis_check` stay null: the analysis infers the rotationRate mapping from the gravity closure of the trials ([03, section 5](03_SENSORS_AND_PLATFORMS.md#5-normalisation-layer-for-analysis)).
+
 | Field | Type | Null | Meaning |
 |---|---|---|---|
+| `method` | `guided_v1` / `implicit_v1` | absent before 1.2 | See above |
 | `performed_at` | ISO time | no | |
 | `flat` | `PoseStats` | yes | Phone flat on a table, screen up |
 | `upright` | `PoseStats` | yes | Phone upright in front of the participant, screen toward them |
@@ -196,7 +199,7 @@ The procedure and its use are described in [03, section 4](03_SENSORS_AND_PLATFO
 | `gravity_magnitude` | number | yes | \|mean accg\| of the flat window |
 | `upright_check` | `ok` / `inverted` / `unclear` | yes | Consistency of the upright window with `gravity_sign` (`y·sign > 7` ok, `< −7` inverted) |
 | `gyro_bias_dps` | `{alpha, beta, gamma}` | yes | Mean rotationRate in the flat window (raw field names); `null` when that window gave no gravity sign. The analysis subtracts it only when the window was still (`flat.still`) and the bias norm is below 3 deg/s, which also screens records from app versions that stored the bias of a moving window ([03, section 5.1](03_SENSORS_AND_PLATFORMS.md#51-rules)) |
-| `notes` | string[] | no | Why a step was rejected ("not flat", "moving", "implausible magnitude", ...). `flat_sign_contradicts_engine` means the participant continued although the flat sign contradicted `device.engine` ([03, section 4](03_SENSORS_AND_PLATFORMS.md#4-calibration-procedure)) |
+| `notes` | string[] | no | Why a step was rejected ("not flat", "moving", "implausible magnitude", ...). `flat_sign_contradicts_engine` means the participant continued although the flat sign contradicted `device.engine` ([03, section 4](03_SENSORS_AND_PLATFORMS.md#4-calibration-procedure)); `upright_sign_contradicts_engine` (implicit_v1) means the upright hold's sign contradicted the engine prior |
 | `axis_check` | `AxisCheck` | yes, absent in 1.0 | Schema 1.1. Tilt-gesture check of the rotationRate axis mapping, sign and unit |
 
 `PoseStats`: `n`, `duration_ms`, `accg_mean` and `accg_sd` (Vec3, population SD), `acc_mean` (Vec3 or null), `rr_mean` and `rr_sd` (`{alpha, beta, gamma}` or null), `still` (every accg axis SD < 0.25 m/s², every rr SD < 3 deg/s or rr missing, and n ≥ 20).
@@ -218,17 +221,17 @@ The procedure and its use are described in [03, section 4](03_SENSORS_AND_PLATFO
 
 | Field | Type | Meaning |
 |---|---|---|
-| `preset` | `quick` / `standard` / `full` / `custom` | See [Protocol](01_PROTOCOL.md) |
-| `protocol_version` | string | Version of the plan generator (`PROTOCOL_VERSION`, currently `1.0.0`) |
+| `preset` | `street` / `quick` / `standard` / `full` / `custom` | `street` (schema 1.2, protocol 2.0.0) is the participant visit: 13 blocks, 39 trials, 29 of them in the 9 non-optional blocks (`app/src/core/protocol.ts`). The others are researcher presets. See [Protocol](01_PROTOCOL.md) |
+| `protocol_version` | string | Version of the plan generator (`PROTOCOL_VERSION`, currently `2.0.0`; the same seed gives another plan than under `1.0.0`) |
 | `seed` | integer ≥ 0 (uint32) | Seed of the plan. The plan is reproducible from (preset, seed, posture, first_hand, custom, protocol_version) |
 | `posture` | `standing` / `sitting` | Session-level factor, copied into every condition |
 | `first_hand` | `left` / `right` | First hand of the ABBA order (seed parity unless overridden) |
 | `n_planned_trials` | integer | Planned trials, excluding redos |
-| `estimated_minutes` | number | About 9 s per trial + 25 s per block change + 60 s setup |
+| `estimated_minutes` | number | Protocol 2.0.0: 40 s setup + per trial 5.5 s (fast), 6.5 s (natural) or 10 s (slow), +2 s for a non-standard start or variant, + 6 s per block change, over the non-optional blocks, rounded to 0.5 min (`street`: 5). Protocol 1.0.0: about 9 s per trial + 25 s per block change + 60 s setup |
 | `custom` | `CustomProtocolSpec` or null | Normalised custom spec: `orientations`, `speeds`, `start_positions`, `reps` (1–10), `odd_variants`, `include_free` |
 | `plan` | `PlannedBlock[]` | Blocks in presentation order |
 
-`PlannedBlock`: `block_index`, `kind` (`main` / `odd` / `free`), `hand`, `orientation`, `trials`. `PlannedTrial`: `trial_index`, `block_index`, `trial_in_block`, `condition` (a `TrialCondition`, [5.1](#51-identity-and-labels)). `session.progress.next_trial_index` indexes the flattened plan directly.
+`PlannedBlock`: `block_index`, `kind` (`main` / `odd` / `free`, and `choice` in schema 1.2: the street visit's free trial whose hand the participant reports afterwards; its planned `hand` is a placeholder), `hand`, `orientation`, `trials`, and in `street` plans (schema 1.2) `tier` (0 the choice trial, 1 basics, 2 sideways, 3 varied movements, 4 bonus) and `optional` (the bonus blocks, run only when the participant opts in at the checkpoint). `PlannedTrial`: `trial_index`, `block_index`, `trial_in_block`, `condition` (a `TrialCondition`, [5.1](#51-identity-and-labels)). `session.progress.next_trial_index` indexes the flattened plan directly.
 
 ### 4.7 `settings`, `progress`, `consent`
 
@@ -237,9 +240,10 @@ The procedure and its use are described in [03, section 4](03_SENSORS_AND_PLATFO
 | `settings.language` | `en` / `he` |
 | `settings.audio`, `settings.speech` | Audio cues and spoken instructions enabled |
 | `settings.segmentation_params` | **Base** `SegmentationParams` of the session (`DEFAULT_SEGMENTATION_PARAMS`). The per-trial values after speed/variant overrides are in each trial's `segmentation.params` |
+| `settings.review_mode` | Schema 1.2. `auto`: the hands-free flow (complete trials accepted automatically, next trial at once); `tap`: every trial reviewed with a tap (researcher setting). Absent before 1.2 (every attempt was reviewed) |
 | `progress.next_trial_index` | Next planned trial to run (index into the flattened plan) |
 | `progress.n_attempts`, `progress.n_accepted` | Attempts saved and attempts accepted so far |
-| `consent.version`, `consent.accepted_at` | Consent text version (`config.consent_version`, e.g. `2026-10-v1`) and acceptance time |
+| `consent.version`, `consent.accepted_at` | Consent text version (`config.consent_version`, currently `2026-10-v2`) and acceptance time |
 
 ## 5. TrialRecord
 
@@ -274,9 +278,9 @@ One record per attempt. It holds the label, the outcome, the online segmentation
 | | `too_long` | Still moving `max_movement_ms` after onset |
 | | `aborted` | Stopped by the participant |
 | | `interrupted` | Page hidden or sensors stalled |
-| `accepted` | boolean | `true` only for a complete attempt the participant confirmed with "Yes, next". `false` after Redo, after a "Problem" flag, for a failed attempt, and for a complete attempt whose review was never answered (`note` = `review_interrupted`). The attempt is kept either way |
-| `participant_flag` | `wrong_hand` / `wrong_orientation` / `other_problem` / null | Problem reported by the participant on the review screen |
-| `note` | string ≤ 500 or null | Free text. The app writes `review_interrupted` when it saves a complete attempt as its review opens; the participant's decision re-saves the attempt and drops the note, so it remains only on attempts whose review was never answered |
+| `accepted` | boolean | Hands-free (`settings.review_mode` `auto`): `true` for a complete attempt unless its grip was detected as another one (`detected.orientation_match == false`). Tap review: `true` only for a complete attempt the participant confirmed with "Yes, next". `false` for failed attempts, revoked ones, rejected ones and unanswered placeholders (notes below). The attempt is kept either way |
+| `participant_flag` | `wrong_hand` / `wrong_orientation` / `other_problem` / null | Problem reported by the participant: on the review screen (tap mode), with "Last one was the wrong hand" on the pause sheet (`wrong_hand`), or "Not sure" at the hand question of the choice trial (`other_problem`) |
+| `note` | string ≤ 500 or null | Set by the app. `auto_accept` / `auto_reject:orientation`: the hands-free decision (a rejected trial is run again at once). `review_interrupted` (tap mode) and `hand_not_reported` (the choice trial before its hand question): placeholder copies saved before the participant answered; the answer re-saves the attempt and replaces the note, so they remain only on unanswered attempts. `hand_unsure`: "Not sure" at the hand question (not accepted, not re-run). `redo_requested`: an accepted attempt revoked from the pause sheet ("Redo last movement", or with `participant_flag` `wrong_hand`); the planned trial is run again as a new attempt |
 
 ### 5.3 `timing`
 
@@ -357,7 +361,7 @@ Overrides: `slow` trials lower the thresholds and extend `end_sustain_ms` (450) 
 | `gaps_over_50ms` | Number of motion intervals longer than 50 ms |
 | `acc_available`, `rotation_available` | Whether `acc_*` and `rr_*` carried values |
 | `hidden_during` | The page was hidden at some point during the trial. It is polled at each motion sample, and sensors deliver nothing while the page is hidden, so also check `gaps_over_50ms` and `status == 'interrupted'` |
-| `warnings` | Free strings from the app; inspect them, do not parse them |
+| `warnings` | Strings from the app; inspect them rather than parse them. Known codes: `return_cut_short` (stopped while recording the return of the arm; the trial is still complete), `ui_abort:<reason>` (the session stopped the trial: `user`, `page_hidden`, `sensor_stall`, `idle`, `save_failed`, `unmount`, `start_failed`), `sensor_error:<code>`, `source_ended`, `source_start_failed: …`, `motion_t_invalid`, `motion_t_not_monotonic`, `no_motion_samples`, `acc_unavailable`, `rotation_unavailable`, `low_motion_rate`, and for the optional streams of schema 1.2 (written at most once per session) `quaternion_unavailable`, `abs_orientation_unavailable` / `abs_orientation_denied`, `magnetometer_unavailable` / `magnetometer_denied` |
 
 ### 5.7 `screen`
 
@@ -470,10 +474,10 @@ The synthetic figures come from `npm run synth -- --participants 12 --seed 42` w
 
 | Identifier | Where | Current | Changes when |
 |---|---|---|---|
-| `schema_version` | every record | `1.1.0` | The schema changes (rules below) |
-| `app_version` | every record | `0.1.0` | Any app release |
-| `protocol.protocol_version` | session | `1.0.0` | Presets or ordering rules change (same seed would give a different plan) |
-| `consent.version` | session | `2026-10-v1` | The consent text changes |
+| `schema_version` | every record | `1.2.0` | The schema changes (rules below) |
+| `app_version` | every record | `0.2.0` | Any app release |
+| `protocol.protocol_version` | session | `2.0.0` | Presets or ordering rules change (same seed would give a different plan) |
+| `consent.version` | session | `2026-10-v2` | The consent text changes |
 | `segmentation.method` | trial | `online_v1` | The online algorithm changes in any way that alters indices |
 
 Schema rules (the schema accepts `^1\.\d+\.\d+$`):
@@ -483,6 +487,24 @@ Schema rules (the schema accepts `^1\.\d+\.\d+$`):
 3. Readers branch on `schema_version`, treat absent optional fields as unknown, and fail loudly on unknown enum values instead of guessing.
 
 What 1.1.0 added over 1.0: `device.engine`, `device.in_app_browser` and `calibration.axis_check` (with `$defs.AxisCheck`). All three are optional, so 1.0 records remain valid.
+
+What 1.2.0 added (app 0.2.0, protocol 2.0.0; every addition optional, so 1.0 and 1.1 records stay valid, while app 0.2.0 always writes them):
+
+| Where | Addition | Meaning |
+|---|---|---|
+| enums | preset `street`, variant `tilted_touch`, block kind `choice`, session status `ended_early` | [4.6](#46-protocol), [4.1](#41-top-level-fields) |
+| `PlannedBlock` | `tier` (0–9), `optional` | street tiers and the bonus blocks ([4.6](#46-protocol)) |
+| `calibration` | `method` (`guided_v1` / `implicit_v1`) | [4.5](#45-calibration-calibrationresult) |
+| `settings` | `review_mode` (`auto` / `tap`) | [4.7](#47-settings-progress-consent) |
+| `condition` | `hand_source` (`instructed` / `reported`) | `reported` on the choice trial: `hand` is what the participant said after the trial |
+| `segmentation.params` | `return_cap_ms` | [04, section 4](04_SEGMENTATION.md#4-parameters) |
+| `timing` | `return_onset_ms`, `return_end_ms` (nullable) | the return of the arm after the end ([04, section 4.1](04_SEGMENTATION.md#41-around-the-segmenter-gates-false-starts-and-the-return-of-the-arm-protocol-200)) |
+| `streams.touches[]` | `radius_x`, `radius_y`, `force`, `rotation_angle` (nullable), `x_norm`, `y_norm` (0–1 of the viewport) | the contact of each touch (`Touch.radiusX` …) |
+| `streams` | `quaternion_abs` (`AbsoluteOrientationSensor`, magnetometer-fused, Chrome Android), `orientation_abs` (`deviceorientationabsolute` events), `screen_events` (`{t, type, angle}` screen rotations), `magnetometer` (`{t, x, y, z}` µT, only where the browser exposes it) | each null where unavailable; failures leave a warning ([5.6](#56-quality)) |
+| `streams.orientation` | `compass_accuracy` | iOS `webkitCompassAccuracy`, next to `compass` |
+| `quality` | `n_quaternion_abs`, `n_orientation_abs` | sample counts of the new streams |
+
+The profile did not change: app 0.2.0 asks only name (in `nickname`), age, sex, dominant hand, usual phone hand and height, and writes `ehi_sf`, `ehi_lq`, `ehi_class`, `phone_model` and `phone_case` as null and `arm_issue` as false (the consent checkbox covers it); every key is still present.
 
 Raw records are never edited after collection. Recommended: keep manual corrections (exclusions, relabels, notes) in a separate versioned table keyed by `trial_id`, and stamp every derived dataset with the version of the normalisation and preprocessing code that produced it ([03, section 5](03_SENSORS_AND_PLATFORMS.md#5-normalisation-layer-for-analysis)).
 
@@ -519,7 +541,7 @@ Collect from people other than the student only after Bar-Ilan ethics approval. 
 Duplicates are expected by design: sessions are re-uploaded after every change, and a timed-out upload may already have been stored before it is retried.
 
 1. **Sessions**: several copies of one `session_id` are versions of the same record. Keep the one with the latest `updated_at`. On Drive the file is replaced in place, so normally only one copy exists.
-2. **Trials**: one `trial_id` is one attempt. Copies with the same `trial_id` (retried uploads, an export loaded next to a Drive download) are the same record; keep one. The app saves a complete attempt twice, when its review opens (`accepted: false`, `note` = `review_interrupted`) and again with the decision, with the same `created_at`. Drive keeps only the newer file, but if two copies of one `trial_id` disagree, keep the one without the `review_interrupted` note.
+2. **Trials**: one `trial_id` is one attempt. Copies with the same `trial_id` (retried uploads, an export loaded next to a Drive download) are the same record; keep one. The app saves an attempt up to three times, with the same `created_at`, in this order: a placeholder before the participant answered (`accepted: false`, `note` `review_interrupted` when the review opens in tap mode, `hand_not_reported` before the hand question of the choice trial), the decided copy, and possibly a revoked copy later (`note` `redo_requested`, from the pause sheet). If copies disagree, keep the one latest in that order: a placeholder loses to the decided copy, which loses to a revoked one. `motionlab.io` and the Heroku service apply this rule; Drive keeps only the newest file.
 3. **Attempts**: `(session_id, trial_index, attempt)` should be unique, because `attempt` = 1 + the number of attempts already stored for that `trial_index`. Two different `trial_id`s with the same triple (e.g. the same session resumed on two copies of the app) are both kept and flagged.
 4. **One row per planned trial**: use the attempt with `outcome.accepted = true`. The session only advances on acceptance, so there is normally at most one per `trial_index`. If there are several, keep the latest `created_at` and flag the trial. Keep all attempts for failure and redo analyses.
 5. **Resumed and repeated sessions**: resuming (within 24 h) continues the same `session_id`. A new session gets a new id, seed and plan; both are valid data. Order a participant's sessions by `started_at`, and decide in the analysis plan whether second sessions count (learning effects).
@@ -603,12 +625,12 @@ Recommended defaults. Pre-register them, together with the sensitivity variants,
 |---|---|---|---|
 | S1 | Simulated | `simulated == true` | exclude from real analyses |
 | S2 | Low measured rate | `capabilities.measured.motion_hz < 50` | exclude the session, or rely on T5 per trial |
-| S3 | Sign not measured | `calibration` null or `gravity_sign` null | resolve per [03, section 5](03_SENSORS_AND_PLATFORMS.md#5-normalisation-layer-for-analysis); if unresolved, exclude from accelerometer-based features |
+| S3 | Gravity sign unsupported | the session's gravity sign comes from nothing (`gravity_sign_source == 'default'` in `motionlab`: no calibrated sign, no known engine, no confident trial vote) | exclude from chiral modelling (`train_baseline.py --require-sign-support`). Protocol 1.0.0 read S3 as "calibration missing"; every protocol 2.0.0 session has an implicit calibration, so that reading would say nothing ([03, section 5.2](03_SENSORS_AND_PLATFORMS.md#52-gravity-sign-resolution)) |
 | S4 | Axis mapping not verified | `axis_check` absent or `verdict == 'unclear'` | assume W3C and flag; any other non-`w3c` verdict is remapped |
 | S5 | In-app browser | `device.in_app_browser != null` | flag; keep if trial QC passes |
 | S6 | Motor condition | `participant.arm_issue == true` | analyse separately (sensitivity) |
 | S7 | Abandoned | `status == 'abandoned'` | keep its trials that pass QC; report |
-| S8 | Calibrated sign in doubt | `calibration.notes` contains `flat_sign_contradicts_engine`, or `upright_check == 'inverted'` | flag and check by hand; the normalisation replaces the calibrated sign only when the trial votes clearly contradict it ([03, section 5.2](03_SENSORS_AND_PLATFORMS.md#52-gravity-sign-resolution)) |
+| S8 | Calibrated sign in doubt | `calibration.notes` contains `flat_sign_contradicts_engine` or `upright_sign_contradicts_engine`, or `upright_check == 'inverted'` | flag and check by hand; the normalisation replaces the calibrated sign only when the trial votes clearly contradict it ([03, section 5.2](03_SENSORS_AND_PLATFORMS.md#52-gravity-sign-resolution)) |
 
 ## 13. Open questions for the PI
 

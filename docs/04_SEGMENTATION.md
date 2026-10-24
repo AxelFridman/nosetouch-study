@@ -1,6 +1,6 @@
 # 04 · Movement segmentation: detecting when the movement starts and ends
 
-Every trial records a long raw window: settling, a hold-still at the extended arm, a random foreperiod, the GO beep, the movement, a hold at the nose, and a post-roll. Somewhere inside it is the movement itself. This document explains how the app finds it **online** (while recording, to drive the beeps and quality checks) and how the analysis should find it **offline** (non-causally, as the ground truth for features).
+Every trial records a long raw window: settling, a hold-still at the extended arm, a random foreperiod, the GO beep, the movement, a hold at the nose, a post-roll and, since protocol 2.0.0, the return of the arm to arm's length. Somewhere inside it is the movement itself. This document explains how the app finds it **online** (while recording, to drive the beeps and quality checks) and how the analysis should find it **offline** (non-causally, as the ground truth for features).
 
 Two rules govern everything below:
 
@@ -26,24 +26,26 @@ At rest with the arm extended, the signals are dominated by physiological tremor
 ## 2. The trial timeline
 
 ```
-t=0 Ready tap
-│ settling  │== hold still (still_hold_ms) ==│== foreperiod ==│ GO beep │ RT │==== movement ====│== end_sustain ==│ end beep │== post_roll ==│ stop
-            ↑ still criterion first met      ↑ 'still' event  ↑ markGo        ↑ onset (back-dated)          ↑ end (back-dated)  ↑ end confirmed
+start ─ [awaitReturn: the arm goes back out] ─ hold still (still_hold_ms) ─ [grip gate] ─ foreperiod ─ GO ─ RT ─ movement ─ end_sustain ─ double beep ─ post_roll (≥ 500 ms) ─ return of the arm, still again ─ stop
+                                               ↑ still criterion first met               ↑ markGo          ↑ onset (back-dated)   ↑ end (back-dated) ↑ end confirmed                 ↑ return_onset_ms ↑ return_end_ms
 ```
 
-The participant taps Ready, extends the arm and holds still. Once the hold-still criterion has held for `still_hold_ms`, the controller waits a random foreperiod (so the GO beep cannot be anticipated), beeps, and arms the onset detector. After the movement, the participant holds the phone at the nose until the double beep; recording continues for `post_roll_ms`.
+A trial starts with the block-intro tap (the first trial of a block) or, in the hands-free flow of protocol 2.0.0, by itself right after the previous trial, without the ready beep. The participant extends the arm and holds still. Once the hold-still criterion has held for `still_hold_ms` (and the gates of §4.1 pass), the controller waits a random foreperiod (so GO cannot be anticipated), beeps and arms the onset detector. After the movement the participant holds the phone at the nose until the double beep, which means "arm out again". Recording continues for at least `post_roll_ms` and then through the return of the arm until the arm is still again, or until `return_cap_ms` after the end was confirmed (§4.1).
 
 ```mermaid
 stateDiagram-v2
     [*] --> waiting_still
-    waiting_still --> still: hold-still met for still_hold_ms
-    still --> waiting_still: still_lost / false_start (error beep)
-    still --> armed: markGo (after the random foreperiod)
+    waiting_still --> waiting_still: a gate holds GO back (awaitReturn, wrong grip)
+    waiting_still --> foreperiod: hold-still met for still_hold_ms, gates pass
+    foreperiod --> waiting_still: still_lost (silent) / false_start (error beep)
+    foreperiod --> armed: markGo (after the random foreperiod)
     armed --> moving: onset (sustained above threshold, back-dated)
     armed --> failed: no_movement (max_wait_ms)
-    moving --> ended: end (quiet for end_sustain_ms, back-dated)
+    moving --> post_roll: end (quiet for end_sustain_ms, back-dated; double beep)
     moving --> failed: too_long (max_movement_ms)
-    ended --> [*]
+    post_roll --> returning: post_roll_ms elapsed
+    returning --> complete: return movement, then still for still_hold_ms (or return_cap_ms)
+    complete --> [*]
     failed --> [*]
 ```
 
@@ -53,7 +55,7 @@ The exact, normative specification is the doc comment at the top of [`app/src/co
 
 1. **Smoothing.** EMA(x; τ): S₀ = x₀, Sᵢ = Sᵢ₋₁ + kᵢ(xᵢ − Sᵢ₋₁) with kᵢ = 1 − exp(−Δtᵢ/τ). A missing sample value reuses the previous raw value.
 2. **Hold-still.** `C_still` = smoothed \|ω\| < `still_gyro_dps` **and** smoothed \|a\| < `still_acc_ms2`. When it has held continuously for `still_hold_ms`, the detector emits `still` and starts a **baseline buffer** of the smoothed values (and the raw gravity vector).
-3. **Before GO.** Any sample that breaks `C_still` ends the hold: if the motion is already above the onset floors it is a `false_start` (the controller plays the error beep and counts it in `timing.false_starts`), otherwise `still_lost`. Either way the detector goes back to waiting, so a premature movement never contaminates the baseline.
+3. **Before GO.** Any sample that breaks `C_still` ends the hold and the detector goes back to waiting, so a premature movement never contaminates the baseline. The segmenter labels the break `false_start` when the motion is already above the (per-condition) onset floors, else `still_lost`. Since protocol 2.0.0 the trial controller decides what counts (§4.1): a loss of stillness while GO is pending is a counted false start (error beep, `timing.false_starts` + 1) only if the smoothed motion exceeds 30 deg/s or 0.6 m/s² at the loss or within the following 300 ms; smaller motion (posture sway) restarts the hold silently.
 4. **GO.** The controller gives GO at the first sample after `still` + foreperiod. The thresholds are frozen from the baseline: `thr = max(floor, mean + onset_k_sd · sd)`, separately for \|ω\| (floor `onset_gyro_min_dps`) and \|a\| (floor `onset_acc_min_ms2`). The floors matter on Chrome, where rounding can make the baseline SD zero.
 5. **Onset.** Motion counts once either signal stays above its threshold for `onset_sustain_ms`. The onset is then **back-dated** to the first sample after the last still sample, searching back to at most 300 ms before GO. This removes most of the delay that any threshold introduces.
 6. **End.** The end candidate starts when both signals are below the end thresholds (`end_gyro_dps`, `end_acc_ms2`) at least `min_movement_ms` after onset. It is confirmed when that quiet holds for `end_sustain_ms`, and the end is **back-dated** to the start of the quiet run. The end beep plays at confirmation.
@@ -61,58 +63,72 @@ The exact, normative specification is the doc comment at the top of [`app/src/co
 
 ## 4. Parameters
 
-Defaults live in `DEFAULT_SEGMENTATION_PARAMS` ([`constants.ts`](../app/src/core/constants.ts)). Every trial stores the exact parameters it used in `segmentation.params`, after the per-condition overrides.
+Defaults live in `DEFAULT_SEGMENTATION_PARAMS` ([`constants.ts`](../app/src/core/constants.ts)); `analysis/motionlab/conventions.py` mirrors them (drift test `analysis/tests/test_conventions.py`). Every trial stores the exact parameters it used in `segmentation.params`, after the per-condition overrides. Protocol 2.0.0 (app 0.2.0) loosened the hold-still and the end so that a hands-free trial takes about 5–6 s (spec v2 §4). The protocol 1.0.0 values are kept for comparison; the pilot's records carry them.
 
-| Parameter | Default | Meaning |
-|---|---|---|
-| `smoothing_ms` | 40 | EMA time constant for both magnitudes |
-| `gravity_tau_ms` | 600 | Gravity estimate for the `highpass` fallback |
-| `still_gyro_dps`, `still_acc_ms2` | 15, 0.35 | Hold-still thresholds |
-| `still_hold_ms` | 600 | Continuous stillness required before GO is scheduled |
-| `foreperiod_min_ms`, `foreperiod_max_ms` | 500, 1200 | Random delay between stillness and GO (seeded per attempt) |
-| `onset_k_sd` | 6 | Baseline-adaptive threshold multiplier |
-| `onset_gyro_min_dps`, `onset_acc_min_ms2` | 30, 0.6 | Floors of the onset thresholds |
-| `onset_sustain_ms` | 60 | Suprathreshold duration required for onset |
-| `end_gyro_dps`, `end_acc_ms2` | 20, 0.45 | End thresholds |
-| `end_sustain_ms` | 300 | Quiet duration required to confirm the end |
-| `min_movement_ms` | 150 | No end can be declared earlier than this after onset |
-| `max_wait_ms` | 6000 | GO without movement → `no_movement` |
-| `max_movement_ms` | 8000 | Movement still going → `too_long` |
-| `post_roll_ms` | 1000 | Recording after the end is confirmed |
+| Parameter | Default (2.0.0) | 1.0.0 | Meaning |
+|---|---|---|---|
+| `smoothing_ms` | 40 | 40 | EMA time constant for both magnitudes |
+| `gravity_tau_ms` | 600 | 600 | Gravity estimate for the `highpass` fallback |
+| `still_gyro_dps`, `still_acc_ms2` | 20, 0.5 | 15, 0.35 | Hold-still thresholds |
+| `still_hold_ms` | 400 | 600 | Continuous stillness required before GO is scheduled |
+| `foreperiod_min_ms`, `foreperiod_max_ms` | 400, 900 | 500, 1200 | Random delay between stillness and GO (seeded per attempt) |
+| `onset_k_sd` | 6 | 6 | Baseline-adaptive threshold multiplier |
+| `onset_gyro_min_dps`, `onset_acc_min_ms2` | 30, 0.6 | 30, 0.6 | Floors of the onset thresholds |
+| `onset_sustain_ms` | 60 | 60 | Suprathreshold duration required for onset |
+| `end_gyro_dps`, `end_acc_ms2` | 30, 0.6 | 20, 0.45 | End thresholds |
+| `end_sustain_ms` | 250 | 300 | Quiet duration required to confirm the end |
+| `min_movement_ms` | 150 | 150 | No end can be declared earlier than this after onset |
+| `max_wait_ms` | 3000 | 6000 | GO without movement → `no_movement` |
+| `max_movement_ms` | 6000 | 8000 | Movement still going → `too_long` |
+| `post_roll_ms` | 500 | 1000 | Recording after the end is confirmed (2.0.0: the minimum; the return of the arm follows) |
+| `return_cap_ms` | 3000 | – | The recording stops at the latest this long after the end was confirmed. Optional: 1.0.0 records lack it and end after `post_roll_ms` |
 
 **Per-condition overrides** (`resolveParams` in [`protocol.ts`](../app/src/core/protocol.ts)). Each override moves a parameter in one direction only (floors and end thresholds can only go down, sustain times and limits only up), so combinations compose safely:
 
 | Condition | Overrides | Reason |
 |---|---|---|
-| speed `slow` | onset floors 15 deg/s and 0.3 m/s², end thresholds 10 deg/s and 0.25 m/s², `end_sustain_ms` 450, `max_movement_ms` 12000 | Slow movements have low peaks and long tails |
+| speed `slow` | onset floors 25 deg/s and 0.55 m/s² (1.0.0: 15 and 0.3), end thresholds 10 deg/s and 0.25 m/s², `end_sustain_ms` 450, `max_movement_ms` 12000 | Slow movements have low peaks and long tails. The onset floors stay above the hold-still thresholds: at or below them, every loss of stillness counted as a false start (7 of the pilot's 8) |
 | speed `fast` | `onset_sustain_ms` 40 | Fast movements cross the threshold quickly |
 | variant `pause` | `end_sustain_ms` 1800, `max_movement_ms` 12000 | A one-second pause mid-way must not end the trial |
 | variant `jerky` | `end_sustain_ms` 600 | Stop-and-go movements have short quiet gaps |
 
-**Why these timing margins.** The hold plus the foreperiod guarantee 1.1–1.8 s of stillness before GO, a clean baseline for the adaptive thresholds and an anchor for gravity propagation. The 1 s post-roll keeps a rest window after the movement, which offline segmentation and zero-velocity corrections need ([research: hold ≥ 1 s at both ends](https://pmc.ncbi.nlm.nih.gov/articles/PMC9823748/)).
+**Why these timing margins.** The hold plus the foreperiod guarantee 0.8–1.3 s of stillness before GO (1.0.0: 1.1–1.8 s), still a clean baseline for the adaptive thresholds and an anchor for gravity propagation. The rest at the nose (`post_roll_ms`, the participant waits for the double beep) and the stillness after the return keep rest windows at both ends, which offline segmentation and zero-velocity corrections need ([research: hold ≥ 1 s at both ends](https://pmc.ncbi.nlm.nih.gov/articles/PMC9823748/)).
+
+### 4.1 Around the segmenter: gates, false starts and the return of the arm (protocol 2.0.0)
+
+The segmenter (`segmentation.ts`, ported to `segment.py`) is unchanged by protocol 2.0.0 apart from its parameters. Everything below is decided by the trial controller ([`trialController.ts`](../app/src/core/trialController.ts)) on the same smoothed signals (`segmentation.MotionSignals`, which keep running after the end), so re-segmenting a record with `online_v1` still reproduces its onset and end.
+
+- **Return movement.** Smoothed \|ω\| > 45 deg/s or \|a\| > 1.5 m/s², continuously for at least 100 ms (`RETURN_GYRO_DPS`, `RETURN_ACC_MS2`, `RETURN_SUSTAIN_MS`).
+- **Recording the return.** After the end is confirmed the controller records at least `post_roll_ms`, then (phase `returning`) until a return movement that started after the end has been followed by stillness (`still_gyro_dps`, `still_acc_ms2`) held for `still_hold_ms`, or until `return_cap_ms` after the end. `timing.return_onset_ms` is the first sample of that movement and `timing.return_end_ms` the first sample of the stillness after it; both are null when not observed. In simulation the return is recorded on every complete trial, and the recorded return onset lags the true start of the return by 94 ms (median; 151 ms at the 95th percentile; [`segmentation_eval.md`](../app/scripts/out/segmentation_eval.md)). An abort while the trial is `returning` (pause, page hidden) keeps it `complete` with the warning `return_cut_short`: the movement itself was recorded.
+- **`awaitReturn`.** When a trial ended without its return being seen (`trialController.returnMissed`), the next chained trial starts with `awaitReturn`: stillness counts only after a return movement in that trial (message `return_arm`), so GO is never given with the phone still at the nose.
+- **Grip gate** (`gripGate`: hands-free chained trials, never `free`). At `still`, the mean acceleration including gravity of the last 300 ms is classified like `detected.rotation_start` (35° cone, gravity sign from `calibrationForDetection`). A confident match to another grip than the instructed one withholds GO (message `wrong_grip`; the screen shows the grip picture); `unknown` never blocks. A gravity sign that no measured upright hold has confirmed (the engine prior, or none) could be wrong, and a wrong sign turns upright into upside-down and top-left into top-right. With an unconfirmed sign a mismatch therefore blocks only when it survives flipping the sign, and `detected.orientation_match` is then null rather than false. The hands-free session auto-rejects only `orientation_match === false`.
+- **False starts.** See §3, step 3. A loss of stillness while GO is pending counts (error beep) when the motion exceeds 30 deg/s or 0.6 m/s² at the loss or within `FALSE_START_WATCH_MS` = 300 ms after it, so an anticipation that starts gently gets its error beep up to 300 ms late. A loss while a gate holds GO back is always silent.
+- **Ready beep.** Chained trials skip it (`readyCue: false`); the first trial after a block-intro tap keeps it.
 
 ## 5. How well it works (simulation)
 
 [`app/scripts/evalSegmentation.ts`](../app/scripts/evalSegmentation.ts) (`npm run eval:seg -- --n 50`) replays simulated trials with known ground truth through the real `TrialController`. It compares `timing.onset_ms` with the moment the simulated phone starts moving, and `timing.end_ms` with the moment it reaches the nose. The setup:
 
-- 50 trials per speed × variant × platform cell (`--n 50`; a plain `npm run eval:seg` uses 30), 3,000 normal trials per parameter set;
+- 50 trials per speed × variant × platform cell (`--n 50`; a plain `npm run eval:seg` uses 30), 3,300 normal trials per parameter set (11 variants since protocol 2.0.0 added `tilted_touch`);
 - Android-like data quantised like Chromium;
 - the same trials replayed for every parameter set, so differences are paired.
 
 The full tables are in [`app/scripts/out/segmentation_eval.md`](../app/scripts/out/segmentation_eval.md).
 
-| | Onset error, median [IQR] | Onset \|error\|, 95th pct | End error, median | End > 300 ms early | Detected |
-|---|---|---|---|---|---|
-| All 3,000 trials | +31 ms [16, 115] | 428 ms | +83 ms | 3.5% | 100% |
-| natural | +31 ms | 62 ms | +83 ms | 0% | 100% |
-| fast | +14 ms | 26 ms | +137 ms | 0% | 100% |
-| slow | +202 ms | 616 ms | −97 ms | 10.5% | 100% |
+| Parameters | Trials | Onset error, median [IQR] | Onset \|error\|, 95th pct | End error, median | \|End error\| > 300 ms | Detected |
+|---|---|---|---|---|---|---|
+| 2.0.0 (default) | all 3,300 | +38 ms [19, 107] | 338 ms | +72 ms | 0.1% | 99.97% (1 `no_movement`) |
+| 2.0.0 | natural | +39 ms | 79 ms | +69 ms | 0% | 100% |
+| 2.0.0 | fast | +17 ms | 30 ms | +123 ms | 0.1% | 100% |
+| 2.0.0 | slow | +171 ms | 483 ms | −18 ms | 0.3% | 99.9% |
+| 1.0.0 | all 3,300 | +31 ms [16, 73] | 184 ms | +84 ms | 0.2% | 100% |
+| 1.0.0 | slow | +107 ms | 247 ms | −17 ms | 0.5% | 100% |
 
-Positive errors mean the detector is late. These rows are the `default` set, i.e. the current `DEFAULT_SEGMENTATION_PARAMS`. Further results:
+Positive errors mean the detector is late. "2.0.0" is the `default` set (the current `DEFAULT_SEGMENTATION_PARAMS`), "1.0.0" the `v1` set (the protocol 1.0.0 values of §4, slow onset floors 15 / 0.3), replayed on the same simulated trials. Further results:
 
-- **Timing margins.** Longer margins leave every error unchanged, as expected, because the boundaries are back-dated. A 500 ms end sustain (`candidate`) and a 500–1500 ms foreperiod with a 1200 ms post-roll (`cand+fp1500`) change the paired median onset and end errors by 0 ms and only lengthen the trial, by 0.18 s and 0.47 s. With the defaults (hold 600 ms, foreperiod 500–1200 ms, post-roll 1000 ms) the median trial lasts 4.5 s and keeps 1.4 s of data after the phone reaches the nose.
-- **Stricter hold-still.** Thresholds of 10 deg/s and 0.25 m/s² were the only change that improved accuracy: the onset 95th percentile fell from 428 to 331 ms and the slow-trial median from 202 to 171 ms. They are **not** the default yet. The simulator's tremor is calmer than real hands, so the cost (participants unable to satisfy the hold) cannot be measured in simulation. Decide this in the pilot (§9).
-- **Failures.** Every simulated false start (400/400) was caught before GO and the trial still completed. Every no-move trial (100/100) ended as `no_movement`. With twice the simulated tremor, the hold-still was still met at its earliest possible time.
+- **2.0.0 against 1.0.0, paired.** GO comes 0.4 s earlier (median 1.07 s instead of 1.46 s after the start of the trial) and the end cue 48 ms earlier. The recording keeps 0.75 s more after the phone reaches the nose (the return of the arm), so a recorded trial is 0.35 s longer (median 4.8 s), while the hands-free flow removes the taps and screens between trials.
+- **Onset accuracy is worse, and this is reported, not tuned.** The 95th percentile of the onset error rose by 155 ms (184 → 338 ms), far more than the 40 ms the v2 spec allows without a report. Almost all of it comes from slow trials (95th percentile 247 → 483 ms), because their onset floors were raised from 15 / 0.3 to 25 / 0.55 on purpose (§4: the old floors made every sway a false start). The raw streams allow re-segmentation, and timing features come from offline segmentation anyway (§7). Watch the share of `no_movement` among real slow trials: 1 in 3,300 in simulation.
+- **Failures.** Every simulated false start (400 of 400) was counted before GO and the trial still completed. Every no-move trial ended as `no_movement`. With twice the simulated tremor, the hold-still was still met at its earliest possible time (about 0.41 s).
 - **Weak spot.** Slow trials: late onsets and early ends come from the absolute thresholds meeting the long, low tails of a slow minimum-jerk profile. This is the expected bias of any threshold method (§6) and the main reason timing features must be computed offline.
 
 **Caveat.** These are sanity checks against a model, not real-world accuracy. Real movements have sub-movements, hesitations and grip adjustments the simulator does not produce ([§9](#9-validation-and-tuning-plan)).
@@ -182,8 +198,8 @@ Recommended practice for the stage-2 analysis:
 ```bash
 cd app
 npm run eval:seg -- --n 50            # ~1 min; writes scripts/out/segmentation_eval.md (the run quoted in §5)
-npx tsx scripts/evalSegmentation.ts --n 50 --sets all --out scripts/out/segmentation_eval_all.md   # adds the exploratory sets; --out keeps the §5 report
-npm run synth -- --participants 12 --preset standard --seed 42 --out ../analysis/data/synthetic --validate
+npx tsx scripts/evalSegmentation.ts --n 50 --sets all --out scripts/out/segmentation_eval_all.md   # adds the exploration sets (v2+v1slow, v2+wait6000, v2+cap5000); --out keeps the §5 report
+npm run synth -- --participants 12 --preset street --seed 42 --out ../analysis/data/synthetic --validate
 cd ../analysis
 .venv/Scripts/python.exe scripts/qa_report.py data/synthetic    # includes the online_v1 port agreement
 ```

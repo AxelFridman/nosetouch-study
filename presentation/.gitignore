@@ -1,0 +1,5 @@
+# Built decks, their PDFs and the generated QR code; a hand-made master template may be tracked.
+/build/
+*.pptx
+!template.pptx
+__pycache__/

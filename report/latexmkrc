@@ -1,0 +1,33 @@
+# latexmk configuration for the NoseTouch report. Run `latexmk` in report/ (see README.md).
+#
+# Builds main.pdf with pdfLaTeX + biber; auxiliary files go to build/ (git-ignored).
+# Before LaTeX runs, the asset step scripts/make_assets.py (when it exists; docs/09 milestone M6)
+# regenerates figures/, tables/ and the result numbers from the analysis runs named in report.toml.
+#
+#   REPORT_MODE=final      turn on the final-mode guards (default: draft)
+#   REPORT_SKIP_ASSETS=1   build without running the asset step
+#   REPORT_PY=<python>     interpreter for the asset step (default: the analysis venv)
+
+@default_files = ('main.tex');
+$pdf_mode   = 1;        # pdfLaTeX
+$bibtex_use = 2;        # run biber when needed; `latexmk -C` also removes the .bbl
+$aux_dir    = 'build';
+$out_dir    = '.';
+$pdflatex   = 'pdflatex -interaction=nonstopmode -halt-on-error -file-line-error %O %S';
+
+my $assets   = 'scripts/make_assets.py';
+my $cleaning = grep { /^-(c|C|CA)$/ } @ARGV;
+if ($cleaning) {
+    # nothing to generate when cleaning
+} elsif (!-e $assets) {
+    print "latexmkrc: $assets does not exist yet; building the skeleton with placeholders.\n";
+} elsif (!$ENV{REPORT_SKIP_ASSETS}) {
+    my $py = $ENV{REPORT_PY};
+    unless ($py) {
+        $py = (-e '../analysis/.venv/Scripts/python.exe') ? '../analysis/.venv/Scripts/python.exe'
+                                                         : '../analysis/.venv/bin/python';
+    }
+    my $mode = $ENV{REPORT_MODE} || 'draft';
+    system($py, $assets, '--config', 'report.toml', '--mode', $mode) == 0
+        or die "latexmkrc: $assets failed (REPORT_SKIP_ASSETS=1 builds without it)\n";
+}
