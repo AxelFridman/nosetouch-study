@@ -54,7 +54,7 @@ function v12Session(): SessionRecord {
       plan,
     },
     settings: { language: 'he', audio: true, speech: true, segmentation_params: { ...DEFAULT_SEGMENTATION_PARAMS }, review_mode: 'auto' },
-    consent: { version: '2026-10-v2', accepted_at: T0 },
+    consent: { version: '2026-10-v3', accepted_at: T0 },
   });
 }
 

@@ -20,8 +20,10 @@ import {
   expectNoHorizontalScroll,
   expectNoVerticalScroll,
   fillProfile,
+  finishFromPause,
   onboard,
   openApp,
+  runSession,
   setToggle,
   SMALL_VIEWPORTS,
   tapFresh,
@@ -156,7 +158,7 @@ for (const vp of SMALL_VIEWPORTS) {
         }
         await expectNoHorizontalScroll(page, 'pause sheet');
         await shot('8-pause');
-        await tapFresh(page, page.getByTestId('btn-finish-now'));
+        await finishFromPause(page);
 
         // done: thanks, the count and "Next person"
         await expect(page.getByTestId('screen-done')).toBeVisible({ timeout: 30_000 });
@@ -170,3 +172,47 @@ for (const vp of SMALL_VIEWPORTS) {
     }
   });
 }
+
+test('street block intros: what changes stays above Start on small and landscape screens (blocks 3, 5, 7)', async ({ page }) => {
+  test.setTimeout(8 * 60_000);
+  const errors = watchErrors(page);
+  const out = join(DIR, 'en-street-intros');
+  await mkdir(out, { recursive: true });
+  await openApp(page, { lang: 'en' });
+  await onboard(page);
+  // the usual iPhone Safari viewport, and an iPhone turned sideways (the page rotates in tier 2)
+  const sizes = [
+    { width: 390, height: 664 },
+    { width: 844, height: 390 },
+  ] as const;
+  const original = page.viewportSize();
+  const checked: number[] = [];
+  const run = await runSession(page, {
+    onIntro: async ({ block, page: p }) => {
+      if (block !== 3 && block !== 5 && block !== 7) return 'start';
+      const intro = p.getByTestId('block-intro');
+      // the same hand, another grip: "Turn the phone…" with "Same hand: …", no "Switch hands!"
+      await expect(intro).toHaveAttribute('data-intro-line', 'turnTo');
+      await expect(intro).toHaveAttribute('data-switch', '0');
+      await expect(p.getByTestId('intro-same-hand')).toBeVisible();
+      for (const vp of sizes) {
+        await p.setViewportSize(vp);
+        await p.evaluate(() => window.scrollTo(0, 0));
+        const what = `block ${block} intro ${vp.width}×${vp.height}`;
+        const start = p.getByTestId('btn-block-start');
+        await expectInViewport(p, start, `${what}: Start`);
+        await expectAbove(p, p.getByTestId('intro-hand'), start, `${what}: the hand line`);
+        await expectAbove(p, p.getByTestId('intro-grip'), start, `${what}: the grip`);
+        await expectNoHorizontalScroll(p, what);
+        await p.screenshot({ path: join(out, `b${block}-${vp.width}x${vp.height}.png`) });
+      }
+      if (original) await p.setViewportSize(original);
+      checked.push(block);
+      return block === 7 ? 'stop' : 'start';
+    },
+    deadlineMs: 7 * 60_000,
+  });
+  expect(run.end).toBe('stopped');
+  expect(checked).toEqual([3, 5, 7]);
+  expect(errors.pageErrors, errors.pageErrors.join('\n')).toEqual([]);
+});

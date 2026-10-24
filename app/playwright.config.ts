@@ -6,6 +6,8 @@ import { defineConfig, devices } from '@playwright/test';
 // viewport. ?sim=1&setup=1 opens the researchers' setup screen for short custom plans. Uses the dev
 // server, so no service worker is involved. Every spec imports test/expect from e2e/fixtures.ts.
 // Headless only: never run it headed or in UI mode on the researcher's computer.
+// Nothing leaves the computer: e2e/fixtures.ts serves config.json without uploads and blocks (and
+// fails the test on) every request to another host than this dev server.
 export default defineConfig({
   testDir: './e2e',
   timeout: 240_000,

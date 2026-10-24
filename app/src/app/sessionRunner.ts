@@ -15,27 +15,42 @@
  *    as not accepted (flag other_problem) and moves on without a re-run.
  *  - Every other block starts with its intro: ONE tap (blockStart) starts it; hands and grips change
  *    only there. The tap requests the iOS motion permission (when still needed), unlocks audio, takes
- *    the wake lock and says hand + grip + the first trial's words.
+ *    the wake lock and says the hand + the first trial's words (the grip is on the screen and in the
+ *    animation; a long sentence would run over the first beeps).
+ *  - The intro words the hand and the grip against what the participant was last told or did
+ *    (state.introRef, sessionFlow.introWording): the hand of the last run, of the last intro shown, or
+ *    the hand reported for the free trial — not the plan's previous block, which is wrong after a redo
+ *    or a resume. After a redo, a resume and the free trial it always names the hand plainly; "Switch
+ *    hands!" only when the current hand is known to be the other one.
  *  - Inside a block the trials chain with no screen in between. A complete trial is decided by
  *    sessionFlow.autoDecision: accepted ('auto_accept') → the next trial starts at once (no ready beep;
  *    awaitReturn when the trial did not see the arm go back out: trialController.returnMissed; grip
  *    gate on); orientation_match === false → saved not accepted ('auto_reject:orientation') and the
  *    same planned trial runs again at once with the grip picture. Saves run in the background; a failed
  *    save pauses the session and the record is retried on Continue (and before finishing).
+ *  - Reading time: GO waits (RecorderStart.readMs) until a new instruction can be read —
+ *    sessionFlow.readTimeMs (a new special movement / start position 2.5 s, a new speed 1.2 s) — and
+ *    until the words spoken at the start of the trial are over (speechMs, + SPEECH_DUCK_TAIL_MS on
+ *    iPhones, whose speech ducks the beeps a moment longer).
  *  - no_movement / too_long: saved (not accepted), the reason shows for RETRY_FLASH_MS, then the same
  *    planned trial runs again by itself; a second failure in a row opens the pause sheet.
  *  - Pause sheet: long press on the live panel's pause control (the recorder aborts with 'user'), the
- *    system back button, the header Pause button, page hidden, stalled sensors, no GO within IDLE_MS, two
- *    failures in a row, a failed save. An attempt that never reached GO is discarded (not saved).
- *    Continue is a tap (audio unlock + wake lock again, which iOS needs) and re-runs the current trial
- *    at once inside the block whose intro was tapped (else that block's intro); Redo last movement /
- *    Last one was the wrong hand revoke the last accepted trial (sessionFlow.revokeAccepted) and show
- *    its block intro again; Finish now ends the session (completed when the main part is done, else
- *    ended_early); Continue later goes to the start screen, where the session can be resumed.
+ *    system back button, the header Pause button, page hidden, stalled sensors, no GO within IDLE_MS
+ *    (reason 'wrong_grip' when the grip gate was holding GO back), two failures in a row, a failed save.
+ *    An attempt that never reached GO is discarded (not saved). Continue is a tap (audio unlock + wake
+ *    lock again, which iOS needs) and re-runs the current trial at once inside the block whose intro was
+ *    tapped (else that block's intro); Redo last movement / Last one was the wrong hand refer to the
+ *    LAST MOVEMENT (the newest saved attempt with a movement onset: state.redoTarget): an accepted one
+ *    is revoked (sessionFlow.revokeAccepted) and its block intro shows again; one that was not accepted
+ *    runs again anyway, so it is only flagged (wrong hand) and its intro shows again; Finish now ends
+ *    the session (completed when the main part is done, else ended_early); "Exit for now" goes to the
+ *    start screen, where the session can be resumed.
+ *  - A screen that appears right after a trial whose arm was not seen going back out (or that ran too
+ *    long) arms its buttons late (state.slowArm): the phone may still be at the face.
  *  - Optional (bonus) blocks are reached only through the checkpoint's Bonus; Finish ends there.
  *  - Speech: each chained trial says its speed word (+ the name of a non-default start position /
  *    variant) while the participant gets still, on non-iOS platforms only (iOS speaks only inside a
- *    tap). Computers are silenced by the cue sink itself.
+ *    tap). Computers are silenced by the cue sink itself (say() then reports that nothing was said).
  * TAP review mode (researcher setting review_each_trial: the v1 flow, lab use): block intro → Ready →
  *  live recording → review (Next / Redo / Problem) → … with a break screen between blocks. A complete
  *  attempt is saved the moment it ends, BEFORE the review shows, as not accepted ('review_interrupted');
@@ -44,8 +59,12 @@
  *
  * Common rules:
  *  - Attempt numbers are counted locally (seeded from the store by enter() before the first tap is
- *    allowed), so no tap ever waits for IndexedDB. A newer save of an attempt supersedes an older failed
- *    one (the retry never writes a stale copy over the participant's answer).
+ *    allowed; a failed read is retried, and after ATTEMPT_READ_TRIES failures the numbers start above
+ *    ATTEMPT_FLOOR so they can never repeat a stored one), so no tap ever waits for IndexedDB. A newer
+ *    save of an attempt supersedes an older failed one (the retry never writes a stale copy over the
+ *    participant's answer).
+ *  - Records of trials that reached GO on a real phone get the warning 'wake_lock_not_held' when the
+ *    screen wake lock was not held (the screen may have dimmed or locked during the block).
  *  - Page hidden → a running trial stops; tap mode: an unanswered review is saved protectively (also
  *    when the screen goes away: dispose()).
  *  - System back button: never leaves a running session; it stops a running trial like the pause
@@ -56,6 +75,7 @@
 import type {
   DeviceInfo,
   Hand,
+  OrientationId,
   ParticipantFlag,
   PermissionState,
   PlannedBlock,
@@ -64,7 +84,7 @@ import type {
   TrialCondition,
   TrialRecord,
 } from '../core/types';
-import { returnMissed } from '../core/trialController';
+import { returnMissed, WRONG_GRIP_AT_STOP } from '../core/trialController';
 import { requestMotionPermission } from '../core/sensors';
 import { stringsFor, type Strings } from '../i18n';
 import { getServices } from './services';
@@ -79,14 +99,17 @@ import {
   blockOf,
   endStatusOf,
   finishSession,
+  flagAttempt,
   isChoiceTrial,
   nextStep,
   plannedAt,
+  readTimeMs,
   reviewModeOf,
   revokeAccepted,
   saveAttempt,
   setPosture,
   withReportedHand,
+  type IntroRef,
   type SaveOptions,
   type TrialDecision,
 } from './sessionFlow';
@@ -95,13 +118,23 @@ import {
 export const IDLE_MS = 25_000;
 /** auto mode: how long a failed trial's reason stays on screen before the trial runs again. */
 export const RETRY_FLASH_MS = 1500;
+/** iOS keeps other audio (the beeps) ducked about this long after speech ends (WebKit bug 278598). */
+export const SPEECH_DUCK_TAIL_MS = 1000;
+/** enter(): how often the stored attempts are read before the attempt numbers fall back to the floor. */
+export const ATTEMPT_READ_TRIES = 4;
+/** ... how long between those reads (ms). */
+export const ATTEMPT_READ_RETRY_MS = 1000;
+/** After the reads failed: attempt numbers start above this, so they never repeat a stored attempt. */
+export const ATTEMPT_FLOOR = 100;
+/** quality warning: the screen wake lock was not held when the trial ended (the screen may have dimmed). */
+export const WAKE_LOCK_NOT_HELD = 'wake_lock_not_held';
 
 // ───────────────────────────── pure helpers ─────────────────────────────
 
 export type UiAbort = 'user' | 'hidden' | 'stalled' | 'unmount' | 'start_failed' | 'idle' | 'save_failed';
 export type FailureKind = 'no_movement' | 'too_long' | 'aborted' | 'interrupted' | 'sensor_stalled' | 'error';
-/** Why the pause sheet is open (its first line). */
-export type PauseReason = 'paused' | 'hidden' | 'stalled' | 'idle' | 'failed_twice' | 'save_failed' | 'error';
+/** Why the pause sheet is open (its first line). 'wrong_grip': no GO for a while because of the grip. */
+export type PauseReason = 'paused' | 'hidden' | 'stalled' | 'idle' | 'wrong_grip' | 'failed_twice' | 'save_failed' | 'error';
 
 /** Why an attempt failed, for the participant-facing message (tap mode). */
 export function failureKind(record: TrialRecord | null, uiAbort: UiAbort | null): FailureKind {
@@ -148,9 +181,28 @@ export function reachedGo(record: TrialRecord | null): record is TrialRecord {
   return !!record && typeof record.timing.go_ms === 'number';
 }
 
+/** The attempt contains a movement (an onset after GO): what "Redo last movement" refers to. */
+export function hasMovement(record: TrialRecord | null): record is TrialRecord {
+  return reachedGo(record) && typeof record.timing.onset_ms === 'number';
+}
+
+/**
+ * The phone may still be at the face when this attempt's record arrives: a complete trial whose return
+ * of the arm was not seen, or a movement that ran too long. The next tap screen arms late.
+ */
+export function armLate(record: TrialRecord | null): boolean {
+  if (!record) return false;
+  return returnMissed(record) || record.outcome.status === 'too_long';
+}
+
 /** Speech outside a tap (chained trials): never on iOS / WebKit, which speaks only inside a gesture. */
 export function perTrialSpeechAllowed(device: DeviceInfo | null | undefined): boolean {
   return !!device && device.platform !== 'ios' && device.engine !== 'webkit';
+}
+
+/** Rough length of an utterance (ms): about 75 ms per character after a 250 ms start. */
+export function speechMs(text: string | null | undefined): number {
+  return text ? 250 + 75 * text.length : 0;
 }
 
 /** What is said for one trial: the speed word, plus a non-default start position / variant name. */
@@ -161,12 +213,15 @@ export function trialWords(c: TrialCondition, s: Strings): string[] {
   return words;
 }
 
-/** What the block-intro tap says: hand, grip, and the first trial's words (nothing for the choice trial). */
+/**
+ * What the block-intro tap says: the hand and the first trial's words (nothing for the choice trial).
+ * The grip is on the screen and in the animation; saying it too made the sentence run over the first
+ * trial's beeps.
+ */
 export function introWords(block: PlannedBlock | null, first: PlannedTrial, s: Strings): string[] {
   if (isChoiceTrial(first.condition)) return [];
   const hand = block?.hand ?? first.condition.hand;
-  const grip = block?.orientation ?? first.condition.orientation;
-  return [s.common.hands[hand], s.session.speech.grips[grip], ...trialWords(first.condition, s)];
+  return [s.common.hands[hand], ...trialWords(first.condition, s)];
 }
 
 // ───────────────────────────── saving ─────────────────────────────
@@ -223,19 +278,31 @@ function releaseWakeLock(): void {
   }
 }
 
+/** The screen wake lock is held (true when it cannot be told). */
+function wakeLockHeld(): boolean {
+  try {
+    return getServices().wakeLock.active !== false;
+  } catch {
+    return true;
+  }
+}
+
 /**
- * Speaks `parts` when speech is enabled. On iOS it only works synchronously inside a tap handler
+ * Speaks `parts` when speech is enabled; returns the text when it was actually queued (null when
+ * speech is off, unavailable or silenced). On iOS it only works synchronously inside a tap handler
  * (timers/effects stay silent); callers outside a tap check perTrialSpeechAllowed first.
  */
-function speak(parts: (string | null | false | undefined)[]): void {
+function speak(parts: (string | null | false | undefined)[]): string | null {
   try {
     const { cues } = getServices();
     const { settings } = getState();
-    if (!settings.speech || !cues.say) return;
+    if (!settings.speech || !cues.say) return null;
     const text = parts.filter(Boolean).join('. ');
-    if (text) cues.say(text, settings.language);
+    if (!text) return null;
+    return cues.say(text, settings.language) === true ? text : null;
   } catch {
     // speech is a convenience; the screen and the beeps carry the protocol
+    return null;
   }
 }
 
@@ -264,6 +331,8 @@ export interface RecorderStart {
   gripGate: boolean;
   /** abort('idle') when no GO came this long after the start; null = never */
   idleMs: number | null;
+  /** no GO before this long after the start (ms): reading the new instruction / the speech (0: none) */
+  readMs: number;
 }
 
 /** The trial recorder as the runner sees it: one TrialController at a time. */
@@ -297,6 +366,14 @@ export type View =
   | { kind: 'failed'; reason: FailureKind; saving: boolean } // tap mode
   | { kind: 'break'; fromBlock: number }; // tap mode
 
+/** The movement the pause sheet's Redo / wrong hand refer to. */
+export interface RedoTarget {
+  trial_id: string;
+  trial_index: number;
+  accepted: boolean;
+  condition: TrialCondition;
+}
+
 export interface RunnerState {
   view: View;
   /** the pause sheet is open (over the view), and why */
@@ -309,8 +386,14 @@ export interface RunnerState {
   busy: boolean;
   /** the stored attempts were read (attempt numbers are known): the intro may start */
   attemptsReady: boolean;
-  /** there is an accepted trial that "Redo last movement" / "wrong hand" can take back */
+  /** there is a movement that "Redo last movement" / "wrong hand" can refer to (redoTarget) */
   canRedo: boolean;
+  /** the last movement (see the module doc); null: none */
+  redoTarget: RedoTarget | null;
+  /** an intro view: what the participant was last told or did (sessionFlow.introWording) */
+  introRef: IntroRef | null;
+  /** the view appeared right after a trial whose arm may still be at the face: arm its buttons late */
+  slowArm: boolean;
 }
 
 export interface SessionRunner {
@@ -342,7 +425,7 @@ export interface SessionRunner {
   revoke(flag: ParticipantFlag | null): Promise<void>;
   /** pause sheet's Finish now and the checkpoint's Finish */
   finishNow(): Promise<void>;
-  /** pause sheet: Continue later (the start screen; the session stays resumable) */
+  /** pause sheet: Exit for now (the start screen; the session stays resumable) */
   later(): Promise<void>;
   /** checkpoint: the bonus blocks */
   startBonus(): void;
@@ -356,9 +439,11 @@ export interface SessionRunner {
   pageHidden(): void;
 }
 
-interface AttemptRef {
-  trial_id: string;
-  trial_index: number;
+/** The last instruction the participant followed or saw (see introRef). free: the free choice. */
+interface Instruction {
+  hand: Hand | null;
+  orientation: OrientationId | null;
+  free: boolean;
 }
 
 /**
@@ -374,21 +459,33 @@ export function createSessionRunner(recorder: RecorderPort, onChange: () => void
     busy: false,
     attemptsReady: false,
     canRedo: false,
+    redoTarget: null,
+    introRef: { hand: null, orientation: null, explicit: true },
+    slowArm: false,
   };
   let disposed = false;
 
   // bookkeeping read by callbacks that outlive a render
   const attempts = { counts: new Map<number, number>(), ids: new Set<string>() };
-  let lastAccepted: AttemptRef | null = null;
+  /** after the stored attempts could not be read: every attempt number starts above ATTEMPT_FLOOR */
+  let attemptFloor = 0;
+  let lastMoved: RedoTarget | null = null;
   /** saves that failed, oldest first (one per attempt: its newest copy) */
   let unsaved: { record: TrialRecord; opts?: SaveOptions }[] = [];
   /** per attempt: how many saves were started (a failed older save must not shadow a newer one) */
   const generation = new Map<string, number>();
   let run: RunInfo | null = null;
+  /** the condition of the last run started (the reading time of a chained trial compares with it) */
+  let lastRun: TrialCondition | null = null;
   /** the block whose intro was tapped: inside it the chain needs no further tap */
   let chainBlock: number | null = null;
+  /** what the participant last followed or saw (null: nothing on this page yet) */
+  let instructed: Instruction | null = null;
+  /** the cursor whose intro introRef was computed for */
+  let introCursor: number | null = null;
   let failStreak = 0;
   let flashTimer: ReturnType<typeof setTimeout> | undefined;
+  let summaryTimer: ReturnType<typeof setTimeout> | undefined;
   /** tap mode: reviewed attempts already saved */
   const settled = new Set<string>();
   let deciding = false;
@@ -405,7 +502,31 @@ export function createSessionRunner(recorder: RecorderPort, onChange: () => void
     const cur = getState().session;
     return cur ? reviewModeOf(cur) === 'auto' : true;
   };
-  const nextAttempt = (trialIndex: number): number => (attempts.counts.get(trialIndex) ?? 0) + 1;
+  const nextAttempt = (trialIndex: number): number => Math.max(attempts.counts.get(trialIndex) ?? 0, attemptFloor) + 1;
+
+  /**
+   * Shows the intro of the trial at the cursor. A new intro (another cursor than the intro on screen,
+   * or a redo) words itself against what the participant last followed or saw; from then on, the intro
+   * itself is that instruction.
+   */
+  const showIntro = (extra: { redo?: boolean; notice?: 'permission_denied' } = {}): void => {
+    const cur = getState().session;
+    const planned = cur ? plannedAt(cur, st.cursor) : null;
+    let ref = st.introRef;
+    if (extra.redo || st.view.kind !== 'intro' || introCursor !== st.cursor) {
+      ref = {
+        hand: instructed?.hand ?? null,
+        orientation: instructed?.orientation ?? null,
+        explicit: !!extra.redo || instructed === null || instructed.free,
+      };
+      introCursor = st.cursor;
+      const block = cur && planned ? blockOf(cur, planned.block_index) : null;
+      if (planned && !isChoiceTrial(planned.condition) && block?.kind !== 'choice') {
+        instructed = { hand: block?.hand ?? planned.condition.hand, orientation: block?.orientation ?? planned.condition.orientation, free: false };
+      }
+    }
+    set({ view: { kind: 'intro', ...extra }, introRef: ref });
+  };
 
   /** Local bookkeeping of a saved attempt: attempt numbers and the pause sheet's "last movement". */
   const noteSaved = (record: TrialRecord): void => {
@@ -413,10 +534,14 @@ export function createSessionRunner(recorder: RecorderPort, onChange: () => void
       attempts.ids.add(record.trial_id);
       attempts.counts.set(record.trial_index, nextAttempt(record.trial_index));
     }
-    if (record.outcome.accepted) lastAccepted = { trial_id: record.trial_id, trial_index: record.trial_index };
-    else if (lastAccepted?.trial_id === record.trial_id) lastAccepted = null;
-    set({ canRedo: lastAccepted !== null });
+    if (hasMovement(record)) {
+      lastMoved = { trial_id: record.trial_id, trial_index: record.trial_index, accepted: record.outcome.accepted, condition: record.condition };
+    }
+    set({ canRedo: redoAllowed(), redoTarget: lastMoved });
   };
+
+  /** A choice trial that was not accepted (no answer yet, or "not sure") is never redone. */
+  const redoAllowed = (): boolean => !!lastMoved && (lastMoved.accepted || !isChoiceTrial(lastMoved.condition));
 
   /** Saves an attempt; a failure keeps its newest copy for retryUnsaved. */
   const persist = (record: TrialRecord, opts?: SaveOptions): Promise<SessionRecord | null> => {
@@ -487,22 +612,32 @@ export function createSessionRunner(recorder: RecorderPort, onChange: () => void
     if (!disposed) navigate('done');
   };
 
-  const startRun = (planned: PlannedTrial, o: { chained: boolean; gripHint: boolean; awaitReturn: boolean }): void => {
+  const startRun = (planned: PlannedTrial, o: { chained: boolean; gripHint: boolean; awaitReturn: boolean; speechMs?: number }): void => {
     const cur = getState().session;
     if (!cur || disposed || finishing) return;
     clearTimeout(flashTimer);
+    const c = planned.condition;
+    const auto = autoMode();
+    // reading time: a new instruction (compared with the previous trial of the chain) and the words said
+    let readMs = auto ? readTimeMs(o.chained ? lastRun : null, c) : 0;
+    if (o.speechMs) readMs = Math.max(readMs, o.speechMs);
+    // said while the participant gets still; outside a tap, so never on iOS
+    if (o.chained && auto && perTrialSpeechAllowed(cur.device)) readMs = Math.max(readMs, speechMs(speak(trialWords(c, strings()))));
+    const block = blockOf(cur, planned.block_index);
+    instructed = isChoiceTrial(c)
+      ? { hand: null, orientation: null, free: true }
+      : { hand: block?.hand ?? c.hand, orientation: block?.orientation ?? c.orientation, free: false };
+    lastRun = c;
     const info: RunInfo = { planned, attempt: nextAttempt(planned.trial_index), chained: o.chained, gripHint: o.gripHint, flash: null };
     run = info;
     goTo({ kind: 'recording', run: info });
-    const auto = autoMode();
     recorder.start(cur, planned, info.attempt, {
       readyCue: !o.chained,
       awaitReturn: o.awaitReturn,
       gripGate: auto,
       idleMs: auto ? IDLE_MS : null,
+      readMs,
     });
-    // said while the participant gets still; outside a tap, so never on iOS
-    if (o.chained && auto && perTrialSpeechAllowed(cur.device)) speak(trialWords(planned.condition, strings()));
   };
 
   /** Where the session goes from the cursor (fromBlock: the block of the trial that just ended, if any). */
@@ -512,33 +647,48 @@ export function createSessionRunner(recorder: RecorderPort, onChange: () => void
     const step = nextStep(cur, st.cursor, fromBlock, st.bonus);
     if (step === 'finished') {
       void finish();
-    } else if (step === 'checkpoint' || step === 'intro') {
+    } else if (step === 'checkpoint') {
       chainBlock = null;
-      goTo({ kind: step });
+      goTo({ kind: 'checkpoint' });
+    } else if (step === 'intro') {
+      chainBlock = null;
+      showIntro();
     } else {
       const planned = plannedAt(cur, st.cursor);
       if (planned) startRun(planned, { chained: true, gripHint: false, awaitReturn });
     }
   };
 
+  /** Session-level warnings of a record that reached GO (see the module doc). */
+  const annotate = (record: TrialRecord | null): TrialRecord | null => {
+    if (!record || !reachedGo(record) || record.simulated || wakeLockHeld()) return record;
+    if (record.quality.warnings.includes(WAKE_LOCK_NOT_HELD)) return record;
+    return { ...record, quality: { ...record.quality, warnings: [...record.quality.warnings, WAKE_LOCK_NOT_HELD] } };
+  };
+
   const finishedAuto = (record: TrialRecord | null, uiAbort: UiAbort | null): void => {
     const current = run;
     const status = record?.outcome.status;
+    // the next tap screen arms late when the phone may still be at the face
+    st.slowArm = armLate(record);
     if (record && status === 'complete') {
       // complete, also when an abort (page hidden, back) cut the return of the arm short: the movement
       // itself is recorded (the engine adds the warning 'return_cut_short')
       failStreak = 0;
       if (isChoiceTrial(record.condition)) {
+        const placeholder = awaitingHandReport(record);
         if (uiAbort === 'unmount') {
-          void persist(awaitingHandReport(record));
+          noteSaved(placeholder);
+          void persist(placeholder);
           return;
         }
-        saveInBackground(awaitingHandReport(record));
+        saveInBackground(placeholder);
         goTo({ kind: 'hand', record });
         return;
       }
       const decided = autoDecision(record);
       if (uiAbort === 'unmount') {
+        noteSaved(decided);
         void persist(decided);
         return;
       }
@@ -558,13 +708,18 @@ export function createSessionRunner(recorder: RecorderPort, onChange: () => void
       return;
     }
     if (uiAbort === 'unmount') {
-      if (reachedGo(record)) void persist(asFailedAttempt(record, uiAbortWarning(uiAbort)));
+      if (reachedGo(record)) {
+        const failed = asFailedAttempt(record, uiAbortWarning(uiAbort));
+        noteSaved(failed);
+        void persist(failed);
+      }
       return;
     }
     if (!current || !record || uiAbort || (status !== 'no_movement' && status !== 'too_long')) {
       // stopped (pause, back, hidden, stall, idle, failed save, an engine error): kept only if it reached GO
       if (reachedGo(record)) saveInBackground(asFailedAttempt(record, uiAbortWarning(uiAbort)));
-      pauseChain(pauseReasonOf(uiAbort));
+      const gripStuck = uiAbort === 'idle' && !!record?.quality.warnings.includes(WRONG_GRIP_AT_STOP);
+      pauseChain(gripStuck ? 'wrong_grip' : pauseReasonOf(uiAbort));
       return;
     }
     // no_movement / too_long: kept (not accepted), the reason shows, the same trial runs again
@@ -623,11 +778,16 @@ export function createSessionRunner(recorder: RecorderPort, onChange: () => void
   };
 
   /** Starts the first trial after a tap (block intro, Ready), asking for the iOS permission first. */
-  const startAfterPermission = (planned: PlannedTrial, permission: Promise<PermissionState> | null, deniedView: View): void => {
+  const startAfterPermission = (
+    planned: PlannedTrial,
+    permission: Promise<PermissionState> | null,
+    denied: () => void,
+    said: number,
+  ): void => {
     const begin = (): void => {
       // back was pressed while the permission prompt was open: the pause sheet comes first
       if (st.pause || disposed) return;
-      startRun(planned, { chained: false, gripHint: false, awaitReturn: false });
+      startRun(planned, { chained: false, gripHint: false, awaitReturn: false, speechMs: said });
     };
     if (!permission) {
       begin();
@@ -637,10 +797,67 @@ export function createSessionRunner(recorder: RecorderPort, onChange: () => void
       (p) => {
         const capsNow = getState().capabilities;
         if (capsNow) setState({ capabilities: { ...capsNow, permission_state: p } });
-        if (p === 'denied') goTo(deniedView);
+        if (p === 'denied') denied();
         else begin();
       },
       () => begin(),
+    );
+  };
+
+  /** How long GO waits for words said in a tap: the speech, plus iOS' ducking of other audio after it. */
+  const speechWait = (text: string | null): number => {
+    if (!text) return 0;
+    const device = getState().session?.device ?? getState().device;
+    const webkit = device?.platform === 'ios' || device?.engine === 'webkit';
+    return speechMs(text) + (webkit ? SPEECH_DUCK_TAIL_MS : 0);
+  };
+
+  /** Reads the stored attempts (attempt numbers, the last movement); retried when the read fails. */
+  const readAttempts = (cur: SessionRecord, tries: number): void => {
+    const route = (s: SessionRecord): void => {
+      set({ cursor: s.progress.next_trial_index });
+      const step = nextStep(s, s.progress.next_trial_index, null, false);
+      instructed = null; // nothing was done on this page yet: the intro names the hand plainly
+      if (step === 'finished') void finish();
+      else if (step === 'checkpoint') goTo({ kind: 'checkpoint' });
+      else showIntro();
+    };
+    attemptSummary(cur).then(
+      (sum) => {
+        if (disposed) return;
+        for (const [i, n] of sum.counts) attempts.counts.set(i, Math.max(n, attempts.counts.get(i) ?? 0));
+        for (const id of sum.ids) attempts.ids.add(id);
+        const moved = sum.latestMoved;
+        if (!lastMoved && moved) {
+          lastMoved = { trial_id: moved.trial_id, trial_index: moved.trial_index, accepted: moved.outcome.accepted, condition: moved.condition };
+        }
+        // saves still running when the screen appeared are done now (the summary waited for them):
+        // nothing could start before this, so continue from the freshest progress
+        const fresh = getState().session;
+        if (
+          fresh &&
+          fresh.session_id === cur.session_id &&
+          fresh.status === 'in_progress' &&
+          fresh.progress.next_trial_index !== st.cursor &&
+          !finishing &&
+          st.pause === null &&
+          (st.view.kind === 'intro' || st.view.kind === 'checkpoint')
+        ) {
+          route(fresh);
+        }
+        set({ attemptsReady: true, canRedo: redoAllowed(), redoTarget: lastMoved });
+      },
+      (e) => {
+        console.error('the stored attempts could not be read', e);
+        if (disposed) return;
+        if (tries + 1 < ATTEMPT_READ_TRIES) {
+          // the intro's Start stays disabled meanwhile: an attempt number must never repeat
+          summaryTimer = setTimeout(() => readAttempts(getState().session ?? cur, tries + 1), ATTEMPT_READ_RETRY_MS);
+          return;
+        }
+        attemptFloor = ATTEMPT_FLOOR; // numbers above every stored attempt: unique without the read
+        set({ attemptsReady: true });
+      },
     );
   };
 
@@ -655,47 +872,18 @@ export function createSessionRunner(recorder: RecorderPort, onChange: () => void
         navigate('done');
         return;
       }
-      /** where a session continues: its next trial's intro, the checkpoint, or the end */
-      const route = (s: SessionRecord): void => {
-        set({ cursor: s.progress.next_trial_index });
-        const step = nextStep(s, s.progress.next_trial_index, null, false);
-        if (step === 'finished') void finish();
-        else goTo({ kind: step === 'checkpoint' ? 'checkpoint' : 'intro' });
-      };
-      route(cur);
-      attemptSummary(cur).then(
-        (sum) => {
-          if (disposed) return;
-          for (const [i, n] of sum.counts) attempts.counts.set(i, Math.max(n, attempts.counts.get(i) ?? 0));
-          for (const id of sum.ids) attempts.ids.add(id);
-          const acc = sum.latestAccepted;
-          if (!lastAccepted && acc) lastAccepted = { trial_id: acc.trial_id, trial_index: acc.trial_index };
-          // saves still running when the screen appeared are done now (the summary waited for them):
-          // nothing could start before this, so continue from the freshest progress
-          const fresh = getState().session;
-          if (
-            fresh &&
-            fresh.session_id === cur.session_id &&
-            fresh.status === 'in_progress' &&
-            fresh.progress.next_trial_index !== st.cursor &&
-            !finishing &&
-            st.pause === null &&
-            (st.view.kind === 'intro' || st.view.kind === 'checkpoint')
-          ) {
-            route(fresh);
-          }
-          set({ attemptsReady: true, canRedo: lastAccepted !== null });
-        },
-        (e) => {
-          console.error('the stored attempts could not be read', e);
-          set({ attemptsReady: true });
-        },
-      );
+      set({ cursor: cur.progress.next_trial_index });
+      const step = nextStep(cur, cur.progress.next_trial_index, null, false);
+      if (step === 'finished') void finish();
+      else if (step === 'checkpoint') goTo({ kind: 'checkpoint' });
+      else showIntro();
+      readAttempts(cur, 0);
     },
 
     dispose() {
       if (disposed) return;
       clearTimeout(flashTimer);
+      clearTimeout(summaryTimer);
       protectReview();
       disposed = true;
       releaseWakeLock();
@@ -703,8 +891,9 @@ export function createSessionRunner(recorder: RecorderPort, onChange: () => void
 
     finished(record, uiAbort, error) {
       if (error) console.warn('trial ended without a normal result', error);
-      if (autoMode()) finishedAuto(record, uiAbort);
-      else finishedTap(record, uiAbort);
+      const rec = annotate(record);
+      if (autoMode()) finishedAuto(rec, uiAbort);
+      else finishedTap(rec, uiAbort);
     },
 
     blockStart() {
@@ -713,6 +902,7 @@ export function createSessionRunner(recorder: RecorderPort, onChange: () => void
       const planned = cur ? plannedAt(cur, st.cursor) : null;
       if (!cur || !planned) return;
       const block = blockOf(cur, planned.block_index);
+      st.slowArm = false;
       if (!autoMode()) {
         unlockAudio();
         const w = strings();
@@ -726,10 +916,10 @@ export function createSessionRunner(recorder: RecorderPort, onChange: () => void
       const permission = requestPermissionInTap();
       unlockAudio();
       acquireWakeLock();
-      speak(introWords(block, planned, strings()));
+      const said = speak(introWords(block, planned, strings()));
       chainBlock = planned.block_index;
       failStreak = 0;
-      startAfterPermission(planned, permission, { kind: 'intro', notice: 'permission_denied' });
+      startAfterPermission(planned, permission, () => showIntro({ notice: 'permission_denied' }), speechWait(said));
     },
 
     ready() {
@@ -742,7 +932,7 @@ export function createSessionRunner(recorder: RecorderPort, onChange: () => void
       acquireWakeLock();
       const w = strings();
       speak([isChoiceTrial(planned.condition) ? null : w.common.hands[planned.condition.hand], ...trialWords(planned.condition, w)]);
-      startAfterPermission(planned, permission, { kind: 'ready', notice: 'permission_denied' });
+      startAfterPermission(planned, permission, () => goTo({ kind: 'ready', notice: 'permission_denied' }), 0);
     },
 
     async decide(decision) {
@@ -781,13 +971,14 @@ export function createSessionRunner(recorder: RecorderPort, onChange: () => void
     nextBlock() {
       if (st.view.kind !== 'break') return;
       unlockAudio();
-      goTo({ kind: 'intro' });
+      showIntro();
     },
 
     async answerHand(answer) {
       const v = st.view;
       if (v.kind !== 'hand' || deciding) return;
       deciding = true;
+      st.slowArm = false;
       set({ busy: true });
       const record = withReportedHand(v.record, answer);
       noteSaved(record);
@@ -796,17 +987,21 @@ export function createSessionRunner(recorder: RecorderPort, onChange: () => void
       deciding = false;
       set({ busy: false });
       if (!saved) return; // the toast says why; the question stays
+      // the hand the free trial was done with: the first intro words itself against it
+      instructed = { hand: answer === 'unsure' ? null : answer, orientation: null, free: true };
       chainBlock = null;
       set({ cursor: record.trial_index + 1 });
       const step = nextStep(saved, st.cursor, null, st.bonus);
       if (step === 'finished') await finish();
-      else goTo({ kind: step === 'checkpoint' ? 'checkpoint' : 'intro' });
+      else if (step === 'checkpoint') goTo({ kind: 'checkpoint' });
+      else showIntro();
     },
 
     async continueSession() {
       if (st.busy || finishing) return;
       unlockAudio();
       acquireWakeLock();
+      st.slowArm = false;
       if (unsaved.length > 0) {
         set({ busy: true });
         const ok = await retryUnsaved();
@@ -823,34 +1018,42 @@ export function createSessionRunner(recorder: RecorderPort, onChange: () => void
       const planned = plannedAt(cur, st.cursor);
       if (step === 'trial' && planned) startRun(planned, { chained: false, gripHint: false, awaitReturn: false });
       else if (step === 'finished') void finish();
-      else goTo({ kind: step === 'checkpoint' ? 'checkpoint' : 'intro' });
+      else if (step === 'checkpoint') goTo({ kind: 'checkpoint' });
+      else showIntro();
     },
 
     async revoke(flag) {
-      const last = lastAccepted;
+      const target = lastMoved;
       const cur = getState().session;
-      if (st.busy || finishing || !cur || !last) return;
+      if (st.busy || finishing || !cur || !target || !redoAllowed()) return;
       unlockAudio();
       acquireWakeLock();
+      st.slowArm = false;
       set({ busy: true });
       let updated: SessionRecord;
       try {
         if (!(await retryUnsaved())) throw new Error('an earlier attempt is still unsaved');
-        updated = await revokeAccepted(getState().session ?? cur, last.trial_id, flag);
+        if (target.accepted) {
+          updated = await revokeAccepted(getState().session ?? cur, target.trial_id, flag);
+        } else {
+          // not accepted: the same planned trial runs again anyway; "wrong hand" is only noted on it
+          updated = flag ? await flagAttempt(getState().session ?? cur, target.trial_id, flag) : (getState().session ?? cur);
+        }
       } catch (e) {
         console.error('redo failed', e);
         showToast(strings().session.saveFailed, 'error');
         set({ busy: false });
         return;
       }
-      if (lastAccepted?.trial_id === last.trial_id) lastAccepted = null;
+      if (lastMoved?.trial_id === target.trial_id) lastMoved = null;
       chainBlock = null; // the intro names the hand again
       failStreak = 0;
       clearTimeout(flashTimer);
-      set({ busy: false, canRedo: lastAccepted !== null, cursor: updated.progress.next_trial_index, pause: null });
+      set({ busy: false, canRedo: redoAllowed(), redoTarget: lastMoved, cursor: updated.progress.next_trial_index, pause: null });
       const step = nextStep(updated, st.cursor, null, st.bonus);
       if (step === 'finished') void finish();
-      else goTo(step === 'checkpoint' ? { kind: 'checkpoint' } : { kind: 'intro', redo: true });
+      else if (step === 'checkpoint') goTo({ kind: 'checkpoint' });
+      else showIntro({ redo: true });
     },
 
     async finishNow() {
@@ -874,8 +1077,9 @@ export function createSessionRunner(recorder: RecorderPort, onChange: () => void
       if (st.busy || finishing || st.view.kind !== 'checkpoint') return;
       unlockAudio();
       acquireWakeLock();
+      st.slowArm = false;
       set({ bonus: true });
-      goTo({ kind: 'intro' });
+      showIntro();
     },
 
     setSitting(sitting) {
@@ -888,6 +1092,7 @@ export function createSessionRunner(recorder: RecorderPort, onChange: () => void
     },
 
     openPause(reason = 'paused') {
+      st.slowArm = false;
       openPause(reason);
     },
 

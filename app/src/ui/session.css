@@ -198,6 +198,8 @@
   margin: 0;
 }
 .new-hand {
+  margin: 0;
+  font-size: 1.15rem;
   font-weight: 800;
   color: var(--warn);
 }
@@ -406,23 +408,44 @@
   line-height: 1;
   letter-spacing: 0.04em;
 }
-/* a non-default start position or movement variant: what to do differently this time */
+/* a special movement / start position takes the speed word's place (all of them are at natural speed) */
+.tp-speed-special {
+  max-width: 14ch;
+  font-size: clamp(1.8rem, min(10vw, 7.5vh), 3.2rem);
+  line-height: 1.05;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  text-align: center;
+}
+/* what to do differently this time: one short line, readable at arm's length */
 .tp-variant {
   display: grid;
   gap: 2px;
   margin: 0;
-  max-width: 32ch;
-  font-size: 1.05rem;
-  line-height: 1.3;
+  max-width: 24ch;
+  font-size: 1.5rem;
+  font-weight: 700;
+  line-height: 1.25;
 }
 .tp-variant strong {
-  font-size: 1.35rem;
+  font-size: 1.6rem;
 }
 /* wrong grip: the instructed grip, on a light card so the figure keeps its colours */
 .tp-grip {
-  padding: 6px;
+  display: grid;
+  justify-items: center;
+  gap: 4px;
+  padding: 6px 10px;
   border-radius: var(--radius-sm);
   background: var(--surface, #ffffff);
+  color: var(--text, #0f172a);
+}
+.tp-grip-words {
+  margin: 0;
+  max-width: 22ch;
+  font-size: 1.25rem;
+  font-weight: 800;
+  line-height: 1.2;
 }
 .tp-sub {
   font-size: 1.15rem;
@@ -476,7 +499,7 @@
   position: absolute;
   inset: 0;
   background: currentColor;
-  opacity: 0.3;
+  opacity: 0.6;
   transform: scaleX(0);
   transform-origin: left center;
 }
@@ -489,6 +512,10 @@
 }
 .tp-stop-text {
   position: relative;
+}
+/* released too early: "Keep holding…" */
+.tp-stop[data-hint] {
+  font-weight: 900;
 }
 
 /* sideways grips can rotate the page: on short landscape viewports the words sit side by side */
@@ -510,7 +537,10 @@
     height: 72px !important;
   }
   .tp-variant {
-    font-size: 0.95rem;
+    font-size: 1.2rem;
+  }
+  .tp-variant strong {
+    font-size: 1.25rem;
   }
 }
 
@@ -548,10 +578,45 @@
 .howto-steps li::marker {
   font-weight: 800;
 }
+/* sound on: the double beep is the only cue at the nose */
+.howto-sound {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  padding: 8px 12px;
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+}
+.howto-sound-text {
+  flex: 1 1 12em;
+  margin: 0;
+  font-weight: 700;
+}
+.howto-tip {
+  margin: 0;
+}
+.howto-anyhand {
+  margin: 0 0 6px;
+  text-align: center;
+  font-weight: 600;
+}
+/* a footer with a line of text above its button: solid, so the scrolled card never shows through */
+.screen-footer:has(.howto-anyhand) {
+  background: var(--bg);
+  box-shadow: 0 -8px 12px var(--bg);
+}
+/* short screens: the steps and the sound check before the second (angled) animation */
+@media (max-height: 700px) {
+  .howto-angled {
+    display: none;
+  }
+}
 
 /* ── block intro ────────────────────────────────────────────── */
+/* what changes (hand, grip) comes first; the animation, the notes and the progress follow */
 .block-intro {
-  gap: 10px;
+  gap: 8px;
 }
 .intro-hand {
   margin: 0;
@@ -570,12 +635,35 @@
   width: 100%;
   max-width: 260px;
 }
+.intro-same {
+  margin: 0;
+  font-weight: 700;
+}
 .intro-grip {
   margin: 0;
+  font-size: 1.2rem;
 }
 .intro-varies {
   margin: 0;
   font-weight: 700;
+}
+.intro-basics {
+  margin: 0;
+}
+.intro-progress {
+  width: 100%;
+}
+@media (max-height: 700px) {
+  .block-intro .intro-gesture {
+    max-width: 190px;
+  }
+}
+/* landscape phones (sideways blocks): the words only */
+@media (max-height: 480px) {
+  .block-intro .intro-gesture,
+  .block-intro .intro-progress {
+    display: none;
+  }
 }
 
 /* ── hand question after the choice trial ───────────────────── */
@@ -609,6 +697,9 @@
 .pause-actions {
   display: grid;
   gap: 10px;
+}
+.pause-last {
+  margin: -4px 0 0;
 }
 
 /* ── checkpoint (after the main part) ───────────────────────── */

@@ -11,6 +11,8 @@
  * even to orphans, without scanning the big trial records.)
  * enqueue() creates/overwrites the outbox item `${kind}:${id}` with status 'pending' (a session record
  * is re-enqueued every time it changes; the backend overwrites by id, so uploads are idempotent).
+ * commit() writes a trial and/or a session AND their outbox items in one transaction (the session
+ * layer's only write path for records); enqueueMissing() repairs trials without any outbox item.
  * Works in Node tests with `import 'fake-indexeddb/auto'`.
  * Robustness (iOS): WebKit can drop the IndexedDB connection ("UnknownError: Connection to Indexed
  * Database server lost") when its networking process dies, and rolls back transactions when a
@@ -66,6 +68,19 @@ export interface LocalStore {
   /** ordered by trial_index, then attempt */
   listTrials(sessionId: string): Promise<TrialRecord[]>;
 
+  /**
+   * ONE atomic transaction over sessions, trials and outbox: saves the trial and/or the session and
+   * enqueues each record written (as enqueue() does). Either all of it is stored or none of it, so a
+   * failure (or a page killed in the middle) never leaves a trial without its session update or its
+   * outbox item. The session layer saves through this (sessionFlow.ts).
+   */
+  commit(c: { session?: SessionRecord; trial?: TrialRecord }): Promise<void>;
+  /**
+   * Repairs the outbox: enqueues every stored trial that has no outbox item at all (one could be lost
+   * by app versions before commit(), when the page died between the separate writes). Returns how
+   * many were enqueued. Items of sent records are kept by the uploader, so this never re-sends them.
+   */
+  enqueueMissing(): Promise<number>;
   enqueue(kind: 'session' | 'trial', recordId: string, sessionId: string): Promise<void>;
   /** oldest enqueued first (an item keeps its place when it is re-enqueued) */
   listOutbox(status?: OutboxItem['status']): Promise<OutboxItem[]>;
@@ -101,6 +116,7 @@ interface NoseTouchDB extends DBSchema {
 type Db = IDBPDatabase<NoseTouchDB>;
 
 const STRICT: IDBTransactionOptions = { durability: 'strict' };
+const noop = (): void => undefined;
 const OUTBOX_STATUSES: OutboxItem['status'][] = ['pending', 'sent', 'failed'];
 
 function upgradeSchema(db: Db, oldVersion: number): void {
@@ -182,6 +198,24 @@ function trialOrder(a: TrialRecord, b: TrialRecord): number {
 
 function outboxOrder(a: StoredOutboxItem, b: StoredOutboxItem): number {
   return compareNum(a.seq ?? 0, b.seq ?? 0) || compareStr(a.id, b.id);
+}
+
+/** A fresh 'pending' outbox item for a record; `prev` (the stored item, if any) keeps its place. */
+function pendingItem(kind: 'session' | 'trial', recordId: string, sessionId: string, prev: StoredOutboxItem | undefined): StoredOutboxItem {
+  return {
+    id: `${kind}:${recordId}`,
+    kind,
+    record_id: recordId,
+    session_id: sessionId,
+    status: 'pending',
+    attempts: 0,
+    last_error: null,
+    last_attempt_at: null,
+    sent_at: null,
+    confirmed: false,
+    seq: prev?.seq ?? nextSeq(),
+    rev: (prev?.rev ?? 0) + 1,
+  };
 }
 
 function storageManager(): StorageManager | undefined {
@@ -347,26 +381,60 @@ export async function openLocalStore(dbName: string = DB_NAME): Promise<LocalSto
     listTrials: (sessionId) =>
       run(async (db) => (await db.getAllFromIndex('trials', 'by_session', sessionId)).sort(trialOrder)),
 
+    commit: ({ session, trial }) =>
+      run(async (db) => {
+        const tx = db.transaction(['sessions', 'trials', 'outbox'], 'readwrite', STRICT);
+        const outbox = tx.objectStore('outbox');
+        const enqueueIn = async (kind: 'session' | 'trial', recordId: string, sessionId: string): Promise<void> => {
+          const prev = await outbox.get(`${kind}:${recordId}`);
+          await outbox.put(pendingItem(kind, recordId, sessionId, prev));
+        };
+        const ops: Promise<unknown>[] = [];
+        try {
+          if (trial) ops.push(tx.objectStore('trials').put(trial));
+          if (session) ops.push(tx.objectStore('sessions').put(session));
+          // session item first: a new session's item is older than its trials' (upload order)
+          if (session) ops.push(enqueueIn('session', session.session_id, session.session_id));
+          if (trial) ops.push(enqueueIn('trial', trial.trial_id, trial.session_id));
+          await Promise.all([...ops, tx.done]);
+        } catch (e) {
+          // a put that throws synchronously (e.g. DataCloneError) does not abort the transaction by
+          // itself: the requests already made would commit without the rest
+          for (const op of ops) op.catch(noop);
+          tx.done.catch(noop);
+          try {
+            tx.abort();
+          } catch {
+            // already finished (committed or aborted)
+          }
+          throw e;
+        }
+      }),
+
+    enqueueMissing: () =>
+      run(async (db) => {
+        const tx = db.transaction(['trials', 'outbox'], 'readwrite', STRICT);
+        const trials = tx.objectStore('trials');
+        const outbox = tx.objectStore('outbox');
+        const [trialIds, outboxIds] = await Promise.all([trials.getAllKeys(), outbox.getAllKeys()]);
+        const queued = new Set(outboxIds);
+        let added = 0;
+        for (const id of trialIds) {
+          if (queued.has(`trial:${id}`)) continue;
+          const t = await trials.get(id);
+          if (!t) continue;
+          await outbox.put(pendingItem('trial', t.trial_id, t.session_id, undefined));
+          added++;
+        }
+        await tx.done;
+        return added;
+      }),
+
     enqueue: (kind, recordId, sessionId) =>
       run(async (db) => {
-        const id = `${kind}:${recordId}`;
         const tx = db.transaction('outbox', 'readwrite', STRICT);
-        const prev = await tx.store.get(id);
-        const item: StoredOutboxItem = {
-          id,
-          kind,
-          record_id: recordId,
-          session_id: sessionId,
-          status: 'pending',
-          attempts: 0,
-          last_error: null,
-          last_attempt_at: null,
-          sent_at: null,
-          confirmed: false,
-          seq: prev?.seq ?? nextSeq(),
-          rev: (prev?.rev ?? 0) + 1,
-        };
-        await Promise.all([tx.store.put(item), tx.done]);
+        const prev = await tx.store.get(`${kind}:${recordId}`);
+        await Promise.all([tx.store.put(pendingItem(kind, recordId, sessionId, prev)), tx.done]);
       }),
 
     listOutbox: (status) =>

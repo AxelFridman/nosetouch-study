@@ -74,6 +74,12 @@ export interface AppState {
    * starting config.default_preset. Set by ?setup=1 or in Settings; like `simulate`, never remembered.
    */
   setupRequested: boolean;
+  /**
+   * The participant chose "Start over" on the welcome screen although an unfinished session could be
+   * resumed: the profile's Continue then starts a new session (the old one ends as abandoned) instead
+   * of resuming the recent one. Reset once the session is created.
+   */
+  startOver: boolean;
 }
 
 const SETTINGS_KEY = 'nosetouch.settings.v1';
@@ -156,5 +162,6 @@ export function initialState(): AppState {
     outbox: { pending: 0, sent: 0, failed: 0 },
     toast: null,
     setupRequested: false,
+    startOver: false,
   };
 }

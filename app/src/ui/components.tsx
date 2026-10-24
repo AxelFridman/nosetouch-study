@@ -102,6 +102,8 @@ export function TextInput(props: {
   autoComplete?: string;
   /** phone keyboards: 'words' capitalises names */
   autoCapitalize?: 'off' | 'none' | 'sentences' | 'words' | 'characters';
+  /** the phone keyboard's action key, e.g. 'next' */
+  enterKeyHint?: 'enter' | 'done' | 'go' | 'next' | 'previous' | 'search' | 'send';
   testId?: string;
 }) {
   return (
@@ -115,6 +117,7 @@ export function TextInput(props: {
       inputMode={props.inputMode}
       autoComplete={props.autoComplete ?? 'off'}
       autoCapitalize={props.autoCapitalize}
+      enterKeyHint={props.enterKeyHint}
       onInput={(e) => props.onInput((e.currentTarget as HTMLInputElement).value)}
       data-testid={props.testId}
     />

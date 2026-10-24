@@ -12,6 +12,8 @@ import {
   createRecordingCueSink,
   createWakeLockGuard,
   isAutomatedBrowser,
+  isTouchWebKit,
+  REPAIR_CHECK_MS,
   pickVoice,
   type CueOptions,
 } from '../src/core/cues';
@@ -458,6 +460,68 @@ describe('createCueSink: speech', () => {
     expect(() => sink.say?.('Ready', 'en')).not.toThrow();
     expect(flaky.spoken[0]).toMatchObject({ lang: 'en-US', voice: null });
     expect(() => sink.setOptions({ ...ALL_ON, speech: false })).not.toThrow();
+  });
+});
+
+describe('createCueSink: iOS audio repair (WebKit bugs 276016, 273511, 283419)', () => {
+  const IPHONE = { userAgent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_1 like Mac OS X) AppleWebKit/605.1.15 Version/18.1 Mobile/15E148 Safari/604.1' };
+
+  it("an 'interrupted' context (after a call or an app switch) gets suspend() then resume() inside the tap", async () => {
+    const audio = withAudio({ initialState: 'running' });
+    const sink = createCueSink(ALL_ON);
+    await sink.unlock();
+    const ctx = audio.instances[0];
+    ctx.state = 'interrupted';
+    const p = sink.unlock();
+    // both started synchronously, in that order (the gesture is still active)
+    expect(ctx.calls.slice(-2)).toEqual(['suspend', 'resume']);
+    await p;
+    expect(ctx.state).toBe('running');
+    expect(audio.instances).toHaveLength(1);
+  });
+
+  it('on an iPhone the cycle runs in EVERY tap, also while the context reads running (silent after an alarm)', async () => {
+    const audio = withAudio({ initialState: 'running' }, IPHONE);
+    const sink = createCueSink(ALL_ON);
+    await sink.unlock();
+    await sink.unlock();
+    expect(audio.instances[0].suspendCalls).toBe(2);
+    expect(audio.instances[0].resumeCalls).toBe(2);
+    expect(audio.instances[0].state).toBe('running');
+    // elsewhere a running context is left alone (cheap, idempotent)
+    const desktop = withAudio({ initialState: 'running' });
+    const other = createCueSink(ALL_ON);
+    await other.unlock();
+    await other.unlock();
+    expect(desktop.instances[0].suspendCalls).toBe(0);
+    expect(desktop.instances[0].resumeCalls).toBe(0);
+  });
+
+  it(`a context still not running ${REPAIR_CHECK_MS} ms after its repair is closed and replaced by the next tap`, async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    try {
+      const audio = withAudio({ initialState: 'interrupted', stuck: true });
+      const sink = createCueSink(ALL_ON);
+      await sink.unlock();
+      expect(audio.instances).toHaveLength(1);
+      await vi.advanceTimersByTimeAsync(REPAIR_CHECK_MS + 1);
+      await sink.unlock();
+      expect(audio.instances).toHaveLength(2);
+      expect(audio.instances[0].closeCalls).toBe(1);
+      expect(isTouchWebKit()).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('say() tells whether something was actually queued (the reading time waits only for real speech)', () => {
+    withSpeech();
+    expect(createCueSink(ALL_ON).say('Left hand', 'en')).toBe(true);
+    expect(createCueSink({ ...ALL_ON, speech: false }).say('Left hand', 'en')).toBe(false);
+    expect(createCueSink(ALL_ON, { silenced: () => true }).say('Left hand', 'en')).toBe(false);
+    expect(createCueSink(ALL_ON).say('', 'en')).toBe(false);
+    vi.stubGlobal('speechSynthesis', undefined);
+    expect(createCueSink(ALL_ON).say('Left hand', 'en')).toBe(false);
   });
 });
 

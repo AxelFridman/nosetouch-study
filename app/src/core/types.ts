@@ -669,7 +669,8 @@ export interface SensorSource {
 /** Plays audio/haptic/speech cues. Implementations must never throw. */
 export interface CueSink {
   play(kind: CueKind): void;
-  say?(text: string, lang: Language): void;
+  /** true when an utterance was actually queued (speech on, a voice engine, not silenced) */
+  say?(text: string, lang: Language): boolean | void;
 }
 
 /**
@@ -692,7 +693,9 @@ export type TrialMessage =
   /** v2: stretch the arm out again (after the end cue, or before GO while awaiting the return) */
   | 'return_arm'
   /** v2 grip gate: the phone is held in a different known grip than instructed; GO is withheld */
-  | 'wrong_grip';
+  | 'wrong_grip'
+  /** v2 reading time (TrialControllerOptions.readMs): GO is withheld while the new instruction is read */
+  | 'read';
 
 export interface TrialLiveState {
   phase: TrialPhase;
@@ -701,6 +704,11 @@ export interface TrialLiveState {
   acc_ms2: number; // smoothed |a_lin|
   still_progress: number; // 0..1 of still_hold_ms
   message: TrialMessage | null;
+  /**
+   * v2 grip gate: how the phone was held at the last gate check (gravity over the last 300 ms, under the
+   * detection calibration's sign); null while the gate has not judged a grip (no gate, not still yet).
+   */
+  grip_seen?: PhoneRotation | 'unknown' | null;
 }
 
 export interface TrialIds {
@@ -744,6 +752,12 @@ export interface TrialControllerOptions {
    * matches a different known grip than the instructed one. Default false; never applies to 'free'.
    */
   gripGate?: boolean;
+  /**
+   * v2 reading time (ms after t0): GO is never scheduled before it (message 'read' while nothing more
+   * urgent is shown), so a new instruction on the screen — or the words being spoken — can be taken in
+   * before the beep. still_ms is then ≥ readMs. Default 0 (none).
+   */
+  readMs?: number;
 }
 
 /** Local outbox entry for the upload queue (IndexedDB). */

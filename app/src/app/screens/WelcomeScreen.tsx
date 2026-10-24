@@ -4,12 +4,16 @@
  * warnings (insecure context, no motion sensors, in-app browser, simulation, researcher mode, pending
  * uploads), "Continue as {name}" + "New person" when a profile exists on this phone, resuming an
  * unfinished session, and the menu. The consent checkbox and Start sit in the sticky footer.
+ * What must not be missed comes FIRST, above the illustration, so a short screen never hides it under
+ * the sticky footer: the resume card of an unfinished session (Start then reads "Start over" and is
+ * secondary; the profile's Continue would resume a recent session anyway, see startFlow), and the
+ * in-app browser notice with "Copy the link" (on iOS Start then reads "Continue here anyway").
  *
  * The Start tap (startFlow.startFromWelcome, order pinned by tests/startFlow.test.ts): requests the
  * motion permission as its FIRST synchronous statement (WebKit only shows the prompt during the
  * gesture), unlocks audio and takes the wake lock (iOS needs a gesture for both), records the consent
  * time, starts the background sensor measurement (sensorCheck.ts) and opens the profile.
- * NOTE for the PI: the wording is consent_version in public/config.json (2026-10-v2).
+ * NOTE for the PI: the wording is consent_version in public/config.json (2026-10-v3).
  */
 import type { ComponentChildren } from 'preact';
 import { useEffect, useState } from 'preact/hooks';
@@ -39,6 +43,7 @@ const IN_APP_NAMES: Record<string, string> = {
   linkedin: 'LinkedIn',
   wechat: 'WeChat',
   pinterest: 'Pinterest',
+  whatsapp: 'WhatsApp',
   android_webview: '',
   ios_webview: '',
 };
@@ -109,8 +114,25 @@ export function WelcomeScreen() {
 
   // Synchronous: its FIRST statement is the motion-permission request (WebKit shows the prompt only
   // during the gesture), then audio + wake lock, consent time, background sensor check, profile.
-  // Never starts without consent (the button is disabled then anyway).
-  const onStart = () => void startFromWelcome(agreed);
+  // Never starts without consent (the button is disabled then anyway). With the resume card on screen
+  // this is "Start over": the profile's Continue then starts a new session instead of resuming.
+  const onStart = () => {
+    if (startFromWelcome(agreed)) setState({ startOver: !!resumable });
+  };
+
+  const onCopyLink = () => {
+    try {
+      const url = `${location.origin}${location.pathname}`;
+      const clip = navigator.clipboard;
+      if (!clip || typeof clip.writeText !== 'function') throw new Error('no clipboard');
+      clip.writeText(url).then(
+        () => showToast(t.linkCopied, 'ok'),
+        () => showToast(url, 'info', 8000),
+      );
+    } catch {
+      showToast(`${location.origin}${location.pathname}`, 'info', 8000);
+    }
+  };
 
   const onNewPerson = () => {
     forgetParticipant();
@@ -160,6 +182,10 @@ export function WelcomeScreen() {
   const contactEmail = cfg.contact.email.trim();
   const href = mailHref(contactEmail);
   const askPermission = !!caps?.permission_api && caps.permission_state !== 'granted' && !st.settings.simulate;
+  const hasContact = contactName !== '' || contactEmail !== '';
+  // iOS in-app browsers: the participant should leave; Start is the secondary way to stay
+  const stayInApp = inApp !== null && st.device?.platform === 'ios';
+  const startLabel = resumable ? t.startOver : stayInApp ? t.continueHere : t.start;
 
   const section = (title: string, body: ComponentChildren) => (
     <section class="onb-section">
@@ -178,8 +204,15 @@ export function WelcomeScreen() {
             <Toggle testId="chk-consent" checked={agreed} onChange={onAgree} label={t.agree(cfg.min_age, region)} />
           </div>
           {askPermission && agreed && <p class="small muted onb-footer-hint">{t.permissionNote}</p>}
-          <Button testId="btn-start" size="lg" block disabled={!agreed} onClick={onStart}>
-            {t.start}
+          <Button
+            testId="btn-start"
+            size="lg"
+            variant={resumable || stayInApp ? 'secondary' : 'primary'}
+            block
+            disabled={!agreed}
+            onClick={onStart}
+          >
+            {startLabel}
           </Button>
         </>
       }
@@ -195,6 +228,30 @@ export function WelcomeScreen() {
         />
       </div>
 
+      {resumable && (
+        <Card title={t.resumeTitle} tone="warn" testId="resume-card">
+          <div class="stack-sm">
+            <p>
+              {t.resumeBody(resumable.progress.n_accepted, resumable.protocol.n_planned_trials)}{' '}
+              {t.resumeStarted(formatWhen(resumable.started_at, locale))}
+            </p>
+            <Button testId="btn-resume-session" size="lg" block disabled={resuming} onClick={() => void onResume()}>
+              {resuming ? t.resuming : t.resume}
+            </Button>
+          </div>
+        </Card>
+      )}
+      {inApp !== null && (
+        <Notice kind="warn" testId="warn-in-app">
+          <div class="stack-sm">
+            <span>{inApp ? t.warnInApp(inApp) : t.warnInAppGeneric}</span>
+            <Button variant="secondary" testId="btn-copy-link" onClick={onCopyLink}>
+              {t.copyLink}
+            </Button>
+          </div>
+        </Notice>
+      )}
+
       <div class="onb-hero">
         <div class="onb-hero-gesture" data-testid="welcome-gesture">
           <GestureAnimation
@@ -204,6 +261,7 @@ export function WelcomeScreen() {
             contact="any"
             view="side"
             compact
+            badge={false}
             label={t.gestureLabel}
           />
         </div>
@@ -218,11 +276,6 @@ export function WelcomeScreen() {
       {caps && caps.secure_context && !caps.device_motion && !st.settings.simulate && (
         <Notice kind="error" testId="warn-no-motion">
           {t.warnNoMotion}
-        </Notice>
-      )}
-      {inApp !== null && (
-        <Notice kind="warn" testId="warn-in-app">
-          {inApp ? t.warnInApp(inApp) : t.warnInAppGeneric}
         </Notice>
       )}
       {st.settings.simulate && (
@@ -248,24 +301,10 @@ export function WelcomeScreen() {
               {t.continueAs(participant.nickname?.trim() || participant.participant_id)}
             </p>
             <p class="small muted">
-              <bdi class="mono">{participant.participant_id}</bdi> · {t.continueHint}
+              <bdi class="mono">{participant.participant_id}</bdi> · {resumable ? t.resumeHint : t.continueHint}
             </p>
             <Button testId="btn-new-participant" variant="secondary" block onClick={onNewPerson}>
               {t.newPerson}
-            </Button>
-          </div>
-        </Card>
-      )}
-
-      {resumable && (
-        <Card title={t.resumeTitle} tone="warn" testId="resume-card">
-          <div class="stack-sm">
-            <p>
-              {t.resumeBody(resumable.progress.n_accepted, resumable.protocol.n_planned_trials)}{' '}
-              {t.resumeStarted(formatWhen(resumable.started_at, locale))}
-            </p>
-            <Button testId="btn-resume-session" block disabled={resuming} onClick={() => void onResume()}>
-              {resuming ? t.resuming : t.resume}
             </Button>
           </div>
         </Card>
@@ -276,9 +315,9 @@ export function WelcomeScreen() {
           <li>{t.summaryDuration}</li>
           <li>{t.summarySensors}</li>
           <li>{t.summaryStored(uploads, cfg.upload_nickname)}</li>
-          <li>{t.summaryDelete}</li>
+          <li>{t.summaryDelete(hasContact)}</li>
         </ul>
-        {contactName || contactEmail ? (
+        {hasContact ? (
           <p class="small onb-contact" data-testid="consent-contact">
             {c.contactIntro} <bdi>{contactName}</bdi>
             {contactName && contactEmail ? ' · ' : ''}

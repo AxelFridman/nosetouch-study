@@ -1,9 +1,11 @@
 /**
  * Done (spec v2 §1, screen 4): "Thank you, {first name}!", how many movements were recorded, the live
- * upload state of the outbox (state.outbox, updated by the upload queue: all sent / sending, keep the
- * page open / offline), the participant code (needed to have the data deleted later), "Next person"
- * (the phone goes to someone else: nothing of this participant stays on the welcome screen) and Home.
- * For researchers: attempts and time, "Upload now" and the "Save / share my data" export.
+ * upload state of the outbox (state.outbox, updated by the upload queue: all sent — "you can close this
+ * page" / sending, keep the page open / offline), the participant code (needed to have the data
+ * deleted later), "Send the link to a friend" (navigator.share of the study link, where the browser
+ * has it: recruitment goes through WhatsApp), "Someone else on this phone" (the phone goes to someone
+ * else: nothing of this participant stays on the welcome screen) and Home. For researchers, folded in
+ * a <details> "For the researcher": attempts and time and the "Save / share my data" export.
  *
  * The export bundle is prepared as soon as the screen opens, so that the tap calls deliverExport
  * synchronously: iOS only opens the share sheet inside a user gesture, which an IndexedDB read
@@ -177,6 +179,18 @@ export function DoneScreen() {
     navigate('welcome');
   };
 
+  // the study link without its query (?lang, ?sim…): synchronous inside the tap (iOS share sheet)
+  const canShare = typeof navigator !== 'undefined' && typeof navigator.share === 'function';
+  const onShare = () => {
+    try {
+      void navigator
+        .share({ title: s.onboarding.welcome.title, url: `${location.origin}${location.pathname}` })
+        .catch(() => undefined);
+    } catch {
+      // sharing is a convenience
+    }
+  };
+
   const participant = st.participant;
   const name = firstName(participant?.nickname);
   const code = participant?.participant_id ?? session?.participant_id ?? null;
@@ -189,7 +203,12 @@ export function DoneScreen() {
       testId="screen-done"
       footer={
         <>
-          <Button size="lg" block testId="btn-next-person" onClick={onNextPerson}>
+          {canShare && (
+            <Button size="lg" block testId="btn-share-link" onClick={onShare}>
+              {t.share}
+            </Button>
+          )}
+          <Button variant="secondary" block testId="btn-next-person" onClick={onNextPerson}>
             {t.nextPerson}
           </Button>
           <Button variant="ghost" block testId="btn-home" onClick={goHome}>
@@ -232,15 +251,17 @@ export function DoneScreen() {
       )}
 
       {session && (
-        <Card title={t.detailsTitle} testId="done-summary">
-          <Stat label={t.attempts} value={session.progress.n_attempts} testId="stat-attempts" />
-          <Stat label={t.duration} value={minutes !== null ? s.common.minutes(Math.max(1, Math.round(minutes))) : '–'} />
-          <div style={{ marginTop: '12px' }}>
+        // without uploads the export IS how the data reaches the researcher: shown unfolded
+        <details class="onb-details" data-testid="done-details" open={!configured}>
+          <summary>{t.detailsTitle}</summary>
+          <div class="stack-sm onb-details-body" data-testid="done-summary">
+            <Stat label={t.attempts} value={session.progress.n_attempts} testId="stat-attempts" />
+            <Stat label={t.duration} value={minutes !== null ? s.common.minutes(Math.max(1, Math.round(minutes))) : '–'} />
             <Button variant="secondary" block disabled={exporting} testId="btn-export" onClick={onExport}>
               {exporting ? t.exporting : t.exportData}
             </Button>
           </div>
-        </Card>
+        </details>
       )}
     </Screen>
   );

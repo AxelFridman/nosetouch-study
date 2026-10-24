@@ -15,6 +15,7 @@ import {
   chooseTwoTrialProtocol,
   disableWebShare,
   exportBundle,
+  finishFromPause,
   installTimeline,
   type IntroDecision,
   numberIn,
@@ -180,7 +181,7 @@ test('finishing from the pause sheet after the basics ends the session as ended_
   await tapFresh(page, page.getByTestId('btn-session-exit'));
   await expect(page.getByTestId('pause-sheet')).toBeVisible();
   await expect(page.getByTestId('pause-reason')).toHaveAttribute('data-reason', 'paused');
-  await tapFresh(page, page.getByTestId('btn-finish-now'));
+  await finishFromPause(page);
 
   await expect(page.getByTestId('screen-done')).toBeVisible({ timeout: 30_000 });
   await expect(page.getByTestId('screen-done')).toContainText(en.onboarding.done.endedEarly);

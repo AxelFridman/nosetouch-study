@@ -4,7 +4,10 @@ import { runOnlineSegmentation } from '../src/core/segmentation';
 import {
   FALSE_START_WATCH_MS,
   GRIP_WINDOW_MS,
+  HIDDEN_AFTER_END,
   RETURN_CUT_SHORT,
+  SCREEN_ROTATED_DURING_MOVEMENT,
+  WRONG_GRIP_AT_STOP,
   createTrialController,
   resetSessionWarnings,
   returnMissed,
@@ -1010,4 +1013,137 @@ describe('TrialController with asynchronous sources', () => {
       expect(onsetErr).toBeLessThan(200);
     },
   );
+});
+
+describe('TrialController v2 review fixes: reading time, hidden timing, rotation and grip warnings', () => {
+  it('readMs: no GO before the reading time ("read" shows meanwhile); still_ms is the first still sample after it', async () => {
+    const plain = await runTrial(harness());
+    const READ = 2500;
+    const h = harness({}, { readMs: READ });
+    const rec = await runTrial(h);
+    checkRecord(rec);
+    expect(rec.outcome.status).toBe('complete');
+    // without it GO comes ≈ 0.8–1.3 s after the start (the hold + the foreperiod)
+    expect(plain.timing.go_ms as number).toBeLessThan(READ);
+    expect(rec.timing.still_ms as number).toBeGreaterThanOrEqual(READ);
+    expect(rec.timing.still_ms as number).toBeLessThan(READ + FRAME);
+    expect(rec.timing.go_ms as number).toBeGreaterThanOrEqual(READ + PARAMS.foreperiod_min_ms);
+    expect(rec.timing.false_starts).toBe(0);
+    // the status says "read" until the time is up, then the usual hold
+    const reading = h.lives.filter((l) => l.t < READ);
+    expect(reading.length).toBeGreaterThan(100);
+    expect(reading.every((l) => l.phase === 'waiting_still' && l.message === 'read')).toBe(true);
+    expect(h.lives.find((l) => l.t >= READ)?.message).toBe('hold_still');
+    expect(h.ctrl.live.phase).toBe('done');
+    // the ring of the hold is still filled during the reading (the segmenter was still all along)
+    expect(reading.some((l) => l.still_progress === 1)).toBe(true);
+  });
+
+  it('readMs never hides a more urgent message: the arm must come back out first (awaitReturn)', async () => {
+    const back = { startMs: 600, durMs: 900, distM: -0.45, angleDeg: -60 };
+    const h = harness({ preMoves: [back] }, { awaitReturn: true, readMs: 1000 });
+    const rec = await runTrial(h);
+    checkRecord(rec);
+    expect(rec.outcome.status).toBe('complete');
+    expect(h.lives.filter((l) => l.t < back.startMs).every((l) => l.message === 'return_arm')).toBe(true);
+  });
+
+  it('a page hidden during the return of the arm: complete, hidden_during false, warning hidden_after_end (T4 keeps it)', async () => {
+    let hiddenNow = false;
+    const h = harness({}, { isHidden: () => hiddenNow }, (hh) => {
+      // the home button / auto-lock while the arm goes back out: SessionScreen aborts on visibilitychange
+      if (hh.ctrl.live.phase === 'returning' && !hiddenNow) {
+        hiddenNow = true;
+        hh.ctrl.abort('interrupted');
+      }
+    });
+    const rec = await runTrial(h);
+    checkRecord(rec);
+    expect(rec.outcome).toMatchObject({ status: 'complete', accepted: true });
+    expect(rec.quality.hidden_during).toBe(false);
+    expect(rec.quality.warnings).toEqual([RETURN_CUT_SHORT, HIDDEN_AFTER_END]);
+    expect(rec.timing.stop_ms).toBeGreaterThanOrEqual((rec.timing.end_detected_ms as number) + PARAMS.post_roll_ms);
+  });
+
+  it('a page hidden before the end of the movement window (up to end_detected + post_roll) is hidden_during', async () => {
+    let hiddenNow = false;
+    const h = harness({}, { isHidden: () => hiddenNow }, (hh) => {
+      if (hh.ctrl.live.phase === 'post_roll' && !hiddenNow) {
+        hiddenNow = true;
+        hh.ctrl.abort('interrupted');
+      }
+    });
+    const rec = await runTrial(h);
+    checkRecord(rec);
+    expect(rec.outcome.status).toBe('interrupted');
+    expect(rec.quality.hidden_during).toBe(true);
+    expect(rec.quality.warnings).not.toContain(HIDDEN_AFTER_END);
+  });
+
+  it('a screen orientation change between GO and the end is flagged (screen_rotated_during_movement)', async () => {
+    const run = async (when: 'moving' | 'returning') => {
+      let listener: SensorListener | null = null;
+      let sent = false;
+      const h = harness({}, {}, (hh, t) => {
+        if (!sent && listener && hh.ctrl.live.phase === when) {
+          sent = true;
+          listener.onScreen?.({ t: t + 0.5, type: 'landscape-primary', angle: 90 });
+        }
+      });
+      const inner = h.source;
+      const source: SensorSource = {
+        kind: inner.kind,
+        clock: inner.clock,
+        start: (l) => {
+          listener = l;
+          return inner.start(l);
+        },
+        stop: () => inner.stop(),
+        notifyCue: (c, t) => inner.notifyCue?.(c, t),
+      };
+      const ctrl = createTrialController({
+        source,
+        cues: h.cues,
+        ids: SEG_IDS,
+        condition: segCondition(),
+        params: PARAMS,
+        calibration: null,
+        rng: segRng(7),
+        appVersion: '0.2.0',
+        simulated: true,
+        onLive: (s) => {
+          h.lives.push(s);
+          (h as { ctrl: TrialController }).ctrl = ctrl;
+        },
+      });
+      h.ctrl = ctrl;
+      await ctrl.start();
+      return ctrl.result;
+    };
+    const during = await run('moving');
+    checkRecord(during);
+    expect(during.streams.screen_events).toHaveLength(1);
+    expect(during.quality.warnings).toContain(SCREEN_ROTATED_DURING_MOVEMENT);
+    // after the end (the return of the arm): the movement itself was not affected
+    const after = await run('returning');
+    expect(after.streams.screen_events).toHaveLength(1);
+    expect(after.quality.warnings).not.toContain(SCREEN_ROTATED_DURING_MOVEMENT);
+  });
+
+  it('stopped before GO while the grip gate held GO back: warning wrong_grip_at_stop; the live state says how it was held', async () => {
+    const stuck = harness({ up: [1, 0, 0] }, { gripGate: true, calibration: verifiedCal(1) }, (hh, _t, n) => {
+      if (n === 150) hh.ctrl.abort('interrupted'); // the idle limit of the session layer
+    });
+    const rec = await runTrial(stuck);
+    checkRecord(rec);
+    expect(rec.timing.go_ms).toBeNull();
+    expect(rec.quality.warnings).toContain(WRONG_GRIP_AT_STOP);
+    const blocked = stuck.lives.filter((l) => l.message === 'wrong_grip');
+    expect(blocked.length).toBeGreaterThan(10);
+    expect(new Set(blocked.map((l) => l.grip_seen))).toEqual(new Set(['top_left']));
+    // a normal trial: no gate reading without the gate, no warning
+    const plain = await runTrial(harness());
+    expect(plain.quality.warnings).not.toContain(WRONG_GRIP_AT_STOP);
+    expect(plain.timing.go_ms).not.toBeNull();
+  });
 });

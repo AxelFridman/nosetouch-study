@@ -242,7 +242,13 @@ export class FakeGainNode {
 }
 
 /** A fresh AudioContext class per test (static state would leak between tests otherwise). */
-export function fakeAudioContextClass(opts: { throwOnConstruct?: boolean; initialState?: string; throwOnCreate?: boolean } = {}) {
+/**
+ * stuck: resume() never changes the state (iOS contexts stuck on 'interrupted', WebKit bug 273511);
+ * suspend() then sets 'suspended' (unless stuck) and close() 'closed'.
+ */
+export function fakeAudioContextClass(
+  opts: { throwOnConstruct?: boolean; initialState?: string; throwOnCreate?: boolean; stuck?: boolean } = {},
+) {
   const instances: FakeAudioContext[] = [];
   class FakeAudioContext {
     state: string = opts.initialState ?? 'suspended';
@@ -251,6 +257,10 @@ export function fakeAudioContextClass(opts: { throwOnConstruct?: boolean; initia
     readonly oscillators: FakeOscillator[] = [];
     readonly gains: FakeGainNode[] = [];
     resumeCalls = 0;
+    suspendCalls = 0;
+    closeCalls = 0;
+    /** the order of suspend / resume calls */
+    readonly calls: string[] = [];
     silentStarts = 0;
     constructor() {
       if (opts.throwOnConstruct) throw new Error('AudioContext unavailable');
@@ -283,7 +293,19 @@ export function fakeAudioContextClass(opts: { throwOnConstruct?: boolean; initia
     }
     resume(): Promise<void> {
       this.resumeCalls++;
-      if (this.state !== 'closed') this.state = 'running';
+      this.calls.push('resume');
+      if (this.state !== 'closed' && !opts.stuck) this.state = 'running';
+      return Promise.resolve();
+    }
+    suspend(): Promise<void> {
+      this.suspendCalls++;
+      this.calls.push('suspend');
+      if (this.state !== 'closed' && !opts.stuck) this.state = 'suspended';
+      return Promise.resolve();
+    }
+    close(): Promise<void> {
+      this.closeCalls++;
+      this.state = 'closed';
       return Promise.resolve();
     }
   }

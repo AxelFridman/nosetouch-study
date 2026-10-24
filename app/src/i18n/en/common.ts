@@ -84,27 +84,25 @@ export const common = {
     slow: { label: 'Slow', how: 'Move slowly and smoothly, taking about 3 seconds.' },
   } as Record<Speed, { label: string; how: string }>,
 
+  // label: 1-3 words, shown big on the live panel and said aloud; how: one short line, read at arm's length
   startPositions: {
     natural: { label: 'Arm straight in front', how: 'Stretch your arm straight out in front of you, at shoulder height.' },
-    shoulder: { label: 'In line with your shoulder', how: 'Arm fully straight, hand directly in front of the same shoulder.' },
-    center: { label: 'In front of your face', how: 'Arm fully straight, phone centered in front of your nose.' },
+    shoulder: { label: 'Side start', how: 'Arm straight, phone in front of that shoulder' },
+    center: { label: 'Middle start', how: 'Arm straight, phone right in front of your nose' },
   } as Record<StartPosition, { label: string; how: string }>,
 
   variants: {
     standard: { label: 'Normal movement', how: 'Bring the phone straight to your nose.' },
-    curved: { label: 'Curved path', how: 'Take a curved path: swing out to the side first, then to your nose.' },
-    pause: { label: 'Pause halfway', how: 'Stop halfway for about one second, then continue to your nose.' },
-    twist: { label: 'Twist while moving', how: 'Rotate (twist) the phone in your hand while bringing it to your nose.' },
-    elbow_high: { label: 'Elbow up', how: 'Raise your elbow high out to the side as you bring the phone in.' },
-    bent_start: { label: 'Bent elbow start', how: 'Start with your elbow slightly bent instead of fully straight.' },
-    lean_in: { label: 'Lean in', how: 'Lean your head forward to meet the phone halfway.' },
+    curved: { label: 'Curve', how: 'Swing out to the side, then in' },
+    pause: { label: 'Stop halfway', how: 'Stop 1 second halfway, then go on' },
+    twist: { label: 'Twist', how: 'Twist the phone on the way in' },
+    elbow_high: { label: 'Elbow up', how: 'Lift your elbow out to the side' },
+    bent_start: { label: 'Elbow bent', how: 'Start with your elbow a little bent' },
+    lean_in: { label: 'Lean in', how: 'Move your head to meet the phone' },
     chin: { label: 'Touch your chin', how: 'This time touch your CHIN instead of your nose.' },
     forehead: { label: 'Touch your forehead', how: 'This time touch your FOREHEAD instead of your nose.' },
-    jerky: { label: 'Jerky movement', how: 'Move to your nose in a jerky, stop-and-go way.' },
-    tilted_touch: {
-      label: 'Tilted touch',
-      how: 'Touch your nose with the top edge of the phone: tilt it as you arrive.',
-    },
+    jerky: { label: 'Stop-and-go', how: 'Stop and go a few times on the way' },
+    tilted_touch: { label: 'Top edge', how: 'Tilt it so the top edge touches your nose' },
   } as Record<Variant, { label: string; how: string }>,
 
   postures: {
@@ -115,5 +113,5 @@ export const common = {
   // The double beep (end cue) means "arm out again": in the hands-free flow the next trial starts by itself.
   movementSummary:
     'Stretch your arm out and hold still. At the beep, bring the phone to gently touch your nose (any part of the phone may touch it) and hold it there until the double beep, then stretch your arm out again.',
-  safety: 'Hold the phone firmly (doing this over a bed or sofa is a good idea) and always touch your nose gently.',
+  safety: 'Hold the phone firmly and always touch your nose gently.',
 };

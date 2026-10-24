@@ -9,6 +9,7 @@ import { getServices, initServices } from './services';
 import { loadSettings, persistSettings, type ScreenId } from './state';
 import { installHistory, navigate, setState, useAppState } from './store';
 import { setupRequestedIn } from './startFlow';
+import { abandonStaleSessions } from './sessionFlow';
 import { WelcomeScreen } from './screens/WelcomeScreen';
 import { ProfileScreen } from './screens/ProfileScreen';
 import { SensorCheckScreen } from './screens/SensorCheckScreen';
@@ -106,6 +107,21 @@ async function boot(): Promise<void> {
     : null;
   setState({ device, capabilities: detectCapabilities(), participant, outbox });
   void services.store.requestPersistence();
+  // a trial stored without its outbox item (an app version before the atomic commit, killed between
+  // its writes) is queued now and sent
+  services.store.enqueueMissing().then(
+    (added) => {
+      if (added > 0) {
+        services.uploader.flush().then(
+          (r) => setState({ outbox: r.counts }),
+          () => undefined,
+        );
+      }
+    },
+    (e: unknown) => console.warn('the outbox could not be checked', e),
+  );
+  // visits left unfinished for longer than they can be resumed get a final status (abandoned)
+  abandonStaleSessions().catch((e: unknown) => console.warn('old unfinished sessions could not be closed', e));
   navigate('welcome');
 }
 

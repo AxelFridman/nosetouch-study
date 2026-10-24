@@ -98,7 +98,7 @@ describe('sanitizeStudyConfig', () => {
   it('the shipped public/config.json is the v2 study setup: street preset, v2 consent, names uploaded', () => {
     const raw = JSON.parse(readFileSync(new URL('../public/config.json', import.meta.url), 'utf8'));
     expect(raw).toMatchObject({ default_preset: 'street', consent_version: CONSENT_VERSION_DEFAULT, upload_nickname: true });
-    expect(CONSENT_VERSION_DEFAULT).toBe('2026-10-v2');
+    expect(CONSENT_VERSION_DEFAULT).toBe('2026-10-v3'); // v3: ~30 movements + bonus, no bed/sofa advice, Hebrew fixes
     expect(DEFAULT_STUDY_CONFIG.default_preset).toBe('street');
     expect(DEFAULT_STUDY_CONFIG.consent_version).toBe(CONSENT_VERSION_DEFAULT);
   });

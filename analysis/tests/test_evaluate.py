@@ -132,6 +132,23 @@ def test_yaw_sign_rule_learns_the_sign():
     assert set(models.DEFAULT_MODELS) <= set(models.MODEL_REGISTRY)
 
 
+def test_t4_excludes_a_hidden_movement_but_keeps_a_hide_during_the_return_of_the_arm():
+    rows = pd.DataFrame([
+        # the page went away during the movement: interrupted, hidden
+        {'status': 'interrupted', 'hidden_during': True, 'warnings': 'ui_abort:page_hidden'},
+        # app 0.2.0 before the fix: hidden during the return, still flagged hidden_during
+        {'status': 'complete', 'hidden_during': True, 'warnings': 'return_cut_short'},
+        # after the fix: hidden_during false, hidden_after_end noted
+        {'status': 'complete', 'hidden_during': False, 'warnings': 'return_cut_short;hidden_after_end'},
+        # complete but hidden without any sign of a return abort: excluded
+        {'status': 'complete', 'hidden_during': True, 'warnings': ''},
+        {'status': 'complete', 'hidden_during': False, 'warnings': None},
+    ])
+    t4 = E.PRIMARY_RULES['T4 page not hidden'](rows)
+    assert list(t4) == [False, True, True, False, True]
+    assert list(E.hidden_during_movement(rows.drop(columns=['warnings']))) == [True, True, False, True, False]
+
+
 def test_cross_validation_on_synthetic_features(tiny_tree):
     ds = load_dataset(tiny_tree)
     keep, excl = E.analysis_set(ds.trials)

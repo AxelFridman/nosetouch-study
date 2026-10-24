@@ -9,13 +9,20 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const fakes = vi.hoisted(() => ({
   createSession: vi.fn(async (_opts: unknown) => ({ session_id: 'new' })),
+  // the participant's recent unfinished session (none by default) and resuming it
+  recentSessionOf: vi.fn(async (_pid: string, _maxAgeMs?: number): Promise<{ session_id: string } | null> => null),
+  resumeSession: vi.fn(async (id: string): Promise<{ session_id: string } | null> => ({ session_id: id })),
   services: {
     cues: { unlock: vi.fn(async () => undefined), play: vi.fn(), say: vi.fn(), setOptions: vi.fn() },
     wakeLock: { acquire: vi.fn(async () => true), release: vi.fn(async () => undefined), active: false },
   },
   ready: { value: true },
 }));
-vi.mock('../src/app/sessionFlow', () => ({ createSession: fakes.createSession }));
+vi.mock('../src/app/sessionFlow', () => ({
+  createSession: fakes.createSession,
+  recentSessionOf: fakes.recentSessionOf,
+  resumeSession: fakes.resumeSession,
+}));
 vi.mock('../src/app/services', () => ({
   getServices: () => {
     if (!fakes.ready.value) throw new Error('services not initialised');
@@ -84,6 +91,8 @@ function check(permission: PermissionState, measure: () => Promise<MeasuredRates
 beforeEach(() => {
   fakes.ready.value = true;
   createSession.mockClear();
+  fakes.recentSessionOf.mockClear();
+  fakes.resumeSession.mockClear();
   fakeServices.cues.unlock.mockClear();
   fakeServices.wakeLock.acquire.mockClear();
   const base = initialState();
@@ -163,6 +172,36 @@ describe('continueToSession', () => {
     createSession.mockRejectedValueOnce(new Error('disk full'));
     await expect(continueToSession(0)).rejects.toThrow(/disk full/);
     expect(getState().screen).toBe('profile');
+  });
+
+  it("resumes the participant's recent unfinished session (a reload, an app switch) instead of starting again", async () => {
+    fakes.recentSessionOf.mockResolvedValueOnce({ session_id: 'old' });
+    await expect(continueToSession(0)).resolves.toBe('session');
+    expect(fakes.recentSessionOf).toHaveBeenCalledWith(makeProfile().participant_id);
+    expect(fakes.resumeSession).toHaveBeenCalledWith('old');
+    expect(createSession).not.toHaveBeenCalled();
+    expect(getState().screen).toBe('session');
+  });
+
+  it('"Start over" (state.startOver) starts a new session although one could be resumed; the choice is used once', async () => {
+    fakes.recentSessionOf.mockResolvedValue({ session_id: 'old' });
+    try {
+      setState({ startOver: true });
+      await expect(continueToSession(0)).resolves.toBe('session');
+      expect(fakes.resumeSession).not.toHaveBeenCalled();
+      expect(createSession).toHaveBeenCalledOnce();
+      expect(getState().startOver).toBe(false);
+    } finally {
+      fakes.recentSessionOf.mockReset();
+      fakes.recentSessionOf.mockResolvedValue(null);
+    }
+  });
+
+  it('a recent session that can no longer be resumed (finished meanwhile) → a new one', async () => {
+    fakes.recentSessionOf.mockResolvedValueOnce({ session_id: 'old' });
+    fakes.resumeSession.mockResolvedValueOnce(null);
+    await expect(continueToSession(0)).resolves.toBe('session');
+    expect(createSession).toHaveBeenCalledOnce();
   });
 });
 

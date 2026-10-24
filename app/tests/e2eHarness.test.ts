@@ -10,6 +10,7 @@
 import { readdirSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
+import { guardedUrl, localHosts, offlineConfig } from '../e2e/network';
 import { silenceAudio } from '../e2e/silence';
 
 const APP = fileURLToPath(new URL('../', import.meta.url));
@@ -85,6 +86,38 @@ describe('e2e harness: silence', () => {
       expect(src, path).not.toMatch(/headless:\s*false/);
       expect(src, path).not.toMatch(/--headed|headed:\s*true|slowMo/);
     }
+  });
+});
+
+describe('e2e harness: nothing reaches the live backend', () => {
+  it('fixtures.ts guards every context: config.json without uploads, other hosts aborted and failing the test', () => {
+    const src = read(`${E2E}fixtures.ts`);
+    expect(src).toMatch(/externalRequests:\s*\['block',\s*\{\s*option:\s*true\s*\}\]/);
+    expect(src).toMatch(/context\.route\(/);
+    expect(src).toMatch(/route\.abort\(/);
+    expect(src).toMatch(/offlineConfig\(/);
+    expect(src).toMatch(/expect\(blocked/);
+  });
+
+  it('only the live smoke config of a deployed build allows other hosts', () => {
+    expect(read(`${APP}playwright.config.ts`)).not.toMatch(/externalRequests/);
+    expect(read(`${APP}playwright.live.config.ts`)).toMatch(/externalRequests:\s*'allow'/);
+    for (const file of specs) expect(read(E2E + file), file).not.toMatch(/externalRequests/);
+  });
+
+  it('the committed config.json is served with uploads off; the dev server is the only host', () => {
+    const shipped = JSON.parse(read(`${APP}public/config.json`)) as { upload: { mode: string; endpoint: string } };
+    const served = offlineConfig(shipped) as typeof shipped;
+    expect(served.upload.mode).toBe('none');
+    expect(served.upload.endpoint).toBe(shipped.upload.endpoint); // only the mode changes
+    expect(offlineConfig(null)).toBeNull();
+    const local = localHosts('http://127.0.0.1:5173/');
+    expect(guardedUrl(new URL('https://nosetouch-study-14d4b1cd9830.herokuapp.com/api/ingest'), local)).toBe(true);
+    expect(guardedUrl(new URL('https://example.com/'), local)).toBe(true);
+    expect(guardedUrl(new URL('http://127.0.0.1:5173/src/main.tsx'), local)).toBe(false);
+    expect(guardedUrl(new URL('http://127.0.0.1:5173/api/ingest'), local)).toBe(false); // a spec's own endpoint
+    expect(guardedUrl(new URL('http://127.0.0.1:5173/config.json'), local)).toBe(true); // rewritten
+    expect(localHosts('https://axelfridman.github.io/nosetouch-study/').has('axelfridman.github.io')).toBe(true);
   });
 });
 

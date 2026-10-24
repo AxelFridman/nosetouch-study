@@ -24,20 +24,26 @@ import { phoneFigureSpec } from '../src/ui/PhoneFigure';
 import {
   failureKind,
   gestureFor,
+  gripFigureFits,
   introWords,
+  movementText,
   panelTone,
+  panelWords,
   pauseReasonOf,
   permissionDeniedText,
   perTrialSpeechAllowed,
   reachedGo,
+  sensorNote,
   statusKey,
   stopAllowed,
+  trialStatusKey,
   trialWords,
   uiAbortWarning,
   variesLine,
   type FailureKind,
   type StatusKey,
 } from '../src/app/screens/SessionScreen';
+import { armLate, hasMovement, speechMs } from '../src/app/sessionRunner';
 import type { PlannedBlock, PlannedTrial, TrialCondition } from '../src/core/types';
 import { deniedContext, deniedText, iosBrowserName, issueText } from '../src/app/screens/SensorCheckScreen';
 import { SandboxDetector, type SegmenterLike } from '../src/app/screens/SandboxScreen';
@@ -391,25 +397,26 @@ describe('block intros, illustrations and speech', () => {
       condition({ variant: 'tilted_touch' }),
       condition({ variant: 'jerky' }),
     ]);
-    expect(variesLine(odd, en)).toBe(en.session.intro.variesList('Tilted touch · In front of your face · Jerky movement'));
+    // in the block's own order, short labels (the same words as the live panel and the speech)
+    expect(variesLine(odd, en)).toBe(en.session.intro.variesList('Top edge · Middle start · Stop-and-go'));
     expect(variesLine(block([condition(), condition({ speed: 'fast' })]), en)).toBe(en.session.intro.speedsVary);
     expect(variesLine(block([condition(), condition()]), en)).toBeNull();
     expect(variesLine(odd, he)).toContain(he.common.variants.tilted_touch.label);
   });
 
-  it('what is said: hand + grip + the first trial at the intro tap; speed (+ variant) per chained trial', () => {
+  it('what is said: the hand + the first trial at the intro tap (the grip is on screen); speed (+ variant) per chained trial', () => {
     const sideways = condition({ hand: 'right', orientation: 'top_left_toward', speed: 'fast' });
-    expect(introWords(block([sideways]), planned(sideways), en)).toEqual([
-      'Right hand',
-      'Sideways, top of the phone to your left',
-      'Fast',
-    ]);
+    // a long sentence ran over the first trial's ready and GO beeps: the grip is no longer said
+    expect(introWords(block([sideways]), planned(sideways), en)).toEqual(['Right hand', 'Fast']);
     expect(trialWords(condition({ speed: 'slow' }), en)).toEqual(['Slow']);
     expect(trialWords(condition({ variant: 'tilted_touch', start_position: 'shoulder' }), en)).toEqual([
       'Normal',
-      'In line with your shoulder',
-      'Tilted touch',
+      'Side start',
+      'Top edge',
     ]);
+    // the estimate GO waits for: ~75 ms per character (+ 250 ms)
+    expect(speechMs('Right hand. Fast')).toBe(250 + 75 * 16);
+    expect(speechMs(null)).toBe(0);
     // the choice trial: the participant picks hand and grip, nothing is announced
     const free = condition({ orientation: 'free', hand_source: 'reported' });
     expect(introWords(block([free], { kind: 'choice' }), planned(free), en)).toEqual([]);
@@ -430,12 +437,14 @@ describe('block intros, illustrations and speech', () => {
     expect(s.howTo.title).toBe('How to do it');
     expect(s.howTo.anyPart).toBe('Any part of the phone may touch your nose.');
     expect(s.howTo.steps).toEqual([
-      'Hold the phone in front of you, arm straight, screen facing you.',
-      'At the beep, bring it to touch your nose.',
-      'Hold still until the double beep, then stretch your arm out again — the next one starts by itself.',
+      'Arm straight, screen facing you. Hold still.',
+      'Beep → touch your nose with the phone (any part of it).',
+      'Wait there for the double beep, then arm out again. The next one starts by itself.',
     ]);
     expect(s.howTo.safety).toBe('Touch gently and hold the phone firmly.');
-    expect(s.howTo.try).toBe('Try it once — your way');
+    expect(s.howTo.try).toBe('Try it once');
+    expect(s.howTo.anyHand).toBe('Any hand. We’ll ask which one after.');
+    expect(s.howTo.sound).toBe('Sound on: the beeps tell you when to move.');
     expect([s.hand.question, s.hand.left, s.hand.right, s.hand.unsure]).toEqual([
       'Which hand did you use?',
       'Left hand',
@@ -465,14 +474,115 @@ describe('block intros, illustrations and speech', () => {
     expect(s.live.speedWords).toEqual({ natural: 'NORMAL', fast: 'FAST', slow: 'SLOW' });
     expect(s.live.pause).toBe('Hold to pause');
     expect(s.live.minutesLeft(3)).toBe('about 3 min left');
-    expect([s.pause.continue, s.pause.redo, s.pause.wrongHand, s.pause.finish]).toEqual([
+    expect([s.pause.continue, s.pause.redo, s.pause.wrongHand, s.pause.finish, s.pause.later]).toEqual([
       'Continue',
       'Redo last movement',
       'Last one was the wrong hand',
       'Finish now',
+      'Exit for now',
     ]);
+    expect(s.pause.kept).toBe('Finishing now is fine — everything so far is kept.');
+    expect(s.intro.turnTo.top_left_toward).toBe('Turn the phone: top to your LEFT');
+    expect(s.intro.sameHand('right')).toBe('Same hand: RIGHT');
     expect(s.checkpoint.title).toBe('Main part done — thank you!');
     expect(s.checkpoint.bonus(1)).toBe('Bonus: about 1 more minute');
+  });
+});
+
+describe("the live panel at arm's length (reading the instruction, the grip, the pause control)", () => {
+  it("a special movement takes the speed word's place (all variety cells are natural speed) with a short how-line", () => {
+    expect(panelWords(condition(), en)).toEqual({ speed: 'NORMAL', special: false, label: null, how: null });
+    expect(panelWords(condition({ speed: 'fast' }), en)).toEqual({ speed: 'FAST', special: false, label: null, how: null });
+    expect(panelWords(condition({ variant: 'tilted_touch' }), en)).toEqual({
+      speed: 'Top edge',
+      special: true,
+      label: null,
+      how: 'Tilt it so the top edge touches your nose',
+    });
+    expect(panelWords(condition({ start_position: 'center' }), en).speed).toBe('Middle start');
+    // a special movement at another speed (researchers' custom plans): the speed stays, the label moves down
+    expect(panelWords(condition({ speed: 'slow', variant: 'twist' }), en)).toMatchObject({ speed: 'SLOW', special: false, label: 'Twist' });
+    // every label and how-line is short enough to read in a glance at arm's length
+    for (const strings of [en, he]) {
+      for (const v of Object.values(strings.common.variants).concat(Object.values(strings.common.startPositions).slice(1))) {
+        expect(v.label.split(/\s+/).length, v.label).toBeLessThanOrEqual(3);
+      }
+    }
+    for (const k of ['curved', 'pause', 'twist', 'elbow_high', 'bent_start', 'lean_in', 'jerky', 'tilted_touch'] as const) {
+      expect(en.common.variants[k].how.split(/\s+/).length, k).toBeLessThanOrEqual(9);
+    }
+  });
+
+  it('the reading time shows "Read this first…"; bent_start never says "Arm straight"', () => {
+    expect(statusKey('waiting_still', 'read')).toBe('read');
+    expect(en.session.live.status.read).toBe('Read this first…');
+    expect(trialStatusKey('waiting_still', 'hold_still', condition({ variant: 'bent_start' }))).toBe('waitingBent');
+    expect(en.session.live.status.waitingBent).toBe('Elbow bent — hold still');
+    expect(trialStatusKey('waiting_still', 'hold_still', condition())).toBe('waiting');
+    expect(trialStatusKey('armed', 'go', condition({ variant: 'bent_start' }))).toBe('go');
+    for (const strings of [enSession, heSession]) expect(strings.live.status.waitingBent).toBeTruthy();
+  });
+
+  it('the grip picture only shows when the page turned with the phone (rotation lock makes it look turned)', () => {
+    expect(gripFigureFits('top_left', 'landscape-primary')).toBe(true);
+    expect(gripFigureFits('top_right', 'landscape-secondary')).toBe(true);
+    expect(gripFigureFits('upright', 'portrait-primary')).toBe(true);
+    // rotation lock: a sideways phone on a portrait page, and the other way round
+    expect(gripFigureFits('top_left', 'portrait-primary')).toBe(false);
+    expect(gripFigureFits('upright', 'landscape-primary')).toBe(false);
+    // nothing known: words only
+    for (const seen of [null, undefined, 'unknown', 'flat'] as const) expect(gripFigureFits(seen, 'portrait-primary')).toBe(false);
+    expect(gripFigureFits('upright', null)).toBe(false);
+    // the grip in words, for every collected grip, in both languages
+    for (const strings of [en, he]) {
+      for (const o of ['upright_toward', 'top_left_toward', 'top_right_toward'] as const) {
+        expect(strings.session.live.gripWords[o].length).toBeGreaterThan(5);
+      }
+    }
+    expect(en.session.pause.gripReason(en.session.live.gripWords.top_left_toward)).toBe(
+      'The phone was held another way. Top of the phone to your LEFT, then tap Continue.',
+    );
+  });
+
+  it('the pause sheet names the movement Redo / wrong hand refer to', () => {
+    expect(movementText(condition({ hand: 'left', speed: 'fast' }), en)).toBe('Left hand · FAST');
+    expect(movementText(condition({ hand: 'right', variant: 'twist' }), en)).toBe('Right hand · Twist');
+    expect(en.session.pause.lastMovement('Left hand · FAST')).toBe('Last movement: Left hand · FAST');
+  });
+
+  it('hasMovement / armLate: what Redo refers to, and when the next screen must arm late', () => {
+    const rec = (o: { status?: TrialRecord['outcome']['status']; go?: number | null; onset?: number | null; ret?: number | null }) =>
+      ({
+        outcome: { status: o.status ?? 'complete' },
+        timing: {
+          go_ms: o.go === undefined ? 900 : o.go,
+          onset_ms: o.onset === undefined ? 1000 : o.onset,
+          return_onset_ms: o.ret === undefined ? 2100 : o.ret,
+        },
+      }) as TrialRecord;
+    expect(hasMovement(rec({}))).toBe(true);
+    expect(hasMovement(rec({ status: 'too_long' }))).toBe(true);
+    expect(hasMovement(rec({ status: 'no_movement', onset: null }))).toBe(false);
+    expect(hasMovement(rec({ go: null, onset: null }))).toBe(false);
+    expect(armLate(rec({}))).toBe(false);
+    expect(armLate(rec({ ret: null }))).toBe(true); // the arm was never seen going back out
+    expect(armLate(rec({ status: 'too_long', ret: null }))).toBe(true);
+    expect(armLate(rec({ status: 'no_movement', onset: null, ret: null }))).toBe(false);
+    expect(armLate(null)).toBe(false);
+  });
+
+  it('the How-to card mentions slow sensors or a missing gyroscope (never in simulation)', () => {
+    const t = en.session.howTo;
+    const caps = (hz: number | null, gyro = true) =>
+      ({
+        measured: { motion_hz: hz, rotation_available: gyro },
+      }) as unknown as Parameters<typeof sensorNote>[0];
+    expect(sensorNote(caps(60), false, t)).toBeNull();
+    expect(sensorNote(caps(30), false, t)).toBe(t.slowSensors(30));
+    expect(sensorNote(caps(60, false), false, t)).toBe(t.noGyro);
+    expect(sensorNote(caps(30), true, t)).toBeNull();
+    expect(sensorNote(null, false, t)).toBeNull();
+    expect(sensorNote(caps(10), false, t)).toBeNull(); // too slow: the repair screen, not this note
   });
 });
 

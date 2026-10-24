@@ -270,6 +270,21 @@ export function createMemoryStore(): MemoryStore {
     [...trials.values()]
       .filter((t) => t.session_id === sid)
       .sort((a, b) => a.trial_index - b.trial_index || a.attempt - b.attempt);
+  const putPending = (kind: 'session' | 'trial', recordId: string, sessionId: string): void => {
+    const id = `${kind}:${recordId}`;
+    outbox.set(id, {
+      id,
+      kind,
+      record_id: recordId,
+      session_id: sessionId,
+      status: 'pending',
+      attempts: 0,
+      last_error: null,
+      last_attempt_at: null,
+      sent_at: null,
+      confirmed: false,
+    });
+  };
   return {
     sessions,
     trials,
@@ -324,19 +339,23 @@ export function createMemoryStore(): MemoryStore {
       return sessionTrials(sid).map(clone);
     },
     async enqueue(kind, recordId, sessionId) {
-      const id = `${kind}:${recordId}`;
-      outbox.set(id, {
-        id,
-        kind,
-        record_id: recordId,
-        session_id: sessionId,
-        status: 'pending',
-        attempts: 0,
-        last_error: null,
-        last_attempt_at: null,
-        sent_at: null,
-        confirmed: false,
-      });
+      putPending(kind, recordId, sessionId);
+    },
+    // one atomic write, like the IndexedDB transaction: nothing can fail half-way in memory
+    async commit({ session, trial }) {
+      if (trial) trials.set(trial.trial_id, clone(trial));
+      if (session) sessions.set(session.session_id, clone(session));
+      if (session) putPending('session', session.session_id, session.session_id);
+      if (trial) putPending('trial', trial.trial_id, trial.session_id);
+    },
+    async enqueueMissing() {
+      let added = 0;
+      for (const t of trials.values()) {
+        if (outbox.has(`trial:${t.trial_id}`)) continue;
+        putPending('trial', t.trial_id, t.session_id);
+        added++;
+      }
+      return added;
     },
     async listOutbox(status) {
       return [...outbox.values()].filter((o) => !status || o.status === status).map(clone);

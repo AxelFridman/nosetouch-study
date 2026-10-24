@@ -21,7 +21,7 @@
  *   so desktop Safari (no webkitCompassHeading, no motion sensors) reports 'unknown'.
  *   In-app browsers: Instagram, FBAN/FBAV (Facebook), TikTok/musical_ly/BytedanceWebview, Line,
  *   Snapchat, GSA (Google app), and the Android WebView 'wv' token → in_app_browser. Also
- *   LinkedIn/WeChat/Pinterest, and 'ios_webview' for an iOS UA without a "Safari/" token outside
+ *   LinkedIn/WeChat/Pinterest/WhatsApp, and 'ios_webview' for an iOS UA without a "Safari/" token outside
  *   Home Screen mode (a bare WKWebView inside some app).
  * - createBrowserSensorSource(): listens to 'devicemotion' and 'deviceorientation' (and, when
  *   available and opts.quaternion !== false, a RelativeOrientationSensor at opts.frequencyHz (default
@@ -848,6 +848,8 @@ const IN_APP_BROWSERS: [RegExp, string, string, RegExp | null][] = [
   [/LinkedInApp/, 'linkedin', 'LinkedIn', /LinkedInApp\/([\d.]+)/],
   [/MicroMessenger/, 'wechat', 'WeChat', /MicroMessenger\/([\d.]+)/],
   [/\bPinterest\b/, 'pinterest', 'Pinterest', /Pinterest\/([\d.]+)/],
+  // WhatsApp opens business links (and, in an iOS beta of Oct 2026, any link) in its own browser
+  [/\bWhatsApp\b/, 'whatsapp', 'WhatsApp', /WhatsApp\/([\d.]+)/],
 ];
 
 /** Order matters: wrapper browsers carry the tokens of the engine browser after their own. */

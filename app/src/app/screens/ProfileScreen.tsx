@@ -55,7 +55,7 @@ export type ProfileField = 'code' | 'age' | 'sex' | 'handedness' | 'phoneHand' |
 export type ProfileErrorCode = 'code_invalid' | 'age_required' | 'age_range' | 'age_too_young' | 'required' | 'height_range';
 export type ProfileErrors = Partial<Record<ProfileField, ProfileErrorCode>>;
 /** Display order of the fields that can have errors (first one gets scrolled into view). */
-export const PROFILE_FIELDS: ProfileField[] = ['code', 'age', 'sex', 'handedness', 'phoneHand', 'height'];
+export const PROFILE_FIELDS: ProfileField[] = ['age', 'sex', 'handedness', 'phoneHand', 'height', 'code'];
 
 export function emptyDraft(): ProfileDraft {
   return { name: '', age: null, sex: null, handedness: null, phoneHand: null, height: null };
@@ -306,38 +306,6 @@ export function ProfileScreen() {
         </Button>
       }
     >
-      <div ref={fieldRefs.code}>
-        <details
-          class="onb-details onb-code-details"
-          data-testid="returning-details"
-          open={codeOpen || codeText.trim() !== '' || !!errors.code}
-          onToggle={(e) => setCodeOpen((e.currentTarget as HTMLDetailsElement).open)}
-        >
-          <summary>{baseProfile ? t.notYou : t.returning}</summary>
-          <div class="stack-sm onb-details-body">
-            <p class="small muted" data-testid="participant-code-card">
-              {t.codeYours}{' '}
-              <bdi class="mono onb-code-inline" data-testid="participant-code">
-                {activeId}
-              </bdi>
-            </p>
-            <Field label={t.codeInput} htmlFor="in-code" hint={errors.code ? undefined : codeHint} error={errText(errors.code)}>
-              <div dir="ltr">
-                <TextInput
-                  id="in-code"
-                  testId="in-code"
-                  value={codeText}
-                  placeholder="P-XXXXXX"
-                  maxLength={16}
-                  autoCapitalize="characters"
-                  onInput={setCodeText}
-                />
-              </div>
-            </Field>
-          </div>
-        </details>
-      </div>
-
       <Field label={t.name} htmlFor="in-name" hint={nameHint}>
         <TextInput
           id="in-name"
@@ -346,6 +314,9 @@ export function ProfileScreen() {
           placeholder={t.namePlaceholder}
           maxLength={NAME_MAX}
           autoCapitalize="words"
+          // the phone offers its owner's name in one tap
+          autoComplete="name"
+          enterKeyHint="next"
           onInput={(name) => set({ name })}
         />
       </Field>
@@ -417,6 +388,38 @@ export function ProfileScreen() {
             onChange={(height) => set({ height })}
           />
         </Field>
+      </div>
+
+      <div ref={fieldRefs.code}>
+        <details
+          class="onb-details onb-code-details"
+          data-testid="returning-details"
+          open={codeOpen || codeText.trim() !== '' || !!errors.code}
+          onToggle={(e) => setCodeOpen((e.currentTarget as HTMLDetailsElement).open)}
+        >
+          <summary>{baseProfile ? t.notYou : t.returning}</summary>
+          <div class="stack-sm onb-details-body">
+            <p class="small muted" data-testid="participant-code-card">
+              {t.codeYours}{' '}
+              <bdi class="mono onb-code-inline" data-testid="participant-code">
+                {activeId}
+              </bdi>
+            </p>
+            <Field label={t.codeInput} htmlFor="in-code" hint={errors.code ? undefined : codeHint} error={errText(errors.code)}>
+              <div dir="ltr">
+                <TextInput
+                  id="in-code"
+                  testId="in-code"
+                  value={codeText}
+                  placeholder="P-XXXXXX"
+                  maxLength={16}
+                  autoCapitalize="characters"
+                  onInput={setCodeText}
+                />
+              </div>
+            </Field>
+          </div>
+        </details>
       </div>
 
       {submitted && Object.keys(errors).length > 0 && <Notice kind="error">{t.errors.fixBelow}</Notice>}

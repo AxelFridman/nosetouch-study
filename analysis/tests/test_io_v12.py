@@ -238,7 +238,8 @@ def test_qa_reports_the_protocol_2_fields(street_ds):
     assert s['rotationRate mapping sources'] == 'closure w3c/deg_per_s 4'
     assert s['sessions with a rotationRate closure check'] == 4 and s['closure check: decisive sessions'] == 4
     assert s['sessions with a trusted calibration gyro bias'] == 0 and s['sessions ended early'] == 1
-    assert s['choice trials (hand reported)'] == 4 and s['choice trials accepted'] == 2
+    # 4 choice trials, 2 answered "not sure": only the 2 answered ones carry a reported hand
+    assert s['choice trials'] == 4 and s['choice trials (hand reported)'] == 2 and s['choice trials accepted'] == 2
     assert s['schema 1.2 trial fields present'] is True
     assert s['online_v1 port == stored (all trials)'] == 1.0
     f = rep.tables['schema_1_2_fields']

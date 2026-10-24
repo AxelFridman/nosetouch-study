@@ -401,12 +401,34 @@ def _b(df: pd.DataFrame, col: str, default: bool) -> pd.Series:
     return df[col].astype('boolean').fillna(default).astype(bool)
 
 
+def _has_warning(d: pd.DataFrame, code: str) -> pd.Series:
+    """Rows whose ';'-joined ``warnings`` column contains ``code``."""
+    if 'warnings' not in d.columns:
+        return pd.Series(False, index=d.index)
+    return d['warnings'].fillna('').astype(str).str.split(';').apply(lambda ws: code in ws).astype(bool)
+
+
+def hidden_during_movement(d: pd.DataFrame) -> pd.Series:
+    """The page was hidden while the MOVEMENT was recorded (rule T4).
+
+    Since app 0.2.0's review fix, ``quality.hidden_during`` covers only the movement window (up to
+    end_detected_ms + post_roll_ms); a page hidden during the return of the arm leaves a complete trial
+    with warning 'hidden_after_end'. Records of app 0.2.0 written before that fix set hidden_during for
+    such a hide too; they are recognised as complete trials with warning 'return_cut_short' (written only
+    when an abort comes in the 'returning' phase, and the session screen aborts a trial the moment the
+    page is hidden) and are not excluded either.
+    """
+    hidden = _b(d, 'hidden_during', False)
+    complete = d['status'] == 'complete' if 'status' in d.columns else pd.Series(False, index=d.index)
+    return hidden & ~(complete & _has_warning(d, 'return_cut_short'))
+
+
 #: Trial-level exclusion rules of the primary analysis (docs/02 section 12, docs/05 section 1).
 PRIMARY_RULES: dict[str, Callable[[pd.DataFrame], pd.Series]] = {
     'T1 status complete': lambda d: d['status'] == 'complete',
     'T2 accepted': lambda d: _b(d, 'accepted', False),
     'T3 no participant flag': lambda d: d['participant_flag'].isna() if 'participant_flag' in d.columns else pd.Series(True, index=d.index),
-    'T4 page not hidden': lambda d: ~_b(d, 'hidden_during', False),
+    'T4 page not hidden': lambda d: ~hidden_during_movement(d),
     'T5 motion_hz >= 50': lambda d: pd.to_numeric(d['motion_hz'], errors='coerce').fillna(0) >= 50,
     'T6 no gaps > 50 ms': lambda d: pd.to_numeric(d['gaps_over_50ms'], errors='coerce').fillna(0) == 0,
     'T7 rotation rate available': lambda d: _b(d, 'rotation_available', False),

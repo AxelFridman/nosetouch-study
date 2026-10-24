@@ -15,21 +15,38 @@ import type {
   PlannedTrial,
   SensorSource,
   SessionRecord,
+  TrialCondition,
   TrialRecord,
 } from '../src/core/types';
 import { createTapGuard, initialState, TAP_GUARD_MS, type ScreenId } from '../src/app/state';
 import { backTargetOf, getState, installHistory, navigate, setBackHandler, setState } from '../src/app/store';
 import {
+  ATTEMPT_FLOOR,
+  ATTEMPT_READ_RETRY_MS,
+  ATTEMPT_READ_TRIES,
   createSessionRunner,
   IDLE_MS,
   persistAttempt,
   RETRY_FLASH_MS,
   saveForReview,
+  SPEECH_DUCK_TAIL_MS,
+  speechMs,
+  WAKE_LOCK_NOT_HELD,
   type RecorderStart,
   type SessionRunner,
   type UiAbort,
 } from '../src/app/sessionRunner';
+import { WRONG_GRIP_AT_STOP } from '../src/core/trialController';
+import { RESUME_MAX_AGE_MS } from '../src/core/storage';
 import {
+  abandonOtherSessions,
+  abandonStaleSessions,
+  introWording,
+  READ_SPECIAL_MS,
+  READ_SPEED_MS,
+  readTimeMs,
+  recentSessionOf,
+  RESUME_ON_CONTINUE_MS,
   applyDecision,
   asFailedAttempt,
   asUnreviewed,
@@ -901,8 +918,8 @@ describe('a complete attempt is saved before its review opens (tap review mode)'
   it('when the first save failed, the decision still stores the attempt (counted once)', async () => {
     const s0 = await createSession(CUSTOM);
     const rec = makeTrialRecord(s0, plannedTrials(s0)[0], 1);
-    const realSave = services.store.saveTrial;
-    services.store.saveTrial = vi.fn(async () => {
+    const realCommit = services.store.commit;
+    services.store.commit = vi.fn(async () => {
       throw new Error('QuotaExceededError');
     });
     const quiet = vi.spyOn(console, 'error').mockImplementation(() => undefined);
@@ -910,7 +927,7 @@ describe('a complete attempt is saved before its review opens (tap review mode)'
       expect(await saveForReview(rec, new Set())).toBeNull();
       expect(getState().toast?.kind).toBe('error');
     } finally {
-      services.store.saveTrial = realSave;
+      services.store.commit = realCommit;
       quiet.mockRestore();
     }
     const s2 = await persistAttempt(applyDecision(rec, { kind: 'accept' }));
@@ -973,11 +990,17 @@ function fakeRecorder() {
       return running;
     },
     /** the current run ends with a record (complete with the arm's return observed, unless overridden) */
-    end(runner: SessionRunner, overrides: Parameters<typeof makeTrialRecord>[3] = RETURNED, uiAbort: UiAbort | null = null): TrialRecord {
+    end(
+      runner: SessionRunner,
+      overrides: Parameters<typeof makeTrialRecord>[3] = RETURNED,
+      uiAbort: UiAbort | null = null,
+      mutate?: (r: TrialRecord) => void,
+    ): TrialRecord {
       const run = runs[runs.length - 1];
       if (!running) throw new Error('no trial is running');
       running = false;
       const rec = makeTrialRecord(getState().session!, run.planned, run.attempt, overrides);
+      mutate?.(rec);
       runner.finished(rec, uiAbort);
       return rec;
     },
@@ -1084,7 +1107,8 @@ describe('session runner: the hands-free chain', () => {
     await throughChoice(runner, rec);
     services.cues.say.mockClear();
     runner.blockStart();
-    expect(services.cues.say).toHaveBeenCalledWith(`${en.common.hands.left}. ${en.session.speech.grips.upright_toward}. Normal`, 'en');
+    // the hand and the first trial's speed (the grip is on the screen; a long sentence ran over the beeps)
+    expect(services.cues.say).toHaveBeenCalledWith(`${en.common.hands.left}. Normal`, 'en');
     expect(rec.last).toMatchObject({ planned: { trial_index: 1 }, attempt: 1, o: { readyCue: true, awaitReturn: false, gripGate: true } });
 
     const t1 = rec.end(runner, RETURNED);
@@ -1234,8 +1258,8 @@ describe('session runner: the hands-free chain', () => {
     const { runner, rec } = await streetRunner();
     await throughChoice(runner, rec);
     runner.blockStart();
-    const realSave = services.store.saveTrial;
-    services.store.saveTrial = vi.fn(async () => {
+    const realCommit = services.store.commit;
+    services.store.commit = vi.fn(async () => {
       throw new Error('QuotaExceededError');
     });
     const quiet = vi.spyOn(console, 'error').mockImplementation(() => undefined);
@@ -1249,7 +1273,7 @@ describe('session runner: the hands-free chain', () => {
       await runner.continueSession(); // still failing: stays paused
       expect(runner.state().pause).toBe('save_failed');
     } finally {
-      services.store.saveTrial = realSave;
+      services.store.commit = realCommit;
       quiet.mockRestore();
     }
     await runner.continueSession();
@@ -1672,5 +1696,490 @@ describe('a whole two-trial session', () => {
     const bundle = await services.store.exportBundle({ sessionIds: [s.session_id], redact: (p) => p });
     expectValid('ExportBundle', bundle);
     expect(bundle.trials.map((t) => t.condition.hand).sort()).toEqual(['left', 'right']);
+  });
+});
+
+// ───────────────────────────── review fixes (Oct 2026) ─────────────────────────────
+// fake street plan, seed 1: A = left, B = right
+//   block 0 choice (trial 0) · block 1 A upright (1 natural, 2 fast) · block 2 B upright (3 natural, 4 slow)
+//   block 3 B top_left (5) · block 4 A upright odd (6 tilted_touch) · bonus blocks 5 (7), 6 (8)
+
+const UPRIGHT_LEFT = { hand: 'left', orientation: 'upright_toward' } as const;
+const SIDEWAYS_RIGHT = { hand: 'right', orientation: 'top_left_toward' } as const;
+
+describe('review fix: the intro names the hand against what the participant last did or saw', () => {
+  it('introWording: another or an unknown hand → "Phone in your X hand"; same hand, new grip → "Turn the phone…"', () => {
+    expect(introWording(UPRIGHT_LEFT, null)).toEqual({ line: 'phoneIn', switchHands: false, sameHand: false, handChanged: true, gripChanged: true });
+    expect(introWording(UPRIGHT_LEFT, { hand: 'right', orientation: 'upright_toward', explicit: false })).toMatchObject({
+      line: 'phoneIn',
+      switchHands: true,
+    });
+    expect(introWording(SIDEWAYS_RIGHT, { hand: 'right', orientation: 'upright_toward', explicit: false })).toMatchObject({
+      line: 'turnTo',
+      switchHands: false,
+      sameHand: true,
+    });
+    expect(introWording(UPRIGHT_LEFT, { hand: 'left', orientation: 'upright_toward', explicit: false }).line).toBe('keepIn');
+    // after a redo / a resume: plainly named, "Switch hands!" only when the current hand is known to differ
+    expect(introWording(UPRIGHT_LEFT, { hand: 'left', orientation: 'upright_toward', explicit: true })).toMatchObject({
+      line: 'phoneIn',
+      switchHands: false,
+    });
+  });
+
+  it('Redo at a hand switch (block 3 RIGHT done, block 4 LEFT shown): block 3 comes back as "Phone in your RIGHT hand" + "Switch hands!"', async () => {
+    const { runner, rec } = await streetRunner();
+    await drive(runner, rec, (r) => r.state().view.kind === 'intro' && r.state().cursor === 6);
+    // block 4's intro, worded against block 3's runs (right hand, sideways)
+    expect(runner.state().introRef).toEqual({ hand: 'right', orientation: 'top_left_toward', explicit: false });
+    runner.openPause('paused');
+    await runner.revoke(null);
+    await settle();
+    const st = runner.state();
+    expect(st).toMatchObject({ view: { kind: 'intro', redo: true }, cursor: 5, pause: null });
+    // block 4's intro told the participant to take the phone in the LEFT hand
+    expect(st.introRef).toEqual({ hand: 'left', orientation: 'upright_toward', explicit: true });
+    expect(introWording(SIDEWAYS_RIGHT, st.introRef)).toMatchObject({ line: 'phoneIn', switchHands: true });
+  });
+
+  it('Redo inside a block: the same hand is named plainly, without "Switch hands!"', async () => {
+    const { runner, rec } = await streetRunner();
+    await throughChoice(runner, rec);
+    runner.blockStart(); // block 1, left
+    rec.end(runner); // trial 1 accepted
+    rec.end(runner, NO_GO, 'user'); // pause before trial 2's GO
+    await runner.revoke(null);
+    const st = runner.state();
+    expect(st).toMatchObject({ view: { kind: 'intro', redo: true }, cursor: 1 });
+    expect(st.introRef).toEqual({ hand: 'left', orientation: 'upright_toward', explicit: true });
+    expect(introWording(UPRIGHT_LEFT, st.introRef)).toMatchObject({ line: 'phoneIn', switchHands: false });
+  });
+
+  it('a resumed session (a fresh page) names the hand plainly and never says "Switch hands!"', async () => {
+    const { runner, rec } = await streetRunner();
+    await drive(runner, rec, (r) => r.state().view.kind === 'intro' && r.state().cursor === 3);
+    await runner.later();
+    runner.dispose();
+    const again = createSessionRunner(fakeRecorder().port);
+    again.enter();
+    await settle();
+    expect(again.state()).toMatchObject({ view: { kind: 'intro' }, cursor: 3 });
+    expect(again.state().introRef).toEqual({ hand: null, orientation: null, explicit: true });
+    expect(introWording({ hand: 'right', orientation: 'upright_toward' }, again.state().introRef)).toMatchObject({
+      line: 'phoneIn',
+      switchHands: false,
+    });
+  });
+
+  it('after the free trial: the reported hand is the reference ("Switch hands!" when it was the other one)', async () => {
+    for (const [answer, sw] of [
+      ['right', true],
+      ['left', false],
+      ['unsure', false],
+    ] as const) {
+      const { runner, rec } = await streetRunner();
+      runner.blockStart();
+      rec.end(runner);
+      await runner.answerHand(answer);
+      await settle();
+      const ref = runner.state().introRef;
+      expect(ref?.explicit).toBe(true);
+      expect(introWording(UPRIGHT_LEFT, ref), answer).toMatchObject({ line: 'phoneIn', switchHands: sw });
+    }
+  });
+
+  it('same hand, new grip (block 2 → 3): "Turn the phone…" with "Same hand: RIGHT"', async () => {
+    const { runner, rec } = await streetRunner();
+    await drive(runner, rec, (r) => r.state().view.kind === 'intro' && r.state().cursor === 5);
+    expect(runner.state().introRef).toEqual({ hand: 'right', orientation: 'upright_toward', explicit: false });
+    expect(introWording(SIDEWAYS_RIGHT, runner.state().introRef)).toMatchObject({ line: 'turnTo', sameHand: true, switchHands: false });
+    // the pause sheet over the intro and back: the same intro keeps its wording
+    runner.openPause('paused');
+    await runner.continueSession();
+    expect(runner.state().introRef).toEqual({ hand: 'right', orientation: 'upright_toward', explicit: false });
+  });
+});
+
+describe('review fix: Redo / wrong hand refer to the last MOVEMENT', () => {
+  it('after an auto-rejected attempt, "wrong hand" flags THAT attempt; the accepted trial before it stays accepted', async () => {
+    const { runner, rec } = await streetRunner();
+    await throughChoice(runner, rec);
+    runner.blockStart();
+    const t1 = rec.end(runner); // trial 1 accepted (done right)
+    const t2a = rec.end(runner, { orientation_match: false, ...RETURNED }); // trial 2: another grip/hand
+    rec.end(runner, NO_GO, 'user'); // the re-run is paused before GO
+    await settle();
+    expect(runner.state().redoTarget).toMatchObject({ trial_id: t2a.trial_id, trial_index: 2, accepted: false });
+    await runner.revoke('wrong_hand');
+    await settle();
+    expect(stored(t2a.trial_id).outcome).toMatchObject({ accepted: false, participant_flag: 'wrong_hand', note: AUTO_REJECT_ORIENTATION_NOTE });
+    expect(stored(t1.trial_id).outcome).toMatchObject({ accepted: true, participant_flag: null, note: AUTO_ACCEPT_NOTE });
+    expect(sessionNow().progress).toEqual({ next_trial_index: 2, n_attempts: 3, n_accepted: 2 });
+    // the hand is named again before the trial runs once more
+    expect(runner.state()).toMatchObject({ view: { kind: 'intro', redo: true }, cursor: 2, canRedo: false });
+  });
+
+  it('the free trial before its answer (or answered "not sure") cannot be redone', async () => {
+    const { runner, rec } = await streetRunner();
+    runner.blockStart();
+    rec.end(runner);
+    await settle();
+    expect(runner.state().view.kind).toBe('hand');
+    runner.back();
+    expect(runner.state()).toMatchObject({ pause: 'paused', canRedo: false });
+  });
+
+  it('a failed free trial is stored as never asked about: note hand_not_reported (its hand is the placeholder)', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    const { runner, rec } = await streetRunner();
+    runner.blockStart();
+    const failed = rec.end(runner, { status: 'no_movement' });
+    await settle();
+    expect(stored(failed.trial_id).outcome).toMatchObject({ status: 'no_movement', accepted: false, note: HAND_NOT_REPORTED_NOTE });
+  });
+});
+
+describe('review fix: reading time before GO (RecorderStart.readMs)', () => {
+  it('readTimeMs: a new special movement 2.5 s, a new speed 1.2 s, nothing new 0', () => {
+    const c = (o: Partial<TrialCondition> = {}): TrialCondition => ({
+      hand: 'left',
+      orientation: 'upright_toward',
+      speed: 'natural',
+      start_position: 'natural',
+      variant: 'standard',
+      posture: 'standing',
+      rep: 0,
+      ...o,
+    });
+    expect(readTimeMs(null, c())).toBe(0);
+    expect(readTimeMs(null, c({ speed: 'fast' }))).toBe(READ_SPEED_MS);
+    expect(readTimeMs(c(), c({ speed: 'slow' }))).toBe(READ_SPEED_MS);
+    expect(readTimeMs(c({ speed: 'slow' }), c({ speed: 'slow' }))).toBe(0);
+    expect(readTimeMs(null, c({ variant: 'twist' }))).toBe(READ_SPECIAL_MS);
+    expect(readTimeMs(c({ variant: 'twist' }), c({ variant: 'jerky' }))).toBe(READ_SPECIAL_MS);
+    expect(readTimeMs(c({ variant: 'twist' }), c({ start_position: 'center' }))).toBe(READ_SPECIAL_MS);
+    expect(readTimeMs(c({ variant: 'twist' }), c({ variant: 'twist' }))).toBe(0); // the same trial again
+    expect(readTimeMs(c({ variant: 'twist' }), c())).toBe(0); // back to the standard movement
+  });
+
+  it('chained trials wait to be read; a re-run of the same trial does not; a tier-3 block waits from its first trial', async () => {
+    const { runner, rec } = await streetRunner();
+    await throughChoice(runner, rec);
+    runner.blockStart();
+    expect(rec.last).toMatchObject({ planned: { trial_index: 1 }, o: { readMs: 0 } }); // natural, first
+    rec.end(runner);
+    expect(rec.last).toMatchObject({ planned: { trial_index: 2 }, o: { readMs: READ_SPEED_MS } }); // → FAST
+    rec.end(runner, { orientation_match: false, ...RETURNED });
+    expect(rec.last).toMatchObject({ planned: { trial_index: 2 }, o: { readMs: 0 } }); // the same trial again
+    await drive(runner, rec, (r) => r.state().view.kind === 'intro' && r.state().cursor === 6);
+    runner.blockStart();
+    expect(rec.last).toMatchObject({ planned: { trial_index: 6, condition: { variant: 'tilted_touch' } }, o: { readMs: READ_SPECIAL_MS } });
+  });
+
+  it('the words said at the intro tap: GO waits for them, + SPEECH_DUCK_TAIL_MS on an iPhone', async () => {
+    services.cues.say.mockReturnValue(true); // a phone that speaks
+    const android = await streetRunner();
+    await throughChoice(android.runner, android.rec);
+    android.runner.blockStart();
+    const said = `${en.common.hands.left}. Normal`;
+    expect(services.cues.say).toHaveBeenLastCalledWith(said, 'en');
+    expect(android.rec.last.o.readMs).toBe(speechMs(said));
+
+    setState({ device: { ...makeDevice(), platform: 'ios', engine: 'webkit' } });
+    const iphone = await streetRunner();
+    await throughChoice(iphone.runner, iphone.rec);
+    iphone.runner.blockStart();
+    expect(iphone.rec.last.o.readMs).toBe(speechMs(said) + SPEECH_DUCK_TAIL_MS);
+  });
+});
+
+describe('review fix: screens after a missed return arm late; idle in a wrong grip; the wake lock', () => {
+  it('slowArm after a trial whose arm was not seen going back out; a tap clears it', async () => {
+    const { runner, rec } = await streetRunner();
+    runner.blockStart();
+    rec.end(runner, { timing: { return_onset_ms: null, return_end_ms: null } }); // the free trial
+    expect(runner.state()).toMatchObject({ view: { kind: 'hand' }, slowArm: true });
+    await runner.answerHand('left');
+    expect(runner.state()).toMatchObject({ view: { kind: 'intro' }, slowArm: false });
+    runner.blockStart();
+    rec.end(runner); // trial 1, back out
+    rec.end(runner, { timing: { return_onset_ms: null, return_end_ms: null } }); // trial 2, the last of block 1
+    expect(runner.state()).toMatchObject({ view: { kind: 'intro' }, cursor: 3, slowArm: true });
+  });
+
+  it('no GO for a while because the grip gate held it back → the pause sheet says how to hold the phone', async () => {
+    const { runner, rec } = await streetRunner();
+    await throughChoice(runner, rec);
+    runner.blockStart();
+    rec.end(runner, { ...NO_GO, status: 'interrupted' }, 'idle', (r) => r.quality.warnings.push(WRONG_GRIP_AT_STOP));
+    expect(runner.state().pause).toBe('wrong_grip');
+    await runner.continueSession();
+    rec.end(runner, { ...NO_GO, status: 'interrupted' }, 'idle'); // idle for another reason
+    expect(runner.state().pause).toBe('idle');
+  });
+
+  it('a real phone without the screen wake lock: records that reached GO carry wake_lock_not_held', async () => {
+    const { runner, rec } = await streetRunner();
+    await throughChoice(runner, rec);
+    runner.blockStart();
+    services.wakeLock.active = false;
+    const real = rec.end(runner, { ...RETURNED, simulated: false });
+    const sim = rec.end(runner, { ...RETURNED, simulated: true });
+    services.wakeLock.active = true;
+    await settle();
+    expect(stored(real.trial_id).quality.warnings).toContain(WAKE_LOCK_NOT_HELD);
+    expect(stored(sim.trial_id).quality.warnings).not.toContain(WAKE_LOCK_NOT_HELD);
+  });
+});
+
+describe('review fix: attempt numbers never repeat', () => {
+  it('a failed read of the stored attempts keeps Start disabled and is retried', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    const { runner, rec } = await streetRunner();
+    await throughChoice(runner, rec);
+    runner.blockStart();
+    rec.end(runner, { status: 'aborted', timing: { go_ms: 900, onset_ms: null } }, 'user'); // kept: trial 1, attempt 1
+    await settle();
+    await runner.later();
+    runner.dispose();
+    const realList = services.store.listTrials.bind(services.store);
+    let failures = 1;
+    services.store.listTrials = vi.fn(async (sid: string) => {
+      if (failures-- > 0) throw new Error('UnknownError: Connection to Indexed Database server lost');
+      return realList(sid);
+    });
+    const quiet = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const rec2 = fakeRecorder();
+    const again = createSessionRunner(rec2.port);
+    try {
+      again.enter();
+      await settle();
+      expect(again.state()).toMatchObject({ view: { kind: 'intro' }, cursor: 1, attemptsReady: false });
+      again.blockStart(); // not yet: an attempt number must not repeat
+      expect(rec2.runs).toHaveLength(0);
+      await vi.advanceTimersByTimeAsync(ATTEMPT_READ_RETRY_MS);
+      await settle();
+    } finally {
+      quiet.mockRestore();
+    }
+    expect(again.state().attemptsReady).toBe(true);
+    again.blockStart();
+    expect(rec2.last).toMatchObject({ planned: { trial_index: 1 }, attempt: 2 });
+  });
+
+  it(`when the reads keep failing, the numbers start above ATTEMPT_FLOOR (${ATTEMPT_FLOOR})`, async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    await createSession(STREET);
+    services.store.listTrials = vi.fn(async () => {
+      throw new Error('UnknownError: Connection to Indexed Database server lost');
+    });
+    const quiet = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const rec = fakeRecorder();
+    const runner = createSessionRunner(rec.port);
+    // settle() reads the attempts itself (and would fail too): plain microtask rounds instead
+    const flush = async () => {
+      for (let i = 0; i < 50; i++) await Promise.resolve();
+    };
+    try {
+      runner.enter();
+      // reads at 0, 1, 2, 3 s: the first ATTEMPT_READ_TRIES − 1 failures keep Start disabled
+      for (let i = 1; i < ATTEMPT_READ_TRIES; i++) {
+        await flush();
+        expect(runner.state().attemptsReady, `after read ${i}`).toBe(false);
+        await vi.advanceTimersByTimeAsync(ATTEMPT_READ_RETRY_MS);
+      }
+      await flush();
+    } finally {
+      quiet.mockRestore();
+    }
+    expect(runner.state().attemptsReady).toBe(true);
+    expect(runner.nextAttempt(0)).toBe(ATTEMPT_FLOOR + 1);
+  });
+
+  it('an attempt saved while the screen goes away (unmount) still counts for the attempt numbers', async () => {
+    const { runner, rec } = await streetRunner();
+    await throughChoice(runner, rec);
+    runner.blockStart(); // trial 1, attempt 1
+    // the session cannot be finished (its record cannot be written): the runner stays
+    const realCommit = services.store.commit.bind(services.store);
+    services.store.commit = vi.fn(async (c) => {
+      if (!c.trial) throw new Error('QuotaExceededError');
+      return realCommit(c);
+    });
+    const quiet = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    try {
+      const finishing = runner.finishNow();
+      expect(rec.aborts).toEqual(['unmount']);
+      rec.end(runner, { status: 'aborted', timing: { go_ms: 900, onset_ms: null } }, 'unmount');
+      await finishing;
+      await settle();
+    } finally {
+      services.store.commit = realCommit;
+      quiet.mockRestore();
+    }
+    expect(runner.nextAttempt(1)).toBe(2);
+  });
+});
+
+describe('review fix: atomic saves — progress survives failed and half-reported commits', () => {
+  it('the last required trial: its save fails once, Continue retries, Finish → completed with every trial counted', async () => {
+    const { session, runner, rec } = await streetRunner();
+    const lastRequired = FAKE_STREET.required - 1;
+    await drive(runner, rec, (r) => r.state().view.kind === 'recording' && rec.running && rec.last.planned.trial_index === lastRequired);
+    const realCommit = services.store.commit.bind(services.store);
+    let failOnce = true;
+    services.store.commit = vi.fn(async (c) => {
+      if (failOnce) {
+        failOnce = false;
+        throw new Error('UnknownError: Connection to Indexed Database server lost');
+      }
+      return realCommit(c);
+    });
+    const quiet = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    try {
+      rec.end(runner);
+      await settle();
+      expect(runner.state()).toMatchObject({ view: { kind: 'checkpoint' }, pause: 'save_failed' });
+      await runner.continueSession();
+      await settle();
+      expect(runner.state().pause).toBeNull();
+      await runner.finishNow();
+    } finally {
+      services.store.commit = realCommit;
+      quiet.mockRestore();
+    }
+    const done = services.store.sessions.get(session.session_id)!;
+    expect(done.status).toBe('completed');
+    expect(done.progress).toEqual({ next_trial_index: FAKE_STREET.required, n_attempts: FAKE_STREET.required, n_accepted: FAKE_STREET.required });
+  });
+
+  it('a commit that was stored although its promise rejected: the retry builds on the stored session and counts once', async () => {
+    const { runner, rec } = await streetRunner();
+    await throughChoice(runner, rec);
+    runner.blockStart();
+    const realCommit = services.store.commit.bind(services.store);
+    let lieOnce = true;
+    services.store.commit = vi.fn(async (c) => {
+      await realCommit(c);
+      if (lieOnce) {
+        lieOnce = false;
+        throw new Error('UnknownError: Connection to Indexed Database server lost'); // after the transaction completed
+      }
+    });
+    const quiet = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    try {
+      rec.end(runner); // trial 1 accepted; its save "fails" while trial 2 runs
+      await settle();
+      rec.end(runner, NO_GO, 'save_failed');
+      expect(runner.state().pause).toBe('save_failed');
+      await runner.continueSession(); // the retry
+      await settle();
+    } finally {
+      services.store.commit = realCommit;
+      quiet.mockRestore();
+    }
+    const expected = { next_trial_index: 2, n_attempts: 2, n_accepted: 2 };
+    expect(sessionNow().progress).toEqual(expected);
+    expect(services.store.sessions.get(sessionNow().session_id)?.progress).toEqual(expected);
+  });
+
+  it('revokeAccepted: a failed save leaves the trial accepted and the counters intact; the second tap re-queues it', async () => {
+    const { runner, rec } = await streetRunner();
+    await throughChoice(runner, rec);
+    runner.blockStart();
+    const t1 = rec.end(runner); // trial 1 accepted
+    rec.end(runner, NO_GO, 'user'); // pause before trial 2's GO
+    await settle();
+    const realCommit = services.store.commit.bind(services.store);
+    let failOnce = true;
+    services.store.commit = vi.fn(async (c) => {
+      if (failOnce) {
+        failOnce = false;
+        throw new Error('UnknownError: Connection to Indexed Database server lost');
+      }
+      return realCommit(c);
+    });
+    const quiet = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    try {
+      await runner.revoke(null); // fails: nothing written
+      expect(stored(t1.trial_id).outcome.accepted).toBe(true);
+      expect(runner.state()).toMatchObject({ pause: 'paused', canRedo: true });
+      await runner.revoke(null); // the participant taps again
+      await settle();
+    } finally {
+      services.store.commit = realCommit;
+      quiet.mockRestore();
+    }
+    expect(stored(t1.trial_id).outcome.note).toBe(REDO_REQUESTED_NOTE);
+    expect({ cursor: runner.state().cursor, ...sessionNow().progress }).toEqual({
+      cursor: 1,
+      next_trial_index: 1,
+      n_attempts: 2,
+      n_accepted: 1,
+    });
+  });
+
+  it('finishSession counts from the stored attempts (a session saved by an older app version)', async () => {
+    const s0 = await createSession(CUSTOM);
+    const [p0, p1] = plannedTrials(s0);
+    // both trials stored accepted, the session record never updated (the app died in between)
+    await services.store.saveTrial(makeTrialRecord(s0, p0, 1));
+    await services.store.saveTrial(makeTrialRecord(s0, p1, 1));
+    const done = await finishSession(s0, endStatusOf);
+    expect(done.status).toBe('completed');
+    expect(done.progress).toEqual({ next_trial_index: 2, n_attempts: 2, n_accepted: 2 });
+  });
+});
+
+describe('review fix: unfinished sessions and the outbox', () => {
+  it("a new session ends the participant's other unfinished sessions as abandoned (ended_at = their last activity)", async () => {
+    const old = await createSession(STREET);
+    const other = await createSession(STREET);
+    await settle();
+    setState({ participant: makeProfile({ participant_id: 'P-XYZ234' }) });
+    const someoneElse = await createSession(STREET);
+    await settle();
+    const closed = services.store.sessions.get(old.session_id)!;
+    expect(closed).toMatchObject({ status: 'abandoned', ended_at: old.updated_at });
+    expectValid('SessionRecord', closed);
+    expect(services.store.outbox.get(`session:${old.session_id}`)?.status).toBe('pending');
+    expect(services.store.sessions.get(other.session_id)?.status).toBe('in_progress'); // the newest one
+    expect(services.store.sessions.get(someoneElse.session_id)?.status).toBe('in_progress');
+    // another participant's sessions are never touched
+    expect(await abandonOtherSessions(someoneElse)).toBe(0);
+    expect(services.store.sessions.get(other.session_id)?.status).toBe('in_progress');
+  });
+
+  it(`recentSessionOf: the unfinished session updated within ${RESUME_ON_CONTINUE_MS / 3_600_000} h, not an older one`, async () => {
+    const s = await createSession(STREET);
+    expect((await recentSessionOf(s.participant_id))?.session_id).toBe(s.session_id);
+    const stale = { ...services.store.sessions.get(s.session_id)!, updated_at: new Date(Date.now() - RESUME_ON_CONTINUE_MS - 60_000).toISOString() };
+    services.store.sessions.set(s.session_id, stale);
+    expect(await recentSessionOf(s.participant_id)).toBeNull();
+  });
+
+  it('at boot, unfinished sessions untouched for longer than they can be resumed (24 h) end as abandoned', async () => {
+    const recent = await createSession(STREET);
+    setState({ participant: makeProfile({ participant_id: 'P-XYZ234' }) });
+    const left = await createSession(STREET);
+    await settle();
+    const lastSeen = new Date(Date.now() - RESUME_MAX_AGE_MS - 60_000).toISOString();
+    services.store.sessions.set(left.session_id, { ...services.store.sessions.get(left.session_id)!, updated_at: lastSeen });
+    expect(await abandonStaleSessions()).toBe(1);
+    expect(services.store.sessions.get(left.session_id)).toMatchObject({ status: 'abandoned', ended_at: lastSeen });
+    expect(services.store.outbox.get(`session:${left.session_id}`)?.status).toBe('pending');
+    expect(services.store.sessions.get(recent.session_id)?.status).toBe('in_progress');
+    expect(await abandonStaleSessions()).toBe(0);
+  });
+
+  it('resumeSession queues a stored trial that never got its outbox item (an older app killed between writes)', async () => {
+    const s0 = await createSession(CUSTOM);
+    const t = makeTrialRecord(s0, plannedTrials(s0)[0], 1);
+    await services.store.saveTrial(t); // no outbox item
+    expect(services.store.outbox.has(`trial:${t.trial_id}`)).toBe(false);
+    setState({ session: null });
+    const resumed = await resumeSession(s0.session_id);
+    expect(resumed?.progress).toEqual({ next_trial_index: 1, n_attempts: 1, n_accepted: 1 });
+    expect(services.store.outbox.get(`trial:${t.trial_id}`)?.status).toBe('pending');
   });
 });

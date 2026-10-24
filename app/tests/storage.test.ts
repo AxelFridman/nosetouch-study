@@ -169,6 +169,60 @@ describe('outbox', () => {
   });
 });
 
+describe('commit (the one atomic write of the session layer) and enqueueMissing', () => {
+  it('writes the trial, the session and both outbox items in ONE transaction', async () => {
+    const store = await freshStore();
+    const tx = vi.spyOn(IDBDatabase.prototype, 'transaction');
+    const trial = makeTrial({ trial_id: 'trial-0001' });
+    await store.commit({ trial, session: makeSession() });
+    expect(tx).toHaveBeenCalledTimes(1);
+    expect(tx.mock.calls[0][0]).toEqual(['sessions', 'trials', 'outbox']);
+    tx.mockRestore();
+    expect((await store.getTrial('trial-0001'))?.trial_id).toBe('trial-0001');
+    expect((await store.getSession('sess-0001'))?.session_id).toBe('sess-0001');
+    expect((await store.listOutbox()).map((i) => [i.id, i.status])).toEqual([
+      ['session:sess-0001', 'pending'],
+      ['trial:trial-0001', 'pending'],
+    ]);
+    // a session-only commit (a revoke without a trial, a posture change, the finish) re-enqueues it
+    const [sessionItem] = await store.listOutbox();
+    await store.updateOutbox({ ...sessionItem, status: 'sent' });
+    await store.commit({ session: makeSession({ status: 'completed' }) });
+    expect((await store.listOutbox()).map((i) => [i.id, i.status])).toEqual([
+      ['session:sess-0001', 'pending'],
+      ['trial:trial-0001', 'pending'],
+    ]);
+  });
+
+  it('a commit that fails stores NOTHING: no trial without its session update or its outbox item', async () => {
+    const store = await freshStore();
+    const trial = makeTrial({ trial_id: 'trial-0001' });
+    // a session that cannot be stored (structured clone fails): the whole transaction is rolled back
+    const bad = { ...makeSession(), notes: (() => 'x') as unknown as string };
+    await expect(store.commit({ trial, session: bad })).rejects.toBeTruthy();
+    expect(await store.getTrial('trial-0001')).toBeUndefined();
+    expect(await store.getSession('sess-0001')).toBeUndefined();
+    expect(await store.listOutbox()).toEqual([]);
+  });
+
+  it('enqueueMissing queues stored trials that have no outbox item, and only those', async () => {
+    const store = await freshStore();
+    await store.commit({ trial: makeTrial({ trial_id: 'trial-0001' }), session: makeSession() });
+    const [, item1] = await store.listOutbox();
+    await store.updateOutbox({ ...item1, status: 'sent', confirmed: true });
+    // an older app version: the trial was stored, the page died before its outbox item
+    await store.saveTrial(makeTrial({ trial_id: 'trial-0002', trial_index: 1 }));
+    expect(await store.enqueueMissing()).toBe(1);
+    const items = await store.listOutbox();
+    expect(items.map((i) => [i.id, i.status, i.session_id])).toEqual([
+      ['session:sess-0001', 'pending', 'sess-0001'],
+      ['trial:trial-0001', 'sent', 'sess-0001'],
+      ['trial:trial-0002', 'pending', 'sess-0001'],
+    ]);
+    expect(await store.enqueueMissing()).toBe(0); // a sent item is never re-sent
+  });
+});
+
 describe('cascading deletes', () => {
   async function seed(store: LocalStore): Promise<void> {
     await store.saveParticipant(makeProfile({ participant_id: 'P-ABCDEF' }));

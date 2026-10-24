@@ -9,40 +9,53 @@
  *    method 'implicit_v1', filled later from the first still upright trial), settings
  *    (segmentation_params = DEFAULT_SEGMENTATION_PARAMS; review_mode 'tap' when the researcher setting
  *    review_each_trial is on, else 'auto'), consent {version: config.consent_version, accepted_at:
- *    state.consentAcceptedAt ?? now}; status 'in_progress'; simulated = settings.simulate. Saves,
- *    enqueues ('session') and kicks an upload, sets state.session, returns it.
+ *    state.consentAcceptedAt ?? now}; status 'in_progress'; simulated = settings.simulate. Saves and
+ *    enqueues it (one commit), kicks an upload, sets state.session, returns it; then the same
+ *    participant's other unfinished sessions end as 'abandoned' (abandonOtherSessions).
  *    preset 'custom' without a spec uses DEFAULT_CUSTOM_SPEC; protocol.custom is null for the other
  *    presets. timezone_offset_min = minutes EAST of UTC (local time = UTC + offset; Israel summer → 180).
  *    Throws when there is no participant profile or the plan is empty.
  *  - nextPlannedTrial(): the PlannedTrial at progress.next_trial_index, or null when finished.
  *  - nextAttemptNumber(): 1 + number of stored attempts with that trial_index in the session.
- *  - saveAttempt(): saves the trial, then updates progress: n_attempts += 1; if
- *    trial.outcome.accepted → n_accepted += 1 and next_trial_index += 1. updated_at = now. The
- *    session's implicit calibration is updated from the trial (calibration.withUprightHold; the engine
- *    prior is dropped for a simulated trial). Saves the session, enqueues both records, kicks
- *    uploader.flush() (not awaited), sets state.session.
+ *  - saveAttempt(): updates progress: n_attempts += 1; if trial.outcome.accepted → n_accepted += 1
+ *    and next_trial_index += 1. updated_at = now. The session's implicit calibration is updated from
+ *    the trial (calibration.withUprightHold; the engine prior is dropped for a simulated trial). The
+ *    trial, the session and both outbox items are written by ONE store.commit() (an IndexedDB
+ *    transaction: all or nothing), then uploader.flush() is kicked (not awaited) and state.session set.
  *    Option skip: next_trial_index also moves past a trial that is NOT accepted (the choice trial
  *    answered "not sure": it is never re-run).
  *    Robustness (identical results in the normal flow):
  *      · next_trial_index becomes max(next_trial_index, trial.trial_index + 1), capped at n_planned_trials;
  *      · re-saving an attempt that is already stored (same trial_id) does not count a new attempt; only a
  *        change of outcome.accepted moves n_accepted (and next_trial_index forward on acceptance);
- *      · the base is the freshest copy of the session (see freshest()), so a stale copy held by a
- *        caller can never roll progress back;
+ *      · the base is the freshest of the caller's copy, state.session and the stored copy (storedBase),
+ *        so a stale copy can never roll progress back — also after a commit that was stored although
+ *        its promise rejected; with the atomic commit, a retry after a failure finds the stored trial
+ *        and the stored counters in agreement, so it counts exactly once;
  *      · throws if the trial belongs to another session.
  *  - revokeAccepted(): "Redo last movement" / "Last one was the wrong hand" in the pause sheet: re-saves
  *    a stored trial as not accepted (note 'redo_requested', participant_flag as given), n_accepted − 1,
  *    and puts that planned trial back as the next one (next_trial_index = its index, only when it was
  *    the trial just before the next one: an older trial is never re-queued over later ones).
- *  - finishSession(): status (or a function of the freshest session that picks it, e.g. endStatusOf),
- *    ended_at, updated_at; save; enqueue; flush; set state.session. A session that has already ended is
- *    final and returned unchanged. endStatusOf(): 'completed' when every trial of the non-optional
- *    blocks is behind next_trial_index, else 'ended_early' (Finish before the main part was done).
+ *    flagAttempt(): "Last one was the wrong hand" about a movement that was NOT accepted (rejected for
+ *    its grip, or failed): only its participant_flag is set (the planned trial runs again anyway).
+ *    A failed attempt of the choice trial is never asked about: asFailedAttempt gives it the note
+ *    'hand_not_reported' (its hand is the plan's placeholder, like the copy saved before the question).
+ *  - finishSession(): the progress is first reconciled with the stored attempts (reconcileProgress),
+ *    then status (or a function of that session that picks it, e.g. endStatusOf), ended_at,
+ *    updated_at; commit; flush; set state.session. A session that has already ended is final and
+ *    returned unchanged. endStatusOf(): 'completed' when every trial of the non-optional blocks is
+ *    behind next_trial_index, else 'ended_early' (Finish before the main part was done).
  *  - setPosture(): the "I'm sitting" toggle of the How-to card: protocol.posture and every planned
  *    trial's condition.posture (posture never changes the plan otherwise).
  *  - resumeSession(id): loads it into state.session if it is still 'in_progress' (else null). Progress
- *    is reconciled with the stored attempts first (reconcileProgress), which repairs the counters if
- *    the app was killed between saving a trial and saving the session.
+ *    is reconciled with the stored attempts first (reconcileProgress), which repairs the counters of a
+ *    session saved by an older app version (separate writes), and store.enqueueMissing() queues any
+ *    stored trial that never got its outbox item.
+ *  - abandonOtherSessions(): the participant's other in-progress sessions → 'abandoned' (ended_at =
+ *    their last update); abandonStaleSessions() (at boot): anyone's in-progress sessions untouched for
+ *    longer than RESUME_MAX_AGE_MS (no longer resumable) → 'abandoned' the same way. recentSessionOf(): the unfinished session (updated within
+ *    RESUME_ON_CONTINUE_MS) that the profile's Continue resumes instead of creating a new one.
  *  All mutating calls (and nextAttemptNumber / attemptSummary) run one at a time, in call order, so a
  *  double tap, a background save racing with the next trial's save, or a protective save racing with
  *  a decision cannot double-count.
@@ -60,6 +73,7 @@ import type {
   CueSink,
   CustomProtocolSpec,
   Hand,
+  OrientationId,
   ParticipantFlag,
   PlannedBlock,
   PlannedTrial,
@@ -90,6 +104,7 @@ import {
 import { isoTime, makeRng, newId, randomSeed } from '../core/util';
 import { detectionCalibration, implicitCalibration, withUprightHold } from '../core/calibration';
 import { redactProfile } from '../core/config';
+import { RESUME_MAX_AGE_MS } from '../core/storage';
 import { detectCapabilities, getDeviceInfo } from '../core/sensors';
 import { getServices } from './services';
 import { getState, setState } from './store';
@@ -119,6 +134,12 @@ export const HAND_NOT_REPORTED_NOTE = 'hand_not_reported';
 /** the choice trial: the participant did not know which hand they used (never re-run) */
 export const HAND_UNSURE_NOTE = 'hand_unsure';
 
+/**
+ * The profile's Continue resumes the participant's unfinished session updated within this long
+ * (a reload, an app switch, "Exit for now"), instead of starting the visit again.
+ */
+export const RESUME_ON_CONTINUE_MS = 2 * 60 * 60 * 1000;
+
 // ───────────────────────────── serialization ─────────────────────────────
 
 let queue: Promise<unknown> = Promise.resolve();
@@ -134,21 +155,41 @@ function serial<T>(task: () => Promise<T>): Promise<T> {
 }
 
 /**
- * state.session when it is the same session and newer than `s`: more attempts, or as many attempts
- * and a later updated_at (a revoke or a posture change keeps the count but is newer), or — same time —
- * further along. An ended copy wins over a running one.
+ * The newer of two copies of the same session: an ended copy wins over a running one; then more
+ * attempts; then — as many attempts — a later updated_at (a revoke or a posture change keeps the count
+ * but is newer); then — same time — further along. `b` when they are not the same session.
  */
+function fresher(a: SessionRecord, b: SessionRecord | null | undefined): SessionRecord {
+  if (!b || b === a || b.session_id !== a.session_id) return a;
+  if (b.status !== 'in_progress' && a.status === 'in_progress') return b;
+  if (a.status !== 'in_progress' && b.status === 'in_progress') return a;
+  const pa = a.progress;
+  const pb = b.progress;
+  if (pa.n_attempts !== pb.n_attempts) return pb.n_attempts > pa.n_attempts ? b : a;
+  const ta = Date.parse(a.updated_at);
+  const tb = Date.parse(b.updated_at);
+  if (Number.isFinite(ta) && Number.isFinite(tb) && ta !== tb) return tb > ta ? b : a;
+  return pb.n_accepted > pa.n_accepted || pb.next_trial_index > pa.next_trial_index ? b : a;
+}
+
+/** state.session when it is the same session and newer than `s` (see fresher). */
 function freshest(s: SessionRecord): SessionRecord {
-  const cur = getState().session;
-  if (!cur || cur === s || cur.session_id !== s.session_id) return s;
-  if (cur.status !== 'in_progress' && s.status === 'in_progress') return cur;
-  const a = cur.progress;
-  const b = s.progress;
-  if (a.n_attempts !== b.n_attempts) return a.n_attempts > b.n_attempts ? cur : s;
-  const ta = Date.parse(cur.updated_at);
-  const tb = Date.parse(s.updated_at);
-  if (Number.isFinite(ta) && Number.isFinite(tb) && ta !== tb) return ta > tb ? cur : s;
-  return a.n_accepted > b.n_accepted || a.next_trial_index > b.next_trial_index ? cur : s;
+  return fresher(s, getState().session);
+}
+
+/**
+ * The base of a read-modify-write of the session record: the freshest of the caller's copy,
+ * state.session and the STORED copy. A commit that was stored although its promise rejected (WebKit can
+ * report a lost connection after the transaction completed) left the stored copy ahead of the state;
+ * building on the stale state would then write old counters over it.
+ */
+async function storedBase(s: SessionRecord): Promise<SessionRecord> {
+  const base = freshest(s);
+  try {
+    return fresher(base, await getServices().store.getSession(s.session_id));
+  } catch {
+    return base; // the read failed: the commit below fails the same way and is retried
+  }
 }
 
 /** Starts an upload round without blocking the participant; refreshes the outbox counters. */
@@ -264,6 +305,76 @@ export function blockChange(session: SessionRecord, blockIndex: number): BlockCh
     gripChanged: unknown || prev.orientation !== block.orientation,
     afterBasics: !!prev && !!block && prev.tier === 1 && (block.tier ?? 0) > 1,
   };
+}
+
+/**
+ * What the participant was last told or did before a block intro appears (the session runner keeps
+ * it): the hand and grip of the last run, or of the last intro shown. null hand / grip = unknown
+ * (a fresh page, the free choice). explicit: the intro must name the hand plainly whatever the
+ * reference says (after a redo, a resume, the free trial).
+ */
+export interface IntroRef {
+  hand: Hand | null;
+  orientation: OrientationId | null;
+  explicit: boolean;
+}
+
+/** The reference of an intro from the plan alone: the block before it (no runner, tap mode, tests). */
+export function planIntroRef(session: SessionRecord, blockIndex: number): IntroRef {
+  const prev = previousBlock(session, blockIndex);
+  if (!prev || prev.kind === 'choice') return { hand: null, orientation: null, explicit: true };
+  return { hand: prev.hand, orientation: prev.orientation, explicit: false };
+}
+
+export interface IntroWording {
+  /**
+   * the big line: 'phoneIn' "Phone in your LEFT hand" (another or an unknown hand, or explicit);
+   * 'turnTo' "Turn the phone: top to your LEFT" (same hand, another grip); 'keepIn' (nothing changes)
+   */
+  line: 'phoneIn' | 'turnTo' | 'keepIn';
+  /** "Switch hands!": the participant is known to hold the phone in the other hand */
+  switchHands: boolean;
+  /** the small "Same hand: RIGHT" line (line 'turnTo') */
+  sameHand: boolean;
+  handChanged: boolean;
+  gripChanged: boolean;
+}
+
+/**
+ * How a block intro words the hand and the grip, against what the participant was last told or did
+ * (`ref`; null = nothing known). A hand switch is only announced when the current hand is known.
+ */
+export function introWording(block: Pick<PlannedBlock, 'hand' | 'orientation'>, ref: IntroRef | null): IntroWording {
+  const r: IntroRef = ref ?? { hand: null, orientation: null, explicit: true };
+  const handChanged = r.hand === null || r.hand !== block.hand;
+  const gripChanged = r.orientation === null || r.orientation !== block.orientation;
+  const line: IntroWording['line'] = r.explicit || handChanged ? 'phoneIn' : gripChanged ? 'turnTo' : 'keepIn';
+  return {
+    line,
+    switchHands: r.hand !== null && r.hand !== block.hand,
+    sameHand: line === 'turnTo',
+    handChanged,
+    gripChanged,
+  };
+}
+
+/** Reading time of a speed word that changed (ms): GO waits for it (TrialControllerOptions.readMs). */
+export const READ_SPEED_MS = 1200;
+/** Reading time of a non-standard movement or start position (ms). */
+export const READ_SPECIAL_MS = 2500;
+
+/**
+ * How long GO must wait so the participant can read the instruction of trial `c` (ms), coming from
+ * the trial `prev` of the same chain (null: the first trial after a tap). A new special movement or
+ * start position: READ_SPECIAL_MS; a new speed (or a first trial that is not at natural speed):
+ * READ_SPEED_MS; nothing new (e.g. the same trial again): 0.
+ */
+export function readTimeMs(prev: TrialCondition | null, c: TrialCondition): number {
+  const special = c.variant !== 'standard' || c.start_position !== 'natural';
+  const sameSpecial = !!prev && prev.variant === c.variant && prev.start_position === c.start_position;
+  if (special && !sameSpecial) return READ_SPECIAL_MS;
+  if (prev ? prev.speed !== c.speed : c.speed !== 'natural') return READ_SPEED_MS;
+  return 0;
 }
 
 /** The speeds of a block's trials, in canonical order, without repeats. */
@@ -396,6 +507,8 @@ export interface TrialRunDeps {
    * a wrongly withheld GO would stall the participant.
    */
   gripGate?: boolean;
+  /** no GO before this long after the start (ms): reading a new instruction / the spoken words */
+  readMs?: number;
 }
 
 /**
@@ -435,6 +548,7 @@ export function buildTrialOptions(
     readyCue: deps.readyCue !== false,
     gripGate:
       deps.gripGate === true && planned.condition.orientation !== 'free' && (calibration?.gravity_sign ?? null) !== null,
+    readMs: typeof deps.readMs === 'number' && deps.readMs > 0 ? deps.readMs : 0,
   };
 }
 
@@ -510,12 +624,17 @@ export function asUnreviewed(record: TrialRecord): TrialRecord {
   return { ...record, outcome: { ...record.outcome, accepted: false, note: REVIEW_INTERRUPTED_NOTE } };
 }
 
-/** Failed attempts are never accepted; a UI-side reason is appended to quality.warnings. */
+/**
+ * Failed attempts are never accepted; a UI-side reason is appended to quality.warnings. A failed attempt
+ * of the choice trial is never asked about: its hand is the plan's placeholder, so it gets the note
+ * 'hand_not_reported' (like the copy saved before the hand question).
+ */
 export function asFailedAttempt(record: TrialRecord, uiWarning: string | null): TrialRecord {
   const warnings = uiWarning ? [...record.quality.warnings, uiWarning] : record.quality.warnings;
+  const note = isChoiceTrial(record.condition) && !record.outcome.note ? HAND_NOT_REPORTED_NOTE : record.outcome.note;
   return {
     ...record,
-    outcome: { ...record.outcome, accepted: false },
+    outcome: { ...record.outcome, accepted: false, note },
     quality: { ...record.quality, warnings },
   };
 }
@@ -616,10 +735,11 @@ export async function createSession(opts: NewSessionOptions): Promise<SessionRec
     notes: null,
   };
 
-  await store.saveSession(session);
-  await store.enqueue('session', session.session_id, session.session_id);
+  await store.commit({ session });
   setState({ session });
   kickUpload();
+  // the same person's older unfinished sessions end here (abandoned): they are never resumed now
+  void abandonOtherSessions(session).catch((e: unknown) => console.warn('closing older sessions failed', e));
   return session;
 }
 
@@ -635,8 +755,10 @@ export interface AttemptSummary {
   counts: Map<number, number>;
   ids: Set<string>;
   latest: TrialRecord | null;
-  /** the most recent accepted attempt (what the pause sheet's "Redo last movement" takes back) */
+  /** the most recent accepted attempt */
   latestAccepted: TrialRecord | null;
+  /** the most recent attempt with a movement (GO and an onset): what the pause sheet's Redo refers to */
+  latestMoved: TrialRecord | null;
 }
 
 /** The stored attempts of a session, summarized (after every save already started). */
@@ -650,6 +772,7 @@ export function attemptSummary(session: SessionRecord): Promise<AttemptSummary> 
       ids: new Set(trials.map((t) => t.trial_id)),
       latest: latestAttempt(trials),
       latestAccepted: latestAttempt(trials.filter((t) => t.outcome.accepted)),
+      latestMoved: latestAttempt(trials.filter((t) => typeof t.timing.go_ms === 'number' && typeof t.timing.onset_ms === 'number')),
     };
   });
 }
@@ -665,9 +788,10 @@ export function saveAttempt(session: SessionRecord, trial: TrialRecord, opts: Sa
       throw new Error('saveAttempt: the trial belongs to another session');
     }
     const { store } = getServices();
-    const base = freshest(session);
+    const base = await storedBase(session);
+    // the stored copy of this attempt and the stored session were written by ONE commit, so the
+    // counters of `base` already include `previous` (a retry after a failed commit finds neither)
     const previous = await store.getTrial(trial.trial_id);
-    await store.saveTrial(trial);
 
     const p = { ...base.progress };
     const advance = () => {
@@ -689,9 +813,7 @@ export function saveAttempt(session: SessionRecord, trial: TrialRecord, opts: Sa
     // implicit calibration: the first still upright hold fills it (a simulated trial has no engine prior)
     const calibration = withUprightHold(base.calibration, trial, trial.simulated ? null : base.device.engine);
     const updated: SessionRecord = { ...base, calibration, progress: p, updated_at: isoTime() };
-    await store.saveSession(updated);
-    await store.enqueue('session', updated.session_id, updated.session_id);
-    await store.enqueue('trial', trial.trial_id, updated.session_id);
+    await store.commit({ trial, session: updated });
     setState({ session: updated });
     kickUpload();
     return updated;
@@ -706,7 +828,7 @@ export function revokeAccepted(
 ): Promise<SessionRecord> {
   return serial(async () => {
     const { store } = getServices();
-    const base = freshest(session);
+    const base = await storedBase(session);
     if (base.status !== 'in_progress') throw new Error('revokeAccepted: the session has ended');
     const stored = await store.getTrial(trialId);
     if (!stored || stored.session_id !== base.session_id) throw new Error('revokeAccepted: no such trial in this session');
@@ -714,16 +836,34 @@ export function revokeAccepted(
       ...stored,
       outcome: { ...stored.outcome, accepted: false, participant_flag: flag, note: REDO_REQUESTED_NOTE },
     };
-    await store.saveTrial(revoked);
     const p = { ...base.progress };
+    // the stored trial and `base` come from the same commits: an accepted copy is counted in base
     if (stored.outcome.accepted) {
       p.n_accepted = Math.max(0, p.n_accepted - 1);
       if (p.next_trial_index === stored.trial_index + 1) p.next_trial_index = stored.trial_index;
     }
     const updated: SessionRecord = { ...base, progress: p, updated_at: isoTime() };
-    await store.saveSession(updated);
-    await store.enqueue('session', updated.session_id, updated.session_id);
-    await store.enqueue('trial', revoked.trial_id, updated.session_id);
+    await store.commit({ trial: revoked, session: updated });
+    setState({ session: updated });
+    kickUpload();
+    return updated;
+  });
+}
+
+/**
+ * "Last one was the wrong hand" about an attempt that was NOT accepted (auto-rejected for its grip, or
+ * failed): its participant_flag is set and nothing else changes (the planned trial runs again anyway).
+ */
+export function flagAttempt(session: SessionRecord, trialId: string, flag: ParticipantFlag): Promise<SessionRecord> {
+  return serial(async () => {
+    const { store } = getServices();
+    const base = await storedBase(session);
+    if (base.status !== 'in_progress') throw new Error('flagAttempt: the session has ended');
+    const stored = await store.getTrial(trialId);
+    if (!stored || stored.session_id !== base.session_id) throw new Error('flagAttempt: no such trial in this session');
+    const flagged: TrialRecord = { ...stored, outcome: { ...stored.outcome, participant_flag: flag } };
+    const updated: SessionRecord = { ...base, updated_at: isoTime() };
+    await store.commit({ trial: flagged, session: updated });
     setState({ session: updated });
     kickUpload();
     return updated;
@@ -733,7 +873,7 @@ export function revokeAccepted(
 /** The "I'm sitting" toggle (see the module doc). Returns the session itself when nothing changes. */
 export function setPosture(session: SessionRecord, posture: Posture): Promise<SessionRecord> {
   return serial(async () => {
-    const base = freshest(session);
+    const base = await storedBase(session);
     const plan = base.protocol.plan;
     const same = base.protocol.posture === posture && plan.every((b) => b.trials.every((t) => t.condition.posture === posture));
     if (same || base.status !== 'in_progress') return base;
@@ -747,8 +887,7 @@ export function setPosture(session: SessionRecord, posture: Posture): Promise<Se
       },
       updated_at: isoTime(),
     };
-    await store.saveSession(updated);
-    await store.enqueue('session', updated.session_id, updated.session_id);
+    await store.commit({ session: updated });
     setState({ session: updated });
     kickUpload();
     return updated;
@@ -760,12 +899,19 @@ export function finishSession(
   status: EndStatus | ((s: SessionRecord) => EndStatus),
 ): Promise<SessionRecord> {
   return serial(async () => {
-    const base = freshest(session);
-    if (base.status !== 'in_progress') {
-      if (getState().session?.session_id === base.session_id) setState({ session: base });
-      return base;
+    const stored = await storedBase(session);
+    if (stored.status !== 'in_progress') {
+      if (getState().session?.session_id === stored.session_id) setState({ session: stored });
+      return stored;
     }
     const { store } = getServices();
+    // the final counters (and so completed / ended_early) come from the stored attempts themselves
+    let base = stored;
+    try {
+      base = reconcileProgress(stored, await store.listTrials(stored.session_id));
+    } catch (e) {
+      console.warn('the stored attempts could not be read before finishing', e);
+    }
     const now = isoTime();
     const updated: SessionRecord = {
       ...base,
@@ -773,8 +919,7 @@ export function finishSession(
       ended_at: now,
       updated_at: now,
     };
-    await store.saveSession(updated);
-    await store.enqueue('session', updated.session_id, updated.session_id);
+    await store.commit({ session: updated });
     setState({ session: updated });
     kickUpload();
     return updated;
@@ -790,11 +935,65 @@ export function resumeSession(sessionId: string): Promise<SessionRecord | null> 
     let session = reconcileProgress(stored, trials);
     if (session !== stored) {
       session = { ...session, updated_at: isoTime() };
-      await store.saveSession(session);
-      await store.enqueue('session', session.session_id, session.session_id);
-      kickUpload();
+      await store.commit({ session });
     }
+    // a trial stored without its outbox item by an older app version is queued now
+    const repaired = await store.enqueueMissing().catch(() => 0);
+    if (session !== stored || repaired > 0) kickUpload();
     setState({ session });
     return session;
   });
+}
+
+/**
+ * Ends the participant's OTHER unfinished sessions as 'abandoned' (a new session was started, so they
+ * are never resumed): ended_at = their last activity (updated_at), updated_at = now. Each is
+ * committed and queued for upload, so the server sees a final status. Returns how many were closed.
+ */
+export function abandonOtherSessions(current: SessionRecord): Promise<number> {
+  return serial(async () => {
+    const { store } = getServices();
+    const others = (await store.listSessions(current.participant_id)).filter(
+      (s) => s.session_id !== current.session_id && s.status === 'in_progress',
+    );
+    for (const s of others) {
+      await store.commit({ session: { ...s, status: 'abandoned', ended_at: s.updated_at, updated_at: isoTime() } });
+    }
+    if (others.length > 0) kickUpload();
+    return others.length;
+  });
+}
+
+/**
+ * At boot: unfinished sessions of anyone on this phone untouched for longer than `maxAgeMs` (default
+ * RESUME_MAX_AGE_MS, beyond which no session is offered for resuming) end as 'abandoned' (ended_at =
+ * their last activity), so the server sees a final status for visits that were simply left. Returns
+ * how many were closed.
+ */
+export function abandonStaleSessions(maxAgeMs: number = RESUME_MAX_AGE_MS, now: number = Date.now()): Promise<number> {
+  return serial(async () => {
+    const { store } = getServices();
+    const stale = (await store.listSessions()).filter((s) => {
+      const t = Date.parse(s.updated_at);
+      return s.status === 'in_progress' && Number.isFinite(t) && now - t > maxAgeMs;
+    });
+    for (const s of stale) {
+      await store.commit({ session: { ...s, status: 'abandoned', ended_at: s.updated_at, updated_at: isoTime() } });
+    }
+    if (stale.length > 0) kickUpload();
+    return stale.length;
+  });
+}
+
+/**
+ * The participant's unfinished session that the profile's Continue resumes instead of starting a new
+ * one: in progress and updated within `maxAgeMs` (default RESUME_ON_CONTINUE_MS). Never throws.
+ */
+export async function recentSessionOf(participantId: string, maxAgeMs: number = RESUME_ON_CONTINUE_MS): Promise<SessionRecord | null> {
+  try {
+    return (await getServices().store.findResumableSession(participantId, maxAgeMs)) ?? null;
+  } catch (e) {
+    console.warn('looking up an unfinished session failed', e);
+    return null;
+  }
 }

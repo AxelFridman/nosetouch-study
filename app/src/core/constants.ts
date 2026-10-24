@@ -8,7 +8,7 @@ import type {
 } from './types';
 
 /** Keep in sync with package.json "version" (a unit test checks this). */
-export const APP_VERSION = '0.2.0';
+export const APP_VERSION = '0.2.1';
 /** Data schema version (schema/records.schema.json). Minor bump = additive change. */
 export const SCHEMA_VERSION = '1.2.0';
 /**
@@ -17,8 +17,8 @@ export const SCHEMA_VERSION = '1.2.0';
  * a different plan than under 1.0.0.
  */
 export const PROTOCOL_VERSION = '2.0.0';
-/** v2 consent text: ~5 minutes, no screen-away grips, no table step, names stored. */
-export const CONSENT_VERSION_DEFAULT = '2026-10-v2';
+/** v2 consent text: ~5 minutes (~30 movements + an optional bonus), no screen-away grips, no table step, names stored; v3: no bed/sofa advice, Hebrew fixes. */
+export const CONSENT_VERSION_DEFAULT = '2026-10-v3';
 
 export const GRAVITY = 9.80665;
 

@@ -16,7 +16,9 @@
  *                         RETURN_ACC_MS2, continuously ≥ RETURN_SUSTAIN_MS) has been seen in this
  *                         trial (message 'return_arm' until then);
  *                       · gripGate (never for 'free'): the mean accg of the last GRIP_WINDOW_MS is not
- *                         confidently another grip (wrongGrip below; message 'wrong_grip').
+ *                         confidently another grip (wrongGrip below; message 'wrong_grip');
+ *                       · readMs: the sample's t ≥ opts.readMs, the reading time of a new instruction
+ *                         (message 'read' until then, unless a message above is shown).
  *                     While a gate holds and the segmenter stays 'still', the gates are re-checked on
  *                     every sample. Passing → still_ms = that sample's t, foreperiod = foreperiod_min +
  *                     rng()·(max−min); phase 'foreperiod' (message 'hold_still').
@@ -50,8 +52,13 @@
  *  abort('user') → finish('aborted'); abort('interrupted') (page hidden etc.) → finish('interrupted');
  *  but in phase 'returning' (movement and minimum post-roll already recorded) an abort — or an
  *  offline source running out — ends the trial as 'complete' with warning RETURN_CUT_SHORT.
- *  finish(): source.stop(); build streams; quality via computeQuality (hidden_during from isHidden
- *    polled on every sample); detected.* via rotationFromGravity on baseline gravity (start) and the
+ *  finish(): source.stop(); build streams; quality via computeQuality: hidden_during = isHidden (polled
+ *    on every sample and at the stop) was first true BEFORE end_detected_ms + post_roll_ms (or at any
+ *    time in a trial without an end) — a page hidden only during the return of the arm leaves the
+ *    movement complete: hidden_during false + warning HIDDEN_AFTER_END. Further warnings:
+ *    SCREEN_ROTATED_DURING_MOVEMENT (a screen_events entry between go_ms and end_detected_ms, or the
+ *    stop without an end), WRONG_GRIP_AT_STOP (stopped before GO while the grip gate held GO back).
+ *    detected.* via rotationFromGravity on baseline gravity (start) and the
  *    mean accg at the nose (end) = the samples from end_ms to end_detected_ms (the hold that
  *    confirmed the end; the recording now goes on through the return), or, for trials without an
  *    end, the last END_GRAVITY_WINDOW_MS before stop; compared with ORIENTATIONS[cond].rotation;
@@ -178,6 +185,15 @@ export const FALSE_START_ACC_MS2 = 0.6;
 export const FALSE_START_WATCH_MS = 300;
 /** quality warning: an abort (or the source) ended the recording during the return; the trial is complete. */
 export const RETURN_CUT_SHORT = 'return_cut_short';
+/**
+ * quality warning: the page went hidden only after the movement window (end_detected_ms + post_roll_ms),
+ * i.e. during the return of the arm; quality.hidden_during stays false (the movement was fully recorded).
+ */
+export const HIDDEN_AFTER_END = 'hidden_after_end';
+/** quality warning: a screen orientation change (streams.screen_events) fell between GO and the end. */
+export const SCREEN_ROTATED_DURING_MOVEMENT = 'screen_rotated_during_movement';
+/** quality warning: the attempt stopped before GO while the grip gate was holding GO back (wrong grip). */
+export const WRONG_GRIP_AT_STOP = 'wrong_grip_at_stop';
 const MAX_DATE_MS = 8.64e15;
 
 /**
@@ -263,6 +279,9 @@ export function createTrialController(opts: TrialControllerOptions): TrialContro
   const trustedSign = signVerified(opts.calibration);
   const capRaw = params.return_cap_ms;
   const returnCapMs = typeof capRaw === 'number' && Number.isFinite(capRaw) && capRaw > 0 ? capRaw : 0;
+  const readRaw = opts.readMs;
+  /** no GO before this (rel ms): the reading time of a new instruction (opts.readMs) */
+  const readUntil = typeof readRaw === 'number' && Number.isFinite(readRaw) && readRaw > 0 ? readRaw : 0;
 
   let recorder: StreamRecorder | null = null;
   let t0 = 0;
@@ -274,8 +293,10 @@ export function createTrialController(opts: TrialControllerOptions): TrialContro
 
   let phase: TrialPhase = 'waiting_still';
   let returnSeen = opts.awaitReturn !== true; // awaitReturn: no GO before a return movement
-  let message: TrialMessage | null = returnSeen ? 'hold_still' : 'return_arm';
-  let live: TrialLiveState = { phase, t: 0, gyro_dps: 0, acc_ms2: 0, still_progress: 0, message };
+  let message: TrialMessage | null = !returnSeen ? 'return_arm' : readUntil > 0 ? 'read' : 'hold_still';
+  /** the grip gate's last reading (TrialLiveState.grip_seen) */
+  let gripSeen: PhoneRotation | 'unknown' | null = null;
+  let live: TrialLiveState = { phase, t: 0, gyro_dps: 0, acc_ms2: 0, still_progress: 0, message, grip_seen: null };
   let lastSampleAt: number | null = null;
   let lastMotionT = -Infinity;
 
@@ -288,7 +309,8 @@ export function createTrialController(opts: TrialControllerOptions): TrialContro
   let endDetectedMs: number | null = null;
   let firstTouchMs: number | null = null;
   let falseStarts = 0;
-  let hidden = false;
+  /** rel time at which the page was first seen hidden (null: never) */
+  let hiddenAt: number | null = null;
   const warnings: string[] = [];
   const onceWarnings: string[] = [];
   let screenStart: { type: string | null; angle: number | null } = { type: null, angle: null };
@@ -324,10 +346,11 @@ export function createTrialController(opts: TrialControllerOptions): TrialContro
     }
   };
 
-  const pollHidden = (): void => {
-    if (hidden || !opts.isHidden) return;
+  /** Polls isHidden(); the first hidden reading is stamped with `relT` (rel ms; null → 0). */
+  const pollHidden = (relT: number | null): void => {
+    if (hiddenAt !== null || !opts.isHidden) return;
     guarded(() => {
-      if (opts.isHidden?.() === true) hidden = true;
+      if (opts.isHidden?.() === true) hiddenAt = relT ?? 0;
     });
   };
 
@@ -362,6 +385,7 @@ export function createTrialController(opts: TrialControllerOptions): TrialContro
       acc_ms2: signals.acc,
       still_progress: seg.live.stillProgress,
       message,
+      grip_seen: gripSeen,
     };
     const onLive = opts.onLive;
     if (onLive) {
@@ -401,8 +425,9 @@ export function createTrialController(opts: TrialControllerOptions): TrialContro
     foreperiodMs = null;
   };
 
-  /** Message while waiting for stillness (no GO pending). */
-  const waitingMessage = (): TrialMessage => (!returnSeen ? 'return_arm' : gripBlocked ? 'wrong_grip' : 'hold_still');
+  /** Message while waiting for stillness (no GO pending) at rel time `relT`. */
+  const waitingMessage = (relT: number): TrialMessage =>
+    !returnSeen ? 'return_arm' : gripBlocked ? 'wrong_grip' : relT < readUntil ? 'read' : 'hold_still';
 
   /** Keeps the accg samples of the last GRIP_WINDOW_MS (only needed by the grip gate). */
   const pushGravity = (rel: RelMotionSample): void => {
@@ -435,7 +460,9 @@ export function createTrialController(opts: TrialControllerOptions): TrialContro
       z += s.g[2];
     }
     const n = gravityWindow.length;
-    return gripMatches([x / n, y / n, z / n]) === false;
+    const g: Vec3 = [x / n, y / n, z / n];
+    gripSeen = rotationFromGravity(g, detectionSign, screenHint);
+    return gripMatches(g) === false;
   };
 
   /** The segmenter is 'still': schedule GO if the gates pass (see the module doc). */
@@ -452,6 +479,12 @@ export function createTrialController(opts: TrialControllerOptions): TrialContro
       return;
     }
     gripBlocked = false;
+    if (relT < readUntil) {
+      // the reading time of a new instruction: GO waits (the hold is re-checked on every sample)
+      phase = 'waiting_still';
+      message = 'read';
+      return;
+    }
     stillMs = relT;
     foreperiodMs = pickForeperiod();
     goPendingAt = relT + foreperiodMs;
@@ -513,15 +546,26 @@ export function createTrialController(opts: TrialControllerOptions): TrialContro
     if (sourceStarted) guarded(() => source.stop());
     try {
       const rec = ensureRecorder();
-      pollHidden();
       applyOnceWarnings();
       let stop = atRel ?? rec.rel(clock.now()) ?? 0;
       const last = rec.lastTime;
       if (last !== null && last > stop) stop = last;
       stop = roundValue(stop, ROUNDING.time) ?? 0;
+      pollHidden(stop);
+      // hidden_during covers the movement window only (up to end_detected + post_roll): a page hidden
+      // during the return of the arm (a complete trial, see finishEarly) keeps a usable movement
+      const movementEnd = endDetectedMs !== null ? endDetectedMs + params.post_roll_ms : null;
+      const hiddenDuring = hiddenAt !== null && (movementEnd === null || hiddenAt < movementEnd);
+      if (hiddenAt !== null && !hiddenDuring) warn(HIDDEN_AFTER_END);
+      if (goMs === null && gripBlocked) warn(WRONG_GRIP_AT_STOP);
 
       const streams = rec.build();
-      const quality = computeQuality(streams, hidden, warnings);
+      if (goMs !== null) {
+        const until = endDetectedMs ?? stop;
+        const go = goMs;
+        if ((streams.screen_events ?? []).some((e) => e.t >= go && e.t <= until)) warn(SCREEN_ROTATED_DURING_MOVEMENT);
+      }
+      const quality = computeQuality(streams, hiddenDuring, warnings);
       const segmentation = seg.result();
       const gStart = seg.baseline?.gravity ?? null;
       const gEnd =
@@ -639,7 +683,7 @@ export function createTrialController(opts: TrialControllerOptions): TrialContro
           countFalseStart(tAbs);
           break;
         }
-        message = waitingMessage(); // silent so far
+        message = waitingMessage(e.t); // silent so far
         lossWatchUntil = pending ? e.t + FALSE_START_WATCH_MS : null;
         break;
       }
@@ -682,7 +726,7 @@ export function createTrialController(opts: TrialControllerOptions): TrialContro
       }
       lastMotionT = tAbs;
       lastSampleAt = tAbs;
-      pollHidden();
+      pollHidden(recorder.rel(tAbs));
       const rel = recorder.addMotionRel(s);
       const sig = signals.push(rel);
       if (gripGate) pushGravity(rel);
@@ -709,6 +753,7 @@ export function createTrialController(opts: TrialControllerOptions): TrialContro
         emitGo(rel.t, tAbs);
         if (finished) return; // a cue callback aborted the trial re-entrantly
       }
+      if (message === 'read' && rel.t >= readUntil) message = waitingMessage(rel.t);
       if ((phase === 'post_roll' || phase === 'returning') && endDetectedMs !== null && rel.t >= endDetectedMs + params.post_roll_ms) {
         if (returnEndMs !== null || rel.t >= endDetectedMs + returnCapMs) {
           message = 'done';
@@ -737,7 +782,7 @@ export function createTrialController(opts: TrialControllerOptions): TrialContro
   const listener: SensorListener & SensorWarningListener = {
     onMotion,
     onOrientation: recording<OrientationSample>((rec, s) => {
-      pollHidden();
+      pollHidden(rec.rel(s.t));
       rec.addOrientation(s);
     }),
     onQuaternion: recording<QuaternionSample>((rec, s) => rec.addQuaternion(s, QUATERNION_NOMINAL_HZ)),
@@ -770,7 +815,7 @@ export function createTrialController(opts: TrialControllerOptions): TrialContro
   const run = async (): Promise<void> => {
     if (finished) return;
     ensureRecorder();
-    pollHidden();
+    pollHidden(0);
     if (opts.readyCue !== false) cue('ready', t0);
     sourceStarted = true;
     inSourceStart = true;

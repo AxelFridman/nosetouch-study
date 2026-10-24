@@ -28,6 +28,10 @@ import numpy as np
 import pandas as pd
 
 from .conventions import GRAVITY, rotation_from_gravity
+
+#: outcome.note of choice-trial copies whose ``hand`` is the plan's placeholder, not the participant's
+#: answer (app/src/app/sessionFlow.ts): saved before the hand question / a failed attempt, and "not sure"
+UNREPORTED_HAND_NOTES = ('hand_not_reported', 'hand_unsure')
 from .io import Dataset
 from .preprocess import lowpass, repeated_sample_mask, resample_uniform
 from .report import df_to_markdown, dict_to_markdown
@@ -428,10 +432,15 @@ def _protocol_v2_summary(tr: pd.DataFrame, ss: pd.DataFrame, summary: dict[str, 
             keys).size().rename('sessions').reset_index()
         summary['sessions ended early'] = int((ss['status'] == 'ended_early').sum())
     if 'hand_source' in tr.columns:
-        rep = tr['hand_source'] == 'reported'
-        summary['choice trials (hand reported)'] = int(rep.sum())
-        if rep.any():
-            summary['choice trials accepted'] = int(_bool(tr.loc[rep, 'accepted']).sum())
+        # hand_source 'reported' marks every attempt of a street choice trial; its hand is the participant's
+        # answer only on the answered copy: the copy saved before the question, a failed attempt (never
+        # asked about) and "not sure" keep the plan's placeholder hand (notes in UNREPORTED_HAND_NOTES)
+        choice = tr['hand_source'] == 'reported'
+        unreported = tr['note'].isin(UNREPORTED_HAND_NOTES) if 'note' in tr.columns else pd.Series(False, index=tr.index)
+        summary['choice trials'] = int(choice.sum())
+        summary['choice trials (hand reported)'] = int((choice & ~unreported).sum())
+        if choice.any():
+            summary['choice trials accepted'] = int(_bool(tr.loc[choice, 'accepted']).sum())
     v2_cols = ('return_observed', 'has_quaternion_abs_stream', 'has_orientation_abs_stream', 'has_magnetometer_stream')
     has_return = tr['return_observed'].notna() if 'return_observed' in tr.columns else pd.Series(False, index=tr.index)
     v2_present = bool(has_return.any()) or any(_bool(tr[c]).any() for c in v2_cols[1:] if c in tr.columns) or (

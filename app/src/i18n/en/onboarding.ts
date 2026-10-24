@@ -2,7 +2,8 @@
 // → (researchers' session setup), and the done screen. Functions are allowed for interpolation.
 // Hebrew mirror: ../he/onboarding.ts (identical keys and array lengths; tests/i18n.test.ts checks this).
 // NOTE for the PI: the consent wording (welcome.summary*, welcome.agree and consent.*) is the version
-// in public/config.json consent_version (2026-10-v2); bump it whenever this wording changes.
+// in public/config.json consent_version (2026-10-v3); bump it whenever this wording changes.
+// v3 (Oct 2026): ~30 movements (+ an optional bonus), no bed/sofa advice, Hebrew wording fixes.
 import type { HandednessSelf, PhoneHand, ProtocolPreset, Sex } from '../../core/types';
 
 export const onboarding = {
@@ -13,7 +14,7 @@ export const onboarding = {
       'Animation: a person holds the phone with the arm stretched out, brings it in to touch the tip of the nose, then stretches the arm out again.',
     // the four key facts of the consent, shown before everything else
     summaryDuration:
-      "You'll hold your phone at arm's length and touch your nose with it, about 40 times — around 5 minutes. You can stop at any time; everything you've done is kept.",
+      "You'll hold your phone at arm's length and touch your nose with it, about 30 times — around 5 minutes, plus an optional 1-minute bonus. You can stop at any time; everything you've done is kept.",
     summarySensors: "We record only the phone's motion sensors (movement and rotation) — no camera, microphone or location.",
     /** uploads: data goes to the research server; names: the name goes too (config.upload_nickname) */
     summaryStored: (uploads: boolean, names: boolean): string =>
@@ -22,7 +23,11 @@ export const onboarding = {
           ? 'We store your name, age, sex, dominant hand and height with the data on a private research server.'
           : 'We store your age, sex, dominant hand and height with the data on a private research server. Your name stays on this phone.'
         : 'Your name, age, sex, dominant hand and height are stored with the data on this phone until it is sent to the researcher.',
-    summaryDelete: 'To have your data deleted, contact the researcher (details below).',
+    /** hasContact: config.contact names someone (shown below the facts) */
+    summaryDelete: (hasContact: boolean): string =>
+      hasContact
+        ? 'To have your data deleted, contact the researcher (details below).'
+        : 'To have your data deleted, contact the researcher who sent you this link and give your participant code (shown at the end).',
     fullInfo: 'Full information',
     /** region: StudyConfig.region in this language ('' → no location clause) */
     agree: (minAge: number, region: string) =>
@@ -31,6 +36,10 @@ export const onboarding = {
     start: 'Start',
     continueAs: (name: string) => `Continue as ${name}`,
     continueHint: 'Tap Start to check your answers and go on.',
+    /** with an unfinished session on this phone */
+    resumeHint: 'Tap “Resume session” to carry on where you stopped.',
+    /** Start, when an unfinished session could be resumed instead */
+    startOver: 'Start over',
     newPerson: 'New person',
     resumeTitle: 'Unfinished session',
     resumeBody: (done: number, total: number) => `${done} of ${total} ${total === 1 ? 'movement' : 'movements'} recorded.`,
@@ -50,9 +59,13 @@ export const onboarding = {
     warnNoMotion:
       'This browser does not provide motion sensors. Please open the link on your phone, in Safari (iPhone) or Chrome (Android).',
     warnInApp: (app: string) =>
-      `You opened this link inside the ${app} app. Motion sensors often do not work there: tap the ⋯ or ⋮ menu and choose "Open in browser", or copy the link into Safari (iPhone) or Chrome (Android).`,
+      `Please open this link in your browser (Safari on iPhone, Chrome on Android): tap ⋯ or ⋮ and choose "Open in browser", or copy the link. Inside ${app}, motion access may be asked again on every visit, the spoken instructions may not work and your progress stays inside ${app}.`,
     warnInAppGeneric:
-      'You opened this link inside another app. Motion sensors often do not work there: tap the ⋯ or ⋮ menu and choose "Open in browser", or copy the link into Safari (iPhone) or Chrome (Android).',
+      'Please open this link in your browser (Safari on iPhone, Chrome on Android): tap ⋯ or ⋮ and choose "Open in browser", or copy the link. Inside another app, motion access may be asked again on every visit, the spoken instructions may not work and your progress stays inside that app.',
+    copyLink: 'Copy the link',
+    linkCopied: 'Link copied: paste it into Safari or Chrome.',
+    /** iOS in-app browser: Start becomes this secondary button */
+    continueHere: 'Continue here anyway',
     warnSim:
       'Simulation mode is on: a built-in simulator replaces the real sensors. For testing only — it switches off when the app is reloaded.',
     warnSetup:
@@ -78,7 +91,7 @@ export const onboarding = {
       'About 5 minutes, and at the end an optional bonus round of about 1 minute. You can pause or stop at any time; everything recorded until then is kept.',
     risksTitle: 'Risks and safety',
     risks: [
-      'You might drop the phone: hold it firmly and, if you can, stand or sit where it would land on a bed or a sofa.',
+      'You might drop the phone: hold it firmly.',
       'You might bump your nose: always touch it gently, also in the "fast" movements.',
       'Stop right away if anything hurts or feels uncomfortable.',
     ],
@@ -263,7 +276,7 @@ export const onboarding = {
     checklist: [
       'Make some room: you will stretch your arm out in front of you.',
       'Turn the volume up so you can hear the beeps.',
-      'If you can, stand or sit where the phone would land on a bed or a sofa if it slips.',
+      'Hold the phone firmly and touch your nose gently.',
     ],
     safetyTitle: 'Safety',
     start: 'Start recording',
@@ -275,13 +288,13 @@ export const onboarding = {
   done: {
     /** firstName: first word of the participant's name ('' → no name) */
     thanks: (firstName: string) => (firstName ? `Thank you, ${firstName}!` : 'Thank you!'),
-    completed: 'You finished the session. Thank you for helping our research!',
+    completed: 'You did all of it — that really helps our research.',
     endedEarly: 'You stopped before the end. Thank you: everything you did is kept and useful.',
     abandoned: 'The session ended early. Thank you: everything you recorded is still useful.',
     noSession: 'Thank you for taking part!',
-    recorded: (n: number) => `${n} ${n === 1 ? 'movement' : 'movements'} recorded`,
+    recorded: (n: number) => (n === 0 ? 'Nothing was recorded — no problem.' : `${n} ${n === 1 ? 'movement' : 'movements'} recorded`),
     uploadTitle: 'Sending your data',
-    allSent: 'All data uploaded ✓',
+    allSent: 'All data uploaded ✓ — you can close this page.',
     sending: (left: number) => `Uploading… please keep this page open a moment (${left} left)`,
     offline: (left: number) =>
       `This phone is offline: ${left} ${left === 1 ? 'item is' : 'items are'} waiting. ${left === 1 ? 'It is' : 'They are'} sent automatically the next time this page is open with an internet connection.`,
@@ -295,10 +308,12 @@ export const onboarding = {
     nothingToUpload: 'Nothing left to upload.',
     codeLabel: 'Your code:',
     codeHint: '(to delete your data later)',
-    detailsTitle: 'Details',
+    detailsTitle: 'For the researcher',
     attempts: 'Attempts (including repeats)',
     duration: 'Time',
-    nextPerson: 'Next person',
+    nextPerson: 'Someone else on this phone',
+    /** navigator.share of the study link (recruitment goes through WhatsApp) */
+    share: 'Send the link to a friend',
     home: 'Home',
     exportData: 'Save / share my data',
     exporting: 'Preparing your file…',

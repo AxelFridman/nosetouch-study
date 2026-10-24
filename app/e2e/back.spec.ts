@@ -13,14 +13,17 @@ import { expect, silenceLog, test } from './fixtures';
 import {
   currentView,
   disableWebShare,
+  expectAbove,
   exportBundle,
   fillProfile,
+  finishFromPause,
   onboard,
   openApp,
   setToggle,
   tapFresh,
   watchErrors,
 } from './helpers';
+import { en } from '../src/i18n/en';
 
 /** Waits for a trial on the live panel whose index satisfies `pred`, in its hold phase (before GO). */
 async function waitForHold(page: Page, pred: (trial: number) => boolean = () => true, timeout = 45_000): Promise<number> {
@@ -136,7 +139,7 @@ test('back never leaves a session: the pause sheet from every step; redo and wro
   // finish from the sheet; on the done screen back goes to the start screen, like its Home button
   await page.goBack();
   await expect(sheet).toBeVisible({ timeout: 10_000 });
-  await tapFresh(page, page.getByTestId('btn-finish-now'));
+  await finishFromPause(page);
   await expect(page.getByTestId('screen-done')).toBeVisible({ timeout: 30_000 });
   const bundle = await exportBundle(page);
   await page.goBack();
@@ -230,5 +233,36 @@ test('a returning participant resumes after a reload', async ({ page }) => {
   await expect(page.getByTestId('resume-card')).toBeVisible();
   await tapFresh(page, page.getByTestId('btn-resume-session'));
   await expect(page.getByTestId('howto-card')).toBeVisible();
+  expect(errors.pageErrors, errors.pageErrors.join('\n')).toEqual([]);
+});
+
+test('after a reload, Resume comes first on a phone-sized screen and the visit goes on where it stopped', async ({ page }) => {
+  test.setTimeout(3 * 60_000);
+  const errors = watchErrors(page);
+  await page.setViewportSize({ width: 390, height: 664 }); // the visible viewport of an iPhone 12–15 in Safari
+  await openApp(page);
+  await onboard(page);
+  // the free trial and the hand question: the first block's intro
+  await tapFresh(page, page.getByTestId('btn-try'));
+  await tapFresh(page, page.getByTestId('btn-hand-right'), 45_000);
+  await expect(page.getByTestId('block-intro')).toHaveAttribute('data-block-index', '1');
+
+  // the phone reloads the page (an app switch, a call, a discarded tab, the link opened again)
+  await page.reload();
+  await expect(page.getByTestId('screen-welcome')).toBeVisible();
+  const resume = page.getByTestId('btn-resume-session');
+  await expect(resume).toBeVisible();
+  await page.evaluate(() => window.scrollTo(0, 0));
+  // above the sticky footer (consent + Start), without scrolling
+  await expectAbove(page, resume, page.getByTestId('chk-consent'), 'welcome after a reload: Resume');
+  await expect(page.getByTestId('btn-start')).toHaveText(en.onboarding.welcome.startOver);
+
+  await tapFresh(page, resume);
+  // block 1's intro again, not the How-to card; on a fresh page the hand is named plainly
+  const intro = page.getByTestId('block-intro');
+  await expect(intro).toHaveAttribute('data-block-index', '1');
+  await expect(intro).toHaveAttribute('data-intro-line', 'phoneIn');
+  await expect(intro).toHaveAttribute('data-switch', '0');
+  expect(await silenceLog(page)).toEqual({ spoken: [], audioContexts: 0 });
   expect(errors.pageErrors, errors.pageErrors.join('\n')).toEqual([]);
 });

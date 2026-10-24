@@ -34,6 +34,18 @@ export async function tapFresh(page: Page, button: Locator, timeout = 30_000): P
   await button.click();
 }
 
+/**
+ * The pause sheet's "Finish now": two taps (the first one turns it into "Tap again to finish", so a
+ * sheet that opened by itself cannot end the visit with one nose touch).
+ */
+export async function finishFromPause(page: Page): Promise<void> {
+  const button = page.getByTestId('btn-finish-now');
+  await tapFresh(page, button);
+  await expect(button.locator('[data-confirm="1"]')).toBeVisible();
+  await page.waitForTimeout(TAP_DELAY_MS);
+  await button.click();
+}
+
 /** The checkbox/radio behind a tile or label: the element itself if it is an input, else its inner input. */
 export async function inputOf(el: Locator): Promise<Locator> {
   const tag = await el.evaluate((node) => node.tagName.toLowerCase());
@@ -386,7 +398,12 @@ export async function runSession(page: Page, opts: RunSessionOptions = {}): Prom
           return report;
         }
         if (d === 'continue') console.warn(`runSession: the pause sheet opened (${v.reason}); continuing`);
-        await tap(d === 'finish' ? 'btn-finish-now' : 'btn-continue-session', v);
+        if (d === 'finish') {
+          await finishFromPause(page);
+          await waitForViewChange(page, v);
+        } else {
+          await tap('btn-continue-session', v);
+        }
         break;
       }
       case 'btn-continue-session':
@@ -449,8 +466,10 @@ export async function chooseTwoTrialProtocol(page: Page): Promise<void> {
 
 // ───────────────────────────── results ─────────────────────────────
 
-/** Done screen → "Save / share my data" → the downloaded export (needs disableWebShare before the goto). */
+/** Done screen → "For the researcher" → "Save / share my data" → the downloaded export (needs disableWebShare before the goto). */
 export async function exportBundle(page: Page): Promise<ExportBundle> {
+  const details = page.getByTestId('done-details');
+  if ((await details.count()) > 0 && (await details.getAttribute('open')) === null) await details.locator('summary').click();
   const button = page.getByTestId('btn-export');
   await expect(button).toBeEnabled();
   const downloadPromise = page.waitForEvent('download');

@@ -468,7 +468,12 @@ describe('consent copy (v2: about 5 minutes, names stored, no away grips, no tab
     expect(c.procedure).toMatch(/Any part of the phone/);
     expect(c.collected.join(' ')).toMatch(/your name/);
     expect(c.retention('')).not.toMatch(/ethics committee/);
-    expect(en.onboarding.welcome.summaryDuration).toMatch(/about 40 times — around 5 minutes/);
+    expect(en.onboarding.welcome.summaryDuration).toMatch(/about 30 times — around 5 minutes, plus an optional 1-minute bonus/);
+    // v3: no bed / sofa advice for street participants (consent and every intro)
+    for (const strings of [en, he]) {
+      expect(strings.onboarding.consent.risks.join(' ')).not.toMatch(/bed|sofa|מיטה|ספה/);
+      expect(strings.common.safety).not.toMatch(/bed|sofa|מיטה|ספה/);
+    }
     expect(he.onboarding.consent.duration).toContain('5');
   });
 
@@ -482,9 +487,9 @@ describe('consent copy (v2: about 5 minutes, names stored, no away grips, no tab
     const [heRequired, heTotal] = counts(he.onboarding.consent.procedure, /בערך (\d+) פעמים \(ובערך (\d+) /);
     for (const n of [enRequired, heRequired]) expect(near(n, required), `${n} vs ${required} required`).toBe(true);
     for (const n of [enTotal, heTotal]) expect(near(n, total), `${n} vs ${total} with the bonus`).toBe(true);
-    // the key facts give the total and the main part's time
-    expect(near(counts(en.onboarding.welcome.summaryDuration, /about (\d+) times/)[0], total)).toBe(true);
-    expect(near(counts(he.onboarding.welcome.summaryDuration, /בערך (\d+) פעמים/)[0], total)).toBe(true);
+    // the key facts give the main part (and its time); the bonus is mentioned separately
+    expect(near(counts(en.onboarding.welcome.summaryDuration, /about (\d+) times/)[0], required)).toBe(true);
+    expect(near(counts(he.onboarding.welcome.summaryDuration, /בערך (\d+) פעמים/)[0], required)).toBe(true);
     expect(Math.abs(estimateMinutes(plan) - 5)).toBeLessThanOrEqual(0.5);
     for (const text of [en.onboarding.welcome.summaryDuration, en.onboarding.consent.duration, en.onboarding.setup.presets.street.desc]) {
       expect(text).toMatch(/\b5[ -]minute/i);

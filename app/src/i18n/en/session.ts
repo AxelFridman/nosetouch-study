@@ -24,13 +24,26 @@ export const session = {
     title: 'How to do it',
     anyPart: 'Any part of the phone may touch your nose.',
     steps: [
-      'Hold the phone in front of you, arm straight, screen facing you.',
-      'At the beep, bring it to touch your nose.',
-      'Hold still until the double beep, then stretch your arm out again — the next one starts by itself.',
+      'Arm straight, screen facing you. Hold still.',
+      'Beep → touch your nose with the phone (any part of it).',
+      'Wait there for the double beep, then arm out again. The next one starts by itself.',
     ],
     safety: 'Touch gently and hold the phone firmly.',
     sitting: 'I’m sitting',
-    try: 'Try it once — your way',
+    try: 'Try it once',
+    /** above the Try button: the free trial */
+    anyHand: 'Any hand. We’ll ask which one after.',
+    /** the at-nose cue is a sound: the screen cannot be read there */
+    sound: 'Sound on: the beeps tell you when to move.',
+    testBeep: 'Play a test beep',
+    tips: 'For these 5 minutes: Do Not Disturb on, Low Power Mode / Battery Saver off.',
+    pauseHint: 'To stop or take a break, press and hold “Hold to pause”.',
+    /** the screen wake lock was refused (Home Screen apps on older iOS, some in-app browsers) */
+    wakeLock: 'Your screen may switch off by itself during the movements: set the automatic screen lock (Auto-Lock / Screen timeout) to 5 minutes for this visit.',
+    /** measured motion rate below the usual ~60 Hz (still usable) */
+    slowSensors: (hz: number) =>
+      `Your phone’s motion sensors report ${hz} times per second (about 60 is usual). Turning off Low Power Mode / Battery Saver may help.`,
+    noGyro: 'This phone does not report rotation (gyroscope): you can take part, but some data will be missing.',
     gestureAria: 'Animation: the arm is stretched out, the phone comes in and touches the nose, then the arm stretches out again.',
     angledAria: 'Animation: the phone arrives tilted and touches the nose with its top edge.',
   },
@@ -48,12 +61,27 @@ export const session = {
     newHand: 'Switch hands!',
     odd: 'In this block every movement is a little different and unusual. Read each instruction before you tap Ready.',
     free: 'In this block, hold the phone in whatever way feels natural to you.',
-    choice: 'Try it once, your way: use whichever hand and grip feel natural. Afterwards we ask which hand you used.',
     start: 'Start',
     /** the block-start button names the hand (tap it with the free hand) */
     startIn: (hand: Hand) => `Start — phone in ${HAND_CAPS(hand)} hand`,
     phoneIn: (hand: Hand) => `Phone in your ${HAND_CAPS(hand)} hand`,
     keepIn: (hand: Hand) => `Keep the phone in your ${HAND_CAPS(hand)} hand`,
+    /** the same hand, another grip: the big line says how to turn the phone */
+    turnTo: {
+      upright_toward: 'Phone upright again',
+      upright_away: 'Turn the phone: upright, screen away',
+      top_left_toward: 'Turn the phone: top to your LEFT',
+      top_right_toward: 'Turn the phone: top to your RIGHT',
+      upside_down_toward: 'Turn the phone upside down',
+      upside_down_away: 'Turn the phone: upside down, screen away',
+      top_left_away: 'Turn the phone: top to your LEFT, screen away',
+      top_right_away: 'Turn the phone: top to your RIGHT, screen away',
+      flat_up: 'Hold the phone flat, screen up',
+      free: 'Hold the phone any way you like',
+    } as Record<OrientationId, string>,
+    sameHand: (hand: Hand) => `Same hand: ${HAND_CAPS(hand)}`,
+    /** a block with FAST movements */
+    fastGentle: 'FAST still means a gentle touch.',
     /** tier label of a street block: 0 choice, 1 basics, 2 sideways, 3 variety, 4 bonus */
     tier: (tier: number) => TIERS[tier] ?? `Part ${tier}`,
     basicsDone: 'Basics done — great! The rest adds variety. You can stop any time.',
@@ -105,6 +133,7 @@ export const session = {
       sensor_stalled: 'The motion sensors stopped',
       return_arm: 'Arm out again',
       wrong_grip: 'Hold the phone like the picture',
+      read: 'Read this first…',
     } as Record<TrialMessage, string>,
     /** the status line of the live panel, by phase (see SessionScreen.statusKey) */
     status: {
@@ -116,12 +145,30 @@ export const session = {
       at_nose: 'Hold…',
       returning: 'Arm out again',
       wrong_grip: 'Hold the phone like the picture',
+      read: 'Read this first…',
+      /** bent_start: the start pose itself is different */
+      waitingBent: 'Elbow bent — hold still',
       too_early: 'Too early! Wait for the beep',
       sensor_stalled: 'The motion sensors stopped',
       no_movement: 'No movement detected',
       too_long: 'That took too long',
       done: 'Done!',
     },
+    /** the grip in words (wrong grip: the picture may be turned when the screen does not rotate) */
+    gripWords: {
+      upright_toward: 'Hold the phone upright',
+      upright_away: 'Hold the phone upright, screen away from you',
+      top_left_toward: 'Top of the phone to your LEFT',
+      top_right_toward: 'Top of the phone to your RIGHT',
+      upside_down_toward: 'Hold the phone upside down',
+      upside_down_away: 'Upside down, screen away from you',
+      top_left_away: 'Top to your LEFT, screen away from you',
+      top_right_away: 'Top to your RIGHT, screen away from you',
+      flat_up: 'Hold the phone flat, screen up',
+      free: 'Hold the phone any way you like',
+    } as Record<OrientationId, string>,
+    /** a press of "Hold to pause" released too early */
+    keepHolding: 'Keep holding…',
     /** the huge speed word of the live panel */
     speedWords: { natural: 'NORMAL', fast: 'FAST', slow: 'SLOW' } as Record<Speed, string>,
     /** the hand word of the choice trial */
@@ -143,17 +190,24 @@ export const session = {
       hidden: 'The app went to the background, so the movement in progress was stopped.',
       stalled: 'The motion sensors stopped sending data. Hold the phone still for a moment, then tap Continue.',
       idle: 'Nothing happened for a while. Stretch your arm out, hold still and wait for the beep.',
+      wrong_grip: 'The phone was held another way. Hold it as the screen shows, then tap Continue.',
       failed_twice: 'That did not work twice in a row. Read the instruction on the screen again, then tap Continue.',
       save_failed: 'The last movement could not be saved on the phone. Tap Continue to try again.',
       error: 'Something went wrong while recording. Tap Continue to try again.',
     },
     continue: 'Continue',
+    /** idle while the grip gate held GO back: `grip` = live.gripWords of the trial */
+    gripReason: (grip: string) => `The phone was held another way. ${grip}, then tap Continue.`,
     redo: 'Redo last movement',
     wrongHand: 'Last one was the wrong hand',
+    /** which movement Redo / wrong hand refer to, e.g. "LEFT hand · FAST" */
+    lastMovement: (what: string) => `Last movement: ${what}`,
     finish: 'Finish now',
-    later: 'Continue later',
+    /** the second step of Finish now */
+    finishConfirm: 'Tap again to finish',
+    later: 'Exit for now',
     laterToast: 'Session paused. You can continue later from the start screen.',
-    kept: 'Everything you recorded is kept, also if you finish now.',
+    kept: 'Finishing now is fine — everything so far is kept.',
   },
 
   // After the main part (tier 3), before the optional bonus blocks.

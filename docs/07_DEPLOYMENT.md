@@ -2,19 +2,20 @@
 
 This guide takes the study from the repository to a live link and back to data on your laptop, in the order you will do it. Commands are for Windows PowerShell, the student's machine. Differences for macOS and Linux are noted where they matter.
 
-**Related:** [Project overview](00_PROJECT_OVERVIEW.md) · [Data schema](02_DATA_SCHEMA.md) · [Sensors and platforms](03_SENSORS_AND_PLATFORMS.md) · [Considerations](06_CONSIDERATIONS.md) · [Stage 3 predictor](08_STAGE3_PREDICTOR.md) · backend [`backend/google-apps-script/`](../backend/google-apps-script/) · receiver [`server/receiver.py`](../server/receiver.py)
+**Related:** [Project overview](00_PROJECT_OVERVIEW.md) · [Data schema](02_DATA_SCHEMA.md) · [Sensors and platforms](03_SENSORS_AND_PLATFORMS.md) · [Considerations](06_CONSIDERATIONS.md) · [Stage 3 predictor](08_STAGE3_PREDICTOR.md) · [Field guide](10_FIELD_GUIDE.md) · upload service [`backend/heroku/`](../backend/heroku/README.md) · alternative backend [`backend/google-apps-script/`](../backend/google-apps-script/) · receiver [`server/receiver.py`](../server/receiver.py)
 
 ## Overview
 
 | Piece | Where it runs | Source | How you change it |
 |---|---|---|---|
-| Collector app (PWA) | Participants' phone browsers. GitHub Pages serves it as static files. | `app/` | Push to `main`. The deploy workflow rebuilds it. |
+| Collector app (PWA) | Participants' phone browsers. GitHub Pages serves it as static files, at <https://axelfridman.github.io/nosetouch-study/> for this study. | `app/` | Push to `main`. The deploy workflow rebuilds it. |
 | Study settings | Fetched by the app every time it starts; the last copy is kept for offline starts | `app/public/config.json` | Edit the file and push. No code change. |
-| Upload backend | Google Apps Script web app in the study's Google account. Writes to Drive and to an index Sheet. | `backend/google-apps-script/` | Manage deployments > New version. The URL stays the same. |
+| Upload service (this study) | A FastAPI service with Postgres on Heroku: live uploads, an admin page, exports, deletion | `backend/heroku/` | `backend/heroku/deploy.sh <app>`; see its [README](../backend/heroku/README.md). |
+| Upload backend (alternative) | Google Apps Script web app in a study Google account. Writes to Drive and to an index Sheet. | `backend/google-apps-script/` | Manage deployments > New version. The URL stays the same. |
 | Local receiver (optional) | Lab laptop | `server/receiver.py` | Run it during a lab session. |
 | Analysis kit | Your laptop | `analysis/` | Python |
 
-Data path: phone (IndexedDB outbox) → one HTTPS POST per record → Apps Script → `<Drive folder>/<study_code>/<participant_id>/<session_id>/*.json` plus one index row → your download → `analysis/data/` (git-ignored). The receiver and the synthetic generator write the same folder layout ([Data schema §7](02_DATA_SCHEMA.md#7-storage-layout)).
+Data path: phone (IndexedDB outbox) → one HTTPS POST per record, sent right after every save → the Heroku service → Postgres → `analysis/scripts/pull_live.py` → `analysis/data/live/` (git-ignored), in the folder layout `<study_code>/<participant_id>/<session_id>/*.json`. Apps Script writes the same layout to Drive, and the receiver and the synthetic generator write it to disk ([Data schema §7](02_DATA_SCHEMA.md#7-storage-layout)).
 
 ## Prerequisites
 
@@ -24,7 +25,8 @@ Data path: phone (IndexedDB outbox) → one HTTPS POST per record → Apps Scrip
 | Git and a GitHub account | any | On the Free plan the repository must be public (§3). |
 | Python | 3.10 or newer (CI uses 3.11) | Windows: the `py` launcher |
 | cloudflared | current | See §2. |
-| Google account | dedicated to the study | See §4. |
+| Heroku account and CLI | for the upload service | [backend/heroku/README.md](../backend/heroku/README.md); the service's URL, study key and admin token live in `%USERPROFILE%\.nosetouch\heroku.env`, never in the repository. |
+| Google account | only for the Apps Script alternative | See §4. |
 | Test phones | one iPhone and one Android phone | Borrow if needed. |
 
 ## 1. Run locally with the simulator
@@ -35,15 +37,16 @@ npm ci
 npm run dev
 ```
 
-Open <http://localhost:5173/?sim=1>. The built-in simulator plays a participant. It holds still, reacts to the GO beep and performs the instructed movement with the instructed hand, so the whole flow runs in a desktop browser: consent, profile, sensor check, calibration, session, export.
+Open <http://localhost:5173/?sim=1>. The built-in simulator plays a participant. It holds still, reacts to the GO cue, performs the instructed movement with the instructed hand and stretches the arm out again, so the whole street visit runs in a desktop browser: welcome and consent, profile, the How-to card, the free trial and its hand question, the hands-free blocks, the checkpoint, done and export. It never beeps or talks: the app silences itself in simulation mode and in automated browsers.
 
-*Code:* records made this way carry `simulated: true`, and `?sim=1` is never remembered (`app/src/app/App.tsx`, `app/src/app/state.ts`). Reload without it to use real sensors. Without `?sim=1`, a desktop browser reports "No motion events arrive", which is expected. Add `?lang=he` for the Hebrew interface.
+*Code:* records made this way carry `simulated: true`, and `?sim=1` is never remembered (`app/src/app/App.tsx`, `app/src/app/state.ts`). Reload without it to use real sensors. Without `?sim=1`, a desktop browser has no motion sensors, so the profile's Continue opens the sensor repair screen, which is expected. Add `&lang=he` for the Hebrew interface, and `&setup=1` to choose another preset or a short custom session.
 
 | Command (in `app/`) | What it does |
 |---|---|
 | `npm run typecheck` | Checks the TypeScript types. |
 | `npm test` | Runs the unit tests (Vitest). |
-| `npm run e2e` | Playwright drives the participant journeys in simulation mode, headless and silent (`e2e/fixtures.ts`, `--mute-audio`), in a Pixel 7 viewport, and starts the dev server itself (about 5 minutes). The first time, run `npx playwright install chromium`. |
+| `npm run e2e` | Playwright drives the participant journeys in simulation mode, headless and silent (`e2e/fixtures.ts`, `--mute-audio`), in a Pixel 7 viewport, and starts the dev server itself (about 5 minutes). Nothing leaves the computer: the fixtures serve `config.json` with uploads off and block, and fail the test on, every request to another host. The first time, run `npx playwright install chromium`. |
+| `npm run e2e:live` | Smoke test of the deployed site (default: the GitHub Pages URL; `LIVE_URL=…` for another): the simulated journeys of `flow.spec.ts` and the boot check against the production build. Its records **are uploaded** to the backend in the deployed `config.json` (marked `simulated: true`, dropped by rule S1 and by `pull_live.py --real-only`). Run it only on purpose. |
 | `npm run build` | Typechecks, then builds for production into `app/dist/`. |
 | `npm run preview` | Serves `app/dist/` on port 4173 on all network interfaces, with the service worker. |
 | `npm run synth -- …` | Generates a synthetic dataset through the real recording pipeline (see below). |
@@ -114,7 +117,7 @@ Once participants are recording, follow these release rules:
 
 1. Every push to `main` that touches `app/` redeploys the app participants use, and that includes edits to `config.json`. Develop on a branch and merge to `main` only to release.
 2. Bump the version in `app/package.json` and `APP_VERSION` in `app/src/core/constants.ts` together. A unit test checks that they match, and every record carries `app_version`.
-3. Tag each release used for collection: run `git tag collect-0.1.0`, then `git push --tags`.
+3. Tag each release used for collection: run `git tag collect-0.2.0`, then `git push --tags`.
 4. Do not deploy on a collection day or on the day of the PI's evaluation.
 5. *Code:* `.github/workflows/ci.yml` runs the typecheck, the unit tests and the Python tests (`analysis/tests`, `server`) on pushes to `main` and on pull requests. Pushes to other branches are not tested until you open a pull request.
 
@@ -122,7 +125,9 @@ Limits: the published site can be at most 1 GB, and bandwidth has a soft limit o
 
 ## 4. Connect the backend and edit config.json
 
-### 4.1 What the backend does
+**This study uploads to the Heroku service** (`upload.mode: "json_post"`). Its README covers deployment, the admin page, the export for the analysis kit and deletion: [backend/heroku/README.md](../backend/heroku/README.md); the field steps are in [10](10_FIELD_GUIDE.md). §4.1–4.3 describe the Google Apps Script backend, the free alternative that needs no server of your own; §4.4 applies to both.
+
+### 4.1 What the Apps Script backend does
 
 - **What it is.** A free Google Apps Script web app that runs in the study's own Google account. There is no server and no billing.
 - **How the app sends.** *Code:* the app sends each record as one `UploadEnvelope` (`{kind, study_key, sent_at, record}`), in a `POST` with a plain string body and no custom headers (`app/src/core/uploader.ts`). That makes it a CORS "simple request", so the browser sends no preflight, which Apps Script could not answer ([Fetch standard][fetch-spec]).
@@ -165,22 +170,22 @@ The `/exec` URL stays the same. **New deployment** creates a new URL, and `confi
 
 ### 4.4 Edit `app/public/config.json`
 
-| Field | Default | Meaning | When to change |
+| Field | In this study's file | Meaning | When to change |
 |---|---|---|---|
-| `study_code` | `"nose-touch-v1"` | Stored in every record and used as the top folder in Drive. Must match `[A-Za-z0-9_-]{1,64}`. | For each new wave: pilot, main, validation |
-| `upload.mode` | `"none"` | `"apps_script"`, `"json_post"` (your own server, such as the receiver) or `"none"` (no upload; participants export a file). | Set `"apps_script"` after approval and §4.2. |
-| `upload.endpoint` | `""` | The `/exec` URL, any `https://` URL, or a same-origin path such as `/api/ingest`. | Together with the mode |
-| `upload.study_key` | `""` | Sent inside the body and checked by the backend. It filters spam; it is not a secret. | If junk uploads appear. Change it together with `STUDY_KEY` in the backend, and see item 3 below |
-| `upload_nickname` | `false` | Whether the nickname is uploaded too. | Keep `false`. |
-| `consent_version` | `"2026-10-v1"` | Copied into each session. | Whenever the consent text changes |
-| `contact.name`, `contact.email` | `""` | The researcher contact shown to participants. | Before recruiting |
-| `institution.en`, `institution.he` | `""` | The institution named in the consent and About texts ("Researchers at …"). Empty gives neutral wording. | Once the ethics committee has approved the study |
-| `region.en`, `region.he` | `""` | Where participants must be, e.g. `"Israel"` / `"ישראל"`; it adds "I am taking part from …" to the consent checkbox. Empty omits the clause. | If recruitment is restricted (see [06](06_CONSIDERATIONS.md)) |
+| `study_code` | `"nose-touch-v1"` | Stored in every record and used as the top folder of every export. Must match `[A-Za-z0-9_-]{1,64}`. | For a new wave, e.g. a validation cohort |
+| `upload.mode` | `"json_post"` | `"json_post"` (the Heroku service, or the receiver), `"apps_script"`, or `"none"` (no upload; participants export a file). The built-in fallback is `"none"`. | Only when switching backends |
+| `upload.endpoint` | `"https://nosetouch-study-14d4b1cd9830.herokuapp.com/api/ingest"` | Any `https://` URL, or a same-origin path such as `/api/ingest`. | Together with the mode |
+| `upload.study_key` | set | Sent inside the body and checked by the backend (`STUDY_KEY` on Heroku). It filters spam; it is not a secret. | If junk uploads appear. Change it together with the backend's key, and see item 3 below |
+| `upload_nickname` | `true` | Whether the participant's name (`nickname`) is uploaded. The consent wording follows the setting. | Names are uploaded with consent in this study ([06 §2](06_CONSIDERATIONS.md#2-privacy-and-security)); changing it changes the consent, so bump `consent_version` too |
+| `consent_version` | `"2026-10-v3"` | Copied into each session. | Whenever the consent text changes |
+| `contact.name`, `contact.email` | `""` | The researcher contact shown to participants; while empty, the consent says "contact the researcher who sent you this link". | Before recruiting beyond people who know you |
+| `institution.en`, `institution.he` | `""` | The institution named in the consent and About texts ("Researchers at …"). Empty gives neutral wording. | If wanted |
+| `region.en`, `region.he` | `""` | Where participants must be, e.g. `"Israel"` / `"ישראל"`; it adds "I'm taking part from …" to the consent checkbox. Empty omits the clause. | If recruitment is restricted (see [06](06_CONSIDERATIONS.md)) |
 | `default_language` | `"en"` | `"en"` or `"he"`. Participants can switch, and `?lang=` overrides it. | For Hebrew-speaking cohorts |
-| `default_preset` | `"standard"` | `quick`, `standard`, `full` or `custom`. | Per wave |
-| `min_age` | `18` | The age gate. | Only if the ethics approval says so |
+| `default_preset` | `"street"` | The session every participant gets: `street`, `quick`, `standard`, `full` or `custom`. Researchers choose another one with `?setup=1`. | Per wave |
+| `min_age` | `18` | The age gate. | Keep 18 |
 
-Example for the Apps Script backend:
+Example for the Apps Script alternative (only the upload block differs from this study's file):
 
 ```json
 {
@@ -190,13 +195,13 @@ Example for the Apps Script backend:
     "endpoint": "https://script.google.com/macros/s/<DEPLOYMENT_ID>/exec",
     "study_key": "<a random string, also set in the backend>"
   },
-  "upload_nickname": false,
-  "consent_version": "2026-11-v1",
+  "upload_nickname": true,
+  "consent_version": "2026-10-v3",
   "contact": { "name": "<your name>", "email": "<your university e-mail>" },
-  "institution": { "en": "<institution, after approval>", "he": "<the same in Hebrew>" },
+  "institution": { "en": "", "he": "" },
   "region": { "en": "Israel", "he": "ישראל" },
   "default_language": "en",
-  "default_preset": "standard",
+  "default_preset": "street",
   "min_age": 18
 }
 ```
@@ -205,7 +210,7 @@ How changes reach phones, and what can go wrong:
 
 1. **Publishing.** The file is part of the deployed site. Edit it on GitHub (pencil icon, commit to `main`) or edit it locally and push. The deploy workflow runs because the path is under `app/`, and the change is live a few minutes later.
 2. **Picked up at the next start.** *Code:* the app fetches `config.json` with `cache: 'no-store'` every time it starts (`app/src/core/config.ts`), so phones pick up the change the next time the app is opened. A phone that keeps the app open keeps the old values until it is reloaded. Offline, the app uses the copy the service worker cached (production builds precache `config.json`) or the last configuration it loaded on that phone, so an offline launch still has the study's `study_code`, `consent_version`, consent texts and upload settings. Only a phone that has never loaded the file runs on the built-in defaults. After such a fallback the app fetches the file again once the phone is back online.
-3. **Changing the study key.** Set the new value in the backend's `STUDY_KEY` Script Property and in `upload.study_key` at the same time. Phones that still have the app open send the old key until the app is reloaded. The backend rejects those uploads (`bad_study_key`) without storing them, and the app does not retry such a permanent rejection on its own. The records stay on the phone: after a reload, "Upload now" on the Done or Data screen sends them with the new key. Rotate between collection days, and ask anyone with the app open to close and reopen it.
+3. **Changing the study key.** Set the new value in the backend's `STUDY_KEY` (a Heroku config var, or the Apps Script Script Property) and in `upload.study_key` at the same time. Phones that still have the app open send the old key until the app is reloaded. The backend rejects those uploads (`bad_study_key`) without storing them, and the app does not retry such a permanent rejection on its own. The records stay on the phone: after a reload, "Upload now" on the Done or Data screen sends them with the new key. Rotate between collection days, and ask anyone with the app open to close and reopen it.
 4. **Invalid values fail silently.** *Code:* each bad value falls back to a default:
    - an unknown `upload.mode` becomes `"none"`;
    - an endpoint that is neither `https://` nor a same-origin path becomes `""`, which turns uploads off;
@@ -218,7 +223,7 @@ How changes reach phones, and what can go wrong:
 
 ### 4.5 File-only mode
 
-With `upload.mode: "none"`, nothing leaves the phone. *Code:* the Done screen then asks the participant to tap "Save / share my data" and send the file to the researcher. Chrome on Android refuses to share `.json` files, so the app retries as `….json.txt` or downloads the file instead ([Chromium share allowlist][cr-share-allowlist]; `app/src/core/exporter.ts`). Use this mode before approval, for self-testing, or if the committee rejects cloud storage. The export is also every participant's fallback when uploads fail.
+With `upload.mode: "none"`, nothing leaves the phone. *Code:* the Done screen then asks the participant to tap "Save / share my data" and send the file to the researcher. Chrome on Android refuses to share `.json` files, so the app retries as `….json.txt` or downloads the file instead ([Chromium share allowlist][cr-share-allowlist]; `app/src/core/exporter.ts`). Use this mode for self-testing, or when data must not leave the phone. The export is also every participant's fallback when uploads fail.
 
 ## 5. Local receiver for lab sessions
 
@@ -262,22 +267,18 @@ After the session, copy `server/received/` into a dated snapshot (§7) and back 
 
 ### 6.1 Before sharing the link
 
-1. Ethics approval is in place, and the consent text, `consent_version` and `contact` are final ([Considerations §1](06_CONSIDERATIONS.md#1-ethics-and-law)).
-2. `upload.mode` is set, and an end-to-end test passed (§4.2, step 5).
-3. Both test phones completed a `quick` session on the live URL.
+1. The consent text, `consent_version` and `contact` are final. The participants are the researcher's adult friends, and no ethics review is sought: the researcher's decision ([Considerations §1](06_CONSIDERATIONS.md#1-ethics-and-law)).
+2. Uploads reach the service: record one trial on a phone and see it on the admin page ([10](10_FIELD_GUIDE.md#check-uploads-live)).
+3. An iPhone and an Android phone each completed a street visit on the live URL ([03 §8](03_SENSORS_AND_PLATFORMS.md#8-pilot-verification-checklist)).
 
 ### 6.2 The link
 
-Share the Pages URL as text and as a QR code. Any QR generator works, and Chrome on desktop has one built in. Two optional URL parameters, `?lang=he` and `?lang=en`, set the language and are remembered on that phone. Never share a link with `?sim=1`.
+Share the Pages URL as text and as a QR code. Any QR generator works, and Chrome on desktop has one built in. Two optional URL parameters, `?lang=he` and `?lang=en`, set the language and are remembered on that phone. Never share a link with `?sim=1` or `?setup=1`.
 
-Example message (adapt it, and get it approved together with the consent text):
+The two-sentence explanation for friends, in English and Hebrew, and what to do on the spot are in the [field guide](10_FIELD_GUIDE.md). Tell participants:
 
-> We are studying how a phone moves when people bring it to their nose. It takes about 15–20 minutes on your own phone, with no app to install. You need to be 18 or older and in Israel. Left-handed people are especially welcome. Open this link in Safari (iPhone) or Chrome (Android): <URL>
-
-Tell participants:
-
-- **Open the link in Safari or Chrome**, not inside WhatsApp, Instagram or Facebook. If it opens inside another app, use that app's "Open in browser" option. *Code:* the app detects in-app browsers (`device.in_app_browser`) and asks the participant to switch. Brave on Android blocks the motion sensors ([Brave][brave-sensors]).
-- **Keep the app open** until the Done screen says "All your data has been sent to the researchers."
+- **Open the link in Safari or Chrome**, not inside WhatsApp, Instagram or Facebook. If it opens inside another app, use that app's "Open in browser" option. *Code:* the app detects the in-app browsers it knows (`device.in_app_browser`) and asks the participant to switch. Brave on Android blocks the motion sensors ([Brave][brave-sensors]).
+- **Keep the page open** until the Done screen says "All data uploaded ✓".
 - **Stay in one browser on one phone.** A second browser or the Home Screen copy starts a new, separate profile ([Data schema §10](02_DATA_SCHEMA.md#10-deduplication-rules)).
 
 ### 6.3 Add to Home Screen (optional)
@@ -292,10 +293,9 @@ This is recommended for iPhone participants who will come back on another day. H
 ### 6.4 Before each collection day
 
 1. Open the live URL on a test phone and check the app version.
-2. Open the `/exec` URL and check that it answers `"ok": true`.
-3. Check the Apps Script Executions page for errors since the last session, and check the Drive storage.
-4. Charge the phones and turn off Low Power Mode on the iPhones.
-5. Plan no deploys for the day.
+2. Open the service's `/api/health` and check that it answers `"ok": true`, then sign in to the admin page and look at "Refused or ignored uploads" (Apps Script: the `/exec` health route and the Executions page).
+3. Charge the phones and turn off Low Power Mode on the iPhones.
+4. Plan no deploys for the day.
 
 ## 7. Collect the data and run the analysis kit
 
@@ -303,8 +303,9 @@ This is recommended for iPhone participants who will come back on another day. H
 
 | Source | How | Where to put it |
 |---|---|---|
-| Drive folder | Download the study folder (the web UI zips large folders into 2 GB parts, [Google][drive-zip]) or sync it with Google Drive for desktop. | A dated, read-only snapshot, for example `analysis/data/real/2026-11-20/` (git-ignored) |
-| Index Sheet | File > Download > CSV | Next to the snapshot. Use it as the inventory and for the weekly recruitment counts. |
+| The Heroku database (this study) | `analysis\.venv\Scripts\python.exe analysis\scripts\pull_live.py --real-only` (credentials from `heroku.env`; [10](10_FIELD_GUIDE.md#pull-the-data)) | `analysis/data/live/`, replaced on every pull; copy it to a dated snapshot before analysing |
+| Drive folder (Apps Script) | Download the study folder (the web UI zips large folders into 2 GB parts, [Google][drive-zip]) or sync it with Google Drive for desktop. | A dated, read-only snapshot, for example `analysis/data/real/2026-11-20/` (git-ignored) |
+| Index Sheet (Apps Script) | File > Download > CSV | Next to the snapshot. Use it as the inventory and for the weekly recruitment counts. |
 | Lab receiver | Copy `server/received/`. | The same snapshot |
 | Participant exports | Files named `nosetouch_<participant_id>_<YYYYMMDD-HHMM>.json` (or `.json.txt`), format `nose-touch-export` | An `exports/` sub-folder of the snapshot |
 
@@ -343,9 +344,10 @@ The library is `analysis/motionlab`, with the modules `io`, `conventions`, `prep
 | Rotation data missing (`rotation_available: false`) | The phone has no gyroscope (some budget Android phones), so the `rotationRate` fields are null ([Chromium][cr-dm-pump-cc]). | Flag the participant. Gyro-based features are not available for that phone. |
 | iPhone: motion permission "denied" with no prompt | An earlier Cancel is cached for the site until Safari is quit ([WebKit][wk-permission-cache]; [Apple forum][apple-forum-128376]), or the page is not on HTTPS, which is denied silently. | Follow the steps on screen; they depend on where the app runs. Safari tab: fully close Safari (swipe it away in the app switcher) and reopen the link. Home Screen app: close it in the app switcher and open it again from the Home Screen. Chrome, Firefox or Edge for iOS: close that browser completely. In-app browser: open the link in Safari. Do not use a Private tab mid-session: it has separate, temporary storage, so the participant gets a new code and cannot resume. Deleting the site's website data is not a reliable reset either (WebKit keeps the decision in memory per app process), and it deletes unsent data. |
 | Android: motion access blocked | Chrome's site setting for motion sensors. Since Chrome 151 it can be Allow, Ask or Block ([Chrome 151][chrome-151]). | ⋮ > Settings > Site settings > Motion sensors, then allow the site. |
-| No sound | The media volume is down, Bluetooth headphones are connected, or audio is not unlocked yet (the first tap unlocks it; [Chrome autoplay policy][chrome-autoplay]). The iPhone ringer switch should not matter, because the app requests the `playback` audio session where supported (Safari 16.4+; [MDN data][bcd-audiosession]). | Raise the media volume, disconnect the headphones and tap Ready again. The colour cues work regardless. |
+| No sound | The media volume is down, Bluetooth headphones are connected, or audio is not unlocked yet (the first tap unlocks it; [Chrome autoplay policy][chrome-autoplay]). The iPhone ringer switch should not matter, because the app requests the `playback` audio session where supported (Safari 16.4+; [MDN data][bcd-audiosession]). | Raise the media volume, disconnect the headphones and tap again (Continue, or the next block's Start: iOS plays audio only after a tap, and on iPhones that tap also repairs or replaces audio that stayed silent after a call or an app switch). "Play a test beep" on the How-to card checks the sound. The colour cues work regardless. On a computer running the simulator the silence is deliberate. |
 | Uploads stay pending or failed, and the console shows `TypeError: Failed to fetch` | Apps Script answered with an HTML error page, which has no CORS header. Causes: the deployment was deleted or not updated, an uncaught script error, a missing re-authorisation, or a quota error. Other causes: a content blocker blocks `script.google.com`, or the phone is offline ([Tanaike][tanaike-webapps]; [content blockers][dwyl-358]). | Open the `/exec` URL (health check) and the Executions page. Redeploy as a new version (§4.3), and run a function in the editor to re-authorise. These failures retry automatically with backoff (*Code:* `uploader.ts`); a refusal by the backend does not (next row). A participant with a blocker can export instead. |
-| Uploads are rejected (`bad_study_key` or another `retry: false` answer) and stay failed | The phone still carries an old `study_key` (it was open while you changed the key), or the backend refuses the record. Rejected uploads are not stored, and the app does not retry them on its own. | Reload the app so it reads the current `config.json`, then tap "Upload now" on the Done or Data screen. The `quarantine` sheet (local receiver: `server/received/quarantine.log`) lists the reason for each rejection (§4.4, item 3). |
+| Uploads are rejected (`bad_study_key` or another `retry: false` answer) and stay failed | The phone still carries an old `study_key` (it was open while you changed the key), or the backend refuses the record. Rejected uploads are not stored, and the app does not retry them on its own. | Reload the app so it reads the current `config.json`, then tap "Upload now" on the Done or Data screen. The reason of each refusal is on the admin page ("Refused or ignored uploads"; Apps Script: the `quarantine` sheet; local receiver: `server/received/quarantine.log`) (§4.4, item 3). |
+| Heroku: every upload answers 503 and the phones keep retrying | The database is unreachable or not attached (`DATABASE_URL`), so the service stores nothing on purpose. | `heroku logs --tail -a <app>` (look for `database_missing`), `/api/health`; the phones keep their records and send them once it answers again ([backend/heroku](../backend/heroku/README.md#operations)). |
 | CORS error in the console | `json_post` mode is pointed at Apps Script: its `Content-Type: application/json` triggers a preflight that Apps Script cannot answer ([Tanaike][tanaike-webapps]). Or your own `json_post` server does not answer `OPTIONS`. | Use `"apps_script"` mode for Apps Script. On your own server, answer preflights (the receiver does). |
 | The `/exec` URL shows a Google sign-in page in a private window | The web app was deployed with "Anyone with Google account" or "Only myself". | Edit the deployment and set Who has access to Anyone (§4.2). |
 | "Service invoked too many times", or uploads stop after a busy session | Apps Script quotas: 30 simultaneous executions per user, and daily quotas that reset 24 h after the first request ([quotas][gas-quotas]). Or Drive is full ([Google One][googleone-15gb]). | Let the queue retry, spread lab sessions over time, and free Drive space. |
@@ -358,7 +360,8 @@ The library is `analysis/motionlab`, with the modules `io`, `conventions`, `prep
 | "UnknownError: Connection to Indexed Database server lost" | WebKit's networking process died ([WebKit bug 273827][wk-idb-273827]). | *Code:* the app reopens the database and retries once. If the error persists, reload. |
 | Low sample rate (< 50 Hz) in the QA report | iOS Low Power Mode (its effect is undocumented), Firefox on a phone that lacks one of the motion sensors (events at about 10 Hz, inferred from the source; [Firefox][ff-nsdevicesensors]), or a busy page. | Turn off Low Power Mode, use Safari or Chrome, and exclude the trials by the QA rule. |
 | The screen rotates during landscape trials | A web page cannot lock the screen orientation on iOS ([MDN data][bcd-screenorientation]). | On iPhone, turn on Rotation Lock in Control Center. On Android, turn off auto-rotate. |
-| Trials end as `interrupted` | The page was hidden by a notification, a screen lock or an app switch ([W3C][w3c-do]). | Turn on Do Not Disturb, keep the screen on and keep the app in front. |
+| Trials end as `interrupted` and the session pauses | The page was hidden by a call, a notification, a screen lock or an app switch ([W3C][w3c-do]). A trial that was already recording the return of the arm stays complete (`return_cut_short`, `hidden_after_end`). | Tap Continue. Turn on Do Not Disturb, keep the screen on and keep the app in front. |
+| The screen dims or locks during a block; trials carry `wake_lock_not_held` | The screen wake lock was refused (Home Screen apps before iOS 18.4, some in-app browsers) or released. | Set Auto-Lock (iPhone) or Screen timeout (Android) to 5 minutes for the visit, as the How-to card then asks; use Safari or Chrome. |
 
 [wk-permission]: https://github.com/WebKit/WebKit/blob/main/Source/WebCore/dom/DeviceOrientationAndMotionAccessController.cpp
 [wk-permission-cache]: https://github.com/WebKit/WebKit/blob/main/Source/WebKit/UIProcess/WebsiteData/WebDeviceOrientationAndMotionAccessController.cpp

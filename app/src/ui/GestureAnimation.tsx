@@ -77,6 +77,11 @@ export interface GestureAnimationProps extends GestureOptions {
   label?: string;
   /** at most 320 px wide: for a session card */
   compact?: boolean;
+  /**
+   * default true: the outlined "?" of the participant's choice (hand null). Cards that say "any hand"
+   * in words pass false: on a phone the badge looked like a help button that does nothing.
+   */
+  badge?: boolean;
 }
 
 export interface GesturePhase {
@@ -1229,7 +1234,7 @@ interface Still {
   touch: boolean;
 }
 
-function SideScene(props: { plan: GesturePlan; still?: Still }) {
+function SideScene(props: { plan: GesturePlan; still?: Still; badge?: boolean }) {
   const { plan, still } = props;
   const live = !still;
   const tl = plan.takes[still?.take ?? 0];
@@ -1265,7 +1270,7 @@ function SideScene(props: { plan: GesturePlan; still?: Still }) {
           </g>
         </g>
       </g>
-      {live && plan.choice && <ChoiceBadge x={SIDE_VIEW.w - 13} y={13} />}
+      {live && plan.choice && props.badge !== false && <ChoiceBadge x={SIDE_VIEW.w - 13} y={13} />}
     </svg>
   );
 }
@@ -1443,7 +1448,7 @@ function Burst() {
   );
 }
 
-function PovScene(props: { plan: GesturePlan; still?: Still }) {
+function PovScene(props: { plan: GesturePlan; still?: Still; badge?: boolean }) {
   const { plan, still } = props;
   const live = !still;
   const tl = plan.takes[still?.take ?? 0];
@@ -1487,7 +1492,7 @@ function PovScene(props: { plan: GesturePlan; still?: Still }) {
         <Burst />
       </g>
       <EyeIcon />
-      {live && plan.choice && <ChoiceBadge x={POV_VIEW - 15} y={15} />}
+      {live && plan.choice && props.badge !== false && <ChoiceBadge x={POV_VIEW - 15} y={15} />}
     </svg>
   );
 }
@@ -1593,14 +1598,14 @@ export function GestureAnimation(props: GestureAnimationProps) {
         {views.includes('side') && (
           <div class="gx-panel gx-panel-side">
             <div class="gx-ratio gx-ratio-side">
-              <SideScene plan={plan} />
+              <SideScene plan={plan} badge={props.badge} />
             </div>
           </div>
         )}
         {views.includes('pov') && (
           <div class="gx-panel gx-panel-pov">
             <div class="gx-ratio gx-ratio-pov">
-              <PovScene plan={plan} />
+              <PovScene plan={plan} badge={props.badge} />
             </div>
           </div>
         )}

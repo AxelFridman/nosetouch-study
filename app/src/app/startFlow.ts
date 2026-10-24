@@ -11,7 +11,7 @@
 import type { PermissionState } from '../core/types';
 import { isoTime } from '../core/util';
 import { stringsFor } from '../i18n';
-import { createSession } from './sessionFlow';
+import { createSession, recentSessionOf, resumeSession } from './sessionFlow';
 import {
   awaitSensorCheck,
   beginSensorCheck,
@@ -112,9 +112,12 @@ export function startFromWelcome(consented: boolean, deps: WelcomeStartDeps = WE
 
 /**
  * Continue on the profile (or on the repair screen): waits for the background sensor check (at most
- * SENSOR_WAIT_MS), then opens the repair screen, the researcher's setup screen, or creates the session
- * with the study's default preset and opens it. Resolves with where it went; rejects only when the
- * session could not be created (the caller shows the error).
+ * SENSOR_WAIT_MS), then opens the repair screen, the researcher's setup screen, or the session: the
+ * participant's unfinished session updated within RESUME_ON_CONTINUE_MS (a reload, an app switch,
+ * "Exit for now") is resumed where it stopped — unless they chose "Start over" (state.startOver) —
+ * else a new one is created with the study's default preset (createSession then ends their older
+ * unfinished sessions as abandoned). Resolves with where it went; rejects only when the session could
+ * not be created (the caller shows the error).
  */
 export async function continueToSession(waitMs: number = SENSOR_WAIT_MS): Promise<StartRoute> {
   const check = await awaitSensorCheck(waitMs);
@@ -138,9 +141,17 @@ export async function continueToSession(waitMs: number = SENSOR_WAIT_MS): Promis
     case 'setup':
       navigate('setup');
       break;
-    default:
+    default: {
+      const pid = st.participant?.participant_id;
+      const recent = pid && !st.startOver ? await recentSessionOf(pid) : null;
+      if (recent && (await resumeSession(recent.session_id).catch(() => null))) {
+        navigate('session');
+        break;
+      }
       await createSession({ preset: st.config.default_preset, posture: 'standing', custom: null });
+      setState({ startOver: false });
       navigate('session');
+    }
   }
   return route;
 }
@@ -154,5 +165,5 @@ export async function continueToSession(waitMs: number = SENSOR_WAIT_MS): Promis
 export function forgetParticipant(): void {
   resetSensorCheck();
   updateSettings({ last_participant_id: null });
-  setState({ participant: null, calibration: null, consentAcceptedAt: null, session: null });
+  setState({ participant: null, calibration: null, consentAcceptedAt: null, session: null, startOver: false });
 }

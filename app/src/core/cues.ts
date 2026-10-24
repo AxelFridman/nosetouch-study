@@ -19,10 +19,15 @@
  * play() must never throw and must be cheap (called from sensor handlers).
  *
  * Implementation notes:
- *  - One AudioContext for the app's lifetime; unlock() is idempotent and cheap, so the UI may call
- *    it in EVERY "start" tap (iOS suspends/interrupts the context after the page was hidden and
- *    only a gesture can resume it). unlock() does its work synchronously before returning the
- *    promise, so the gesture is still active when resume() runs.
+ *  - One AudioContext at a time; unlock() is idempotent and cheap, so the UI may call it in EVERY
+ *    "start" tap (iOS suspends/interrupts the context after the page was hidden and only a gesture
+ *    can resume it). unlock() does its work synchronously before returning the promise, so the
+ *    gesture is still active when resume() runs.
+ *  - iOS repair (WebKit bugs 276016, 273511, 283419): after a call, an alarm or an app switch a
+ *    context can read 'interrupted' and stay silent, ignore resume(), or even read 'running' while
+ *    silent. unlock() therefore runs suspend() and then resume() inside the tap whenever the context
+ *    is not 'running', and on iPhones/iPads (WebKit) in EVERY tap; a context that is still not
+ *    'running' REPAIR_CHECK_MS later is closed and replaced by the next tap.
  *  - play() never creates the context (that can take tens of ms — far too slow for a sensor
  *    handler) and skips the sound while the context is not 'running' (a suspended context would
  *    play the beep LATE, at an unknown time); it asks for a resume so the next cue can sound.
@@ -46,8 +51,10 @@ export interface CueOptions {
 }
 
 export interface AppCueSink extends CueSink {
-  /** Create/resume the AudioContext. Call from a user gesture. */
+  /** Create/resume (or repair, see the module doc) the AudioContext. Call from a user gesture. */
   unlock(): Promise<void>;
+  /** true when an utterance was queued (speech on, a voice engine, not silenced) */
+  say(text: string, lang: Language): boolean;
   setOptions(o: CueOptions): void;
 }
 
@@ -130,6 +137,8 @@ interface AudioContextLike {
   createBuffer?(channels: number, length: number, sampleRate: number): unknown;
   createBufferSource?(): BufferSourceLike;
   resume(): Promise<void>;
+  suspend?(): Promise<void>;
+  close?(): Promise<void>;
 }
 
 type AudioContextCtor = new () => AudioContextLike;
@@ -165,6 +174,8 @@ interface CueGlobals {
   SpeechSynthesisUtterance?: unknown;
   navigator?: {
     webdriver?: boolean;
+    userAgent?: string;
+    maxTouchPoints?: number;
     vibrate?: (pattern: number[]) => boolean;
     audioSession?: { type?: string };
     wakeLock?: { request?: (type: 'screen') => Promise<SentinelLike> } | null;
@@ -181,6 +192,20 @@ function G(): CueGlobals {
 }
 
 const noop = (): void => undefined;
+
+/** unlock(): a context that is not 'running' this long after its repair is replaced at the next tap. */
+export const REPAIR_CHECK_MS = 300;
+
+/** iPhone / iPad (every iOS browser is WebKit; iPadOS may report a Mac with touch). */
+export function isTouchWebKit(): boolean {
+  try {
+    const nav = G().navigator;
+    const ua = typeof nav?.userAgent === 'string' ? nav.userAgent : '';
+    return /\b(iPhone|iPad|iPod)\b/.test(ua) || (/\bMacintosh\b/.test(ua) && (nav?.maxTouchPoints ?? 0) > 1);
+  } catch {
+    return false;
+  }
+}
 
 /**
  * True in browsers driven by automation (Playwright, Puppeteer, Selenium all set
@@ -229,6 +254,8 @@ export function pickVoice<V extends VoiceLike>(voices: readonly V[], lang: Langu
 export function createCueSink(o: CueOptions, env: CueSinkEnv = {}): AppCueSink {
   let opts: CueOptions = { ...o };
   let ctx: AudioContextLike | null = null;
+  /** the context stayed silent after a repair: the next unlock() replaces it */
+  let replaceCtx = false;
   const isSilenced = (): boolean => {
     try {
       return env.silenced?.() === true;
@@ -303,14 +330,43 @@ export function createCueSink(o: CueOptions, env: CueSinkEnv = {}): AppCueSink {
     }
     let resumed: Promise<void> = Promise.resolve();
     try {
-      if (ctx && ctx.state === 'closed') ctx = null; // a closed context can never play again
+      if (ctx && (ctx.state === 'closed' || replaceCtx)) {
+        // a closed context can never play again; one that stayed silent after a repair is replaced
+        const old = ctx;
+        ctx = null;
+        replaceCtx = false;
+        if (old.state !== 'closed' && typeof old.close === 'function') {
+          try {
+            Promise.resolve(old.close()).then(noop, noop);
+          } catch {
+            // already closing
+          }
+        }
+      }
       if (!ctx) {
         const Ctor = (g.AudioContext ?? g.webkitAudioContext) as AudioContextCtor | undefined;
         if (typeof Ctor === 'function') ctx = new Ctor();
       }
       const c = ctx;
       if (c) {
-        if (c.state !== 'running') resumed = Promise.resolve(c.resume()).then(noop, noop);
+        // 'interrupted' anywhere, and every state on iPhones / iPads, get the repair cycle
+        const repair = isTouchWebKit() || (c.state !== 'running' && c.state !== 'suspended');
+        if (repair) {
+          // 'interrupted' (or iOS silent while 'running'): suspend, then resume, both inside the tap
+          if (typeof c.suspend === 'function') {
+            try {
+              Promise.resolve(c.suspend()).then(noop, noop);
+            } catch {
+              // not suspendable now: the resume below still runs
+            }
+          }
+          resumed = Promise.resolve(c.resume()).then(noop, noop);
+          setTimeout(() => {
+            if (ctx === c && c.state !== 'running') replaceCtx = true;
+          }, REPAIR_CHECK_MS);
+        } else if (c.state !== 'running') {
+          resumed = Promise.resolve(c.resume()).then(noop, noop);
+        }
         // Old iOS needs a sound started inside the gesture to really unlock: one silent sample.
         if (typeof c.createBuffer === 'function' && typeof c.createBufferSource === 'function') {
           const src = c.createBufferSource();
@@ -349,13 +405,13 @@ export function createCueSink(o: CueOptions, env: CueSinkEnv = {}): AppCueSink {
     }
   }
 
-  function say(text: string, lang: Language): void {
+  function say(text: string, lang: Language): boolean {
     try {
-      if (!opts.speech || !text || isSilenced()) return;
+      if (!opts.speech || !text || isSilenced()) return false;
       const g = G();
       const synth = g.speechSynthesis;
       const Utterance = g.SpeechSynthesisUtterance as (new (text: string) => UtteranceLike) | undefined;
-      if (!synth || typeof Utterance !== 'function') return;
+      if (!synth || typeof Utterance !== 'function') return false;
       trackVoices(synth);
       if (voices.length === 0) refreshVoices(synth);
       if (synth.speaking || synth.pending) synth.cancel();
@@ -367,8 +423,10 @@ export function createCueSink(o: CueOptions, env: CueSinkEnv = {}): AppCueSink {
       u.pitch = 1;
       u.volume = 1;
       synth.speak(u);
+      return true;
     } catch {
       // speech is optional
+      return false;
     }
   }
 

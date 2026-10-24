@@ -18,11 +18,17 @@
  *
  * UI rules:
  *  - The live panel re-renders at most ~15 Hz (immediately on phase/message changes), never per sample.
+ *    It is read at arm's length: the hand and the speed are the biggest words; a special movement or
+ *    start position takes the speed word's place with one short how-line; "Read this first…" shows
+ *    while GO waits for the reading time; a wrong grip is said in words (the grip picture only shows
+ *    when the page turned with the phone: gripFigureFits).
  *  - Touches anywhere on the panel go to controller.addTouch with their contact details.
  *  - No motion sample for STALL_MS → abort('stalled'); auto mode: no GO within IDLE_MS → abort('idle').
  *  - Taps within TAP_GUARD_MS of a step change are ignored, and the buttons of a screen that appears
  *    without a tap of the participant (after a trial: the phone may still be near the face) stay
- *    disabled for ARM_DELAY_MS, so a nose or a cheek cannot press them.
+ *    disabled for ARM_DELAY_MS — ARM_DELAY_SLOW_MS after a trial whose arm was not seen going back
+ *    out (runner.slowArm) — so a nose or a cheek cannot press them. The pause sheet's Finish now takes
+ *    two taps; its Exit for now and the header's Pause go through the same guards.
  *  - Nothing animates while a trial records: the animations are on the intro screens only.
  */
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
@@ -50,7 +56,7 @@ import { PhoneFigure } from '../../ui/PhoneFigure';
 import { finiteMax, motionMagnitudes, SignalPlot, type SignalMarker, type SignalSeries } from '../../ui/SignalPlot';
 import { useStrings, type Strings } from '../../i18n';
 import { getServices } from '../services';
-import { createTapGuard } from '../state';
+import { createTapGuard, TAP_GUARD_MS } from '../state';
 import { navigate, setBackHandler, useAppState } from '../store';
 import { deniedContext } from './SensorCheckScreen';
 import {
@@ -59,13 +65,15 @@ import {
   blockPosition,
   blockSpeeds,
   buildTrialOptions,
+  introWording,
   isChoiceTrial,
   plannedAt,
-  previousBlock,
+  planIntroRef,
   progressOf,
   reviewModeOf,
   roundMinutes,
   secondsLeft,
+  type IntroRef,
   type TrialDecision,
 } from '../sessionFlow';
 import {
@@ -73,10 +81,12 @@ import {
   type PauseReason,
   type RecorderPort,
   type RecorderStart,
+  type RedoTarget,
   type RunInfo,
   type SessionRunner,
   type UiAbort,
 } from '../sessionRunner';
+import { GOOD_MOTION_HZ, MIN_MOTION_HZ } from '../sensorCheck';
 import '../../ui/session.css';
 
 // the session logic's helpers, also reachable from here (tests, older imports)
@@ -103,6 +113,13 @@ export const STALL_MS = 2000;
 export const RENDER_MS = 66;
 /** Buttons of a screen that appeared without a tap stay disabled this long (see the module doc). */
 export const ARM_DELAY_MS = 900;
+/**
+ * ... and this long when the trial before it did not see the arm go back out (or ran too long): the
+ * phone may still be at the face, where a nose or a cheek could press the next screen's buttons.
+ */
+export const ARM_DELAY_SLOW_MS = 2500;
+/** "Hold to pause" released before it fired: "Keep holding…" shows this long. */
+export const HOLD_HINT_MS = 1500;
 /** If the controller does not deliver a record this long after an abort, give up on it. */
 const FINISH_FALLBACK_MS = 3000;
 const FLAGS: ParticipantFlag[] = ['wrong_hand', 'wrong_orientation', 'other_problem'];
@@ -140,6 +157,7 @@ export function statusKey(phase: TrialPhase | null, message: TrialMessage | null
     case 'sensor_stalled':
     case 'no_movement':
     case 'too_long':
+    case 'read':
       return message;
     case 'return_arm':
       return 'returning';
@@ -164,6 +182,38 @@ export function statusKey(phase: TrialPhase | null, message: TrialMessage | null
     default:
       return 'starting';
   }
+}
+
+/** The status line of a trial: statusKey, but "Elbow bent — hold still" for the bent_start start pose. */
+export function trialStatusKey(phase: TrialPhase | null, message: TrialMessage | null, c: TrialCondition): StatusKey {
+  const key = statusKey(phase, message);
+  return key === 'waiting' && c.variant === 'bent_start' ? 'waitingBent' : key;
+}
+
+/**
+ * The live panel's big words: the hand, and in the speed slot the speed — or, for a special movement
+ * or start position at natural speed (every variety cell), that movement's short label (NORMAL never
+ * changes in the variety blocks). `label` is then shown there and `how` below it.
+ */
+export function panelWords(c: TrialCondition, s: Strings): { speed: string; special: boolean; label: string | null; how: string | null } {
+  const sp =
+    c.variant !== 'standard' ? s.common.variants[c.variant] : c.start_position !== 'natural' ? s.common.startPositions[c.start_position] : null;
+  if (!sp) return { speed: s.session.live.speedWords[c.speed], special: false, label: null, how: null };
+  if (c.speed === 'natural') return { speed: sp.label, special: true, label: null, how: sp.how };
+  return { speed: s.session.live.speedWords[c.speed], special: false, label: sp.label, how: sp.how };
+}
+
+/**
+ * Can the grip picture be trusted? It is drawn in page coordinates, so it is right only when the page
+ * turned with the phone: a sideways phone on a landscape page, an upright one on a portrait page. With
+ * the rotation locked (common) a sideways phone keeps a portrait page and the picture looks turned by
+ * 90° — then only the words show. Unknown readings never show it.
+ */
+export function gripFigureFits(seen: PhoneRotation | 'unknown' | null | undefined, screenType: string | null): boolean {
+  if (!seen || seen === 'unknown' || seen === 'flat' || !screenType) return false;
+  const landscape = screenType.startsWith('landscape');
+  const sideways = seen === 'top_left' || seen === 'top_right';
+  return landscape === sideways;
 }
 
 /** The pause control works before the movement only: at the nose, the nose itself could long-press it. */
@@ -212,6 +262,31 @@ export function variesLine(block: PlannedBlock, s: Strings): string | null {
   }
   if (items.length > 0) return s.session.intro.variesList(items.join(' · '));
   return blockSpeeds(block).length > 1 ? s.session.intro.speedsVary : null;
+}
+
+/**
+ * The How-to card's "Play a test beep": inside the tap it unlocks (or repairs) the audio, then plays the
+ * GO beep once the context runs. Silent on computers like every cue (the cue sink's own gate).
+ */
+function playTestBeep(): void {
+  try {
+    const { cues } = getServices();
+    void cues
+      .unlock()
+      .then(() => cues.play('go'))
+      .catch(() => undefined);
+  } catch {
+    // no audio: nothing to test
+  }
+}
+
+/** The screen wake lock is held (true when it cannot be told, so no false alarm). */
+function wakeLockActive(): boolean {
+  try {
+    return getServices().wakeLock.active !== false;
+  } catch {
+    return true;
+  }
 }
 
 function safeScreenOrientation(): { type: string | null; angle: number | null } {
@@ -315,6 +390,7 @@ function useTrialRecorder(onFinished: FinishHandler): Recorder {
           readyCue: o.readyCue,
           awaitReturn: o.awaitReturn,
           gripGate: o.gripGate,
+          readMs: o.readMs,
         }),
       );
     } catch (e) {
@@ -408,14 +484,25 @@ function ProgressRing(props: { value: number }) {
   );
 }
 
-/** Pause control that only fires after a ~800 ms press (a nose touch lasts 80–240 ms and must never trigger it). */
-function HoldToPause(props: { disabled: boolean; onPause: () => void; label: string; aria: string }) {
+/**
+ * Pause control that only fires after a ~800 ms press (a nose touch lasts 80–240 ms and must never
+ * trigger it). Released too early, it says `holdHint` ("Keep holding…") for HOLD_HINT_MS.
+ */
+function HoldToPause(props: { disabled: boolean; onPause: () => void; label: string; holdHint: string; aria: string }) {
   const [pressing, setPressing] = useState(false);
+  const [hint, setHint] = useState(false);
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
-  const cancel = () => {
+  const hintTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const cancel = (early: boolean) => {
+    const wasPressing = timer.current !== undefined;
     clearTimeout(timer.current);
     timer.current = undefined;
     setPressing(false);
+    if (early && wasPressing) {
+      setHint(true);
+      clearTimeout(hintTimer.current);
+      hintTimer.current = setTimeout(() => setHint(false), HOLD_HINT_MS);
+    }
   };
   const begin = () => {
     if (props.disabled || timer.current) return;
@@ -423,12 +510,22 @@ function HoldToPause(props: { disabled: boolean; onPause: () => void; label: str
     timer.current = setTimeout(() => {
       timer.current = undefined;
       setPressing(false);
+      setHint(false);
       props.onPause();
     }, 800);
   };
-  useEffect(() => () => clearTimeout(timer.current), []);
+  useEffect(
+    () => () => {
+      clearTimeout(timer.current);
+      clearTimeout(hintTimer.current);
+    },
+    [],
+  );
   useEffect(() => {
-    if (props.disabled) cancel();
+    if (props.disabled) {
+      cancel(false);
+      setHint(false);
+    }
   }, [props.disabled]);
   return (
     <button
@@ -437,21 +534,22 @@ function HoldToPause(props: { disabled: boolean; onPause: () => void; label: str
       disabled={props.disabled}
       aria-label={props.aria}
       data-testid="btn-pause"
+      data-hint={hint ? 'keep-holding' : undefined}
       onPointerDown={begin}
-      onPointerUp={cancel}
-      onPointerLeave={cancel}
-      onPointerCancel={cancel}
+      onPointerUp={() => cancel(true)}
+      onPointerLeave={() => cancel(false)}
+      onPointerCancel={() => cancel(false)}
       onKeyDown={(e) => {
         if ((e.key === 'Enter' || e.key === ' ') && !e.repeat) {
           e.preventDefault();
           begin();
         }
       }}
-      onKeyUp={cancel}
+      onKeyUp={() => cancel(true)}
       onContextMenu={(e) => e.preventDefault()}
     >
       <span class="tp-stop-fill" aria-hidden="true" />
-      <span class="tp-stop-text">{props.label}</span>
+      <span class="tp-stop-text">{hint && !pressing ? props.holdHint : props.label}</span>
     </button>
   );
 }
@@ -471,18 +569,17 @@ function TrialPanel(props: {
   const phase: TrialPhase | null = flash ? 'done' : (live?.phase ?? (run.chained ? 'waiting_still' : null));
   const message: TrialMessage | null = flash ?? (stalled ? 'sensor_stalled' : (live?.message ?? null));
   const tone = panelTone(phase, message);
-  const status = s.session.live.status[statusKey(phase, message)];
+  const gripWords = s.session.live.gripWords[c.orientation];
+  // a wrong grip is said in words: the picture can look turned when the page does not rotate
+  const status = message === 'wrong_grip' && !flash ? gripWords : s.session.live.status[trialStatusKey(phase, message, c)];
   const before = phase === null || phase === 'waiting_still' || phase === 'foreperiod';
-  const holding = !flash && !stalled && before && message !== 'too_early' && message !== 'wrong_grip' && message !== 'return_arm';
+  const holding =
+    !flash && !stalled && before && message !== 'too_early' && message !== 'wrong_grip' && message !== 'return_arm' && message !== 'read';
   const showGrip = !flash && (message === 'wrong_grip' || (run.gripHint && before));
+  const figure = showGrip && gripFigureFits(live?.grip_seen, safeScreenOrientation().type);
   const stillProgress = phase === 'foreperiod' ? 1 : (live?.still_progress ?? 0);
   const choice = isChoiceTrial(c);
-  const special =
-    c.variant !== 'standard'
-      ? s.common.variants[c.variant]
-      : c.start_position !== 'natural'
-        ? s.common.startPositions[c.start_position]
-        : null;
+  const words = panelWords(c, s);
   const pct = props.progress.total > 0 ? Math.min(1, props.progress.done / props.progress.total) : 0;
   const onTouch = (type: 'start' | 'end' | 'cancel') => (e: JSX.TargetedTouchEvent<HTMLDivElement>) =>
     props.recorder.touch(type, e);
@@ -513,18 +610,19 @@ function TrialPanel(props: {
         <span class={`tp-hand tp-hand-${choice ? 'any' : c.hand}`} data-testid="tp-hand">
           {choice ? s.session.live.anyHand : s.common.handShort[c.hand]}
         </span>
-        <span class="tp-speed" data-testid="tp-speed">
-          {s.session.live.speedWords[c.speed]}
+        <span class={`tp-speed ${words.special ? 'tp-speed-special' : ''}`} data-testid="tp-speed">
+          {words.speed}
         </span>
       </div>
-      {special && (
+      {words.how && (
         <p class="tp-variant" data-testid="tp-variant">
-          <strong>{special.label}</strong> <span>{special.how}</span>
+          {words.label && <strong>{words.label}</strong>} <span>{words.how}</span>
         </p>
       )}
-      {showGrip && (
-        <div class="tp-grip" data-testid="tp-grip">
-          <PhoneFigure orientation={c.orientation} size={104} />
+      {showGrip && (message !== 'wrong_grip' || figure) && (
+        <div class="tp-grip" data-testid="tp-grip" data-figure={figure ? 'shown' : 'hidden'}>
+          {message !== 'wrong_grip' && <p class="tp-grip-words">{gripWords}</p>}
+          {figure && <PhoneFigure orientation={c.orientation} size={104} />}
         </div>
       )}
       {holding && <ProgressRing value={stillProgress} />}
@@ -535,6 +633,7 @@ function TrialPanel(props: {
         disabled={!!flash || stalled || !stopAllowed(phase)}
         onPause={() => props.recorder.abort('user')}
         label={s.session.live.pause}
+        holdHint={s.session.live.keepHolding}
         aria={s.session.live.pauseAria}
       />
     </div>
@@ -666,13 +765,31 @@ function TrialReview(props: { record: TrialRecord; busy: boolean; onDecide: (d: 
   );
 }
 
+/**
+ * Notes for the How-to card from the background sensor check: a slow motion rate (still usable) or no
+ * gyroscope; null when there is nothing to say (simulation, no measurement, a good rate).
+ */
+export function sensorNote(caps: SessionRecord['capabilities'] | null | undefined, simulated: boolean, t: Strings['session']['howTo']): string | null {
+  const m = caps?.measured;
+  if (simulated || !m) return null;
+  const hz = m.motion_hz;
+  if (typeof hz === 'number' && Number.isFinite(hz) && hz >= MIN_MOTION_HZ && hz < GOOD_MOTION_HZ) return t.slowSensors(Math.round(hz));
+  if (typeof hz === 'number' && hz >= MIN_MOTION_HZ && !m.rotation_available) return t.noGyro;
+  return null;
+}
+
 /** The intro of the choice block: how to do the movement, then one free trial (btn-try). */
 function HowToCard(props: {
   session: SessionRecord;
   headerRight: ComponentChildren;
   enabled: boolean;
   notices: ComponentChildren;
+  /** from the background sensor check (sensorNote) */
+  sensorNote: string | null;
+  /** the screen wake lock is not held: the screen may lock itself in the middle of a block */
+  wakeLockNote: boolean;
   onStart: () => void;
+  onTestBeep: () => void;
   onSitting: (sitting: boolean) => void;
 }) {
   const s = useStrings();
@@ -683,19 +800,24 @@ function HowToCard(props: {
       headerRight={props.headerRight}
       testId="screen-session"
       footer={
-        <Button size="xl" block testId="btn-try" disabled={!props.enabled} onClick={props.onStart}>
-          {t.try}
-        </Button>
+        <>
+          <p class="small howto-anyhand" data-testid="howto-anyhand">
+            {t.anyHand}
+          </p>
+          <Button size="xl" block testId="btn-try" disabled={!props.enabled} onClick={props.onStart}>
+            {t.try}
+          </Button>
+        </>
       }
     >
       <section class="stack howto" data-testid="howto-card">
         {props.notices}
         <div class="howto-demo" data-testid="gesture-demo">
-          <GestureAnimation hand={null} view="both" speed="natural" contact="straight" label={t.gestureAria} />
+          <GestureAnimation hand={null} view="both" speed="natural" contact="straight" badge={false} label={t.gestureAria} />
         </div>
         <div class="howto-angled">
           <div class="howto-angled-figure">
-            <GestureAnimation hand={null} view="side" contact="angled" compact label={t.angledAria} />
+            <GestureAnimation hand={null} view="side" contact="angled" compact badge={false} label={t.angledAria} />
           </div>
           <p class="howto-caption">{t.anyPart}</p>
         </div>
@@ -704,10 +826,31 @@ function HowToCard(props: {
             <li key={i}>{step}</li>
           ))}
         </ol>
-        <Notice kind="warn" testId="intro-safety">
+        <div class="howto-sound" data-testid="howto-sound">
+          <p class="howto-sound-text">{t.sound}</p>
+          <Button variant="secondary" testId="btn-test-beep" onClick={props.onTestBeep}>
+            {t.testBeep}
+          </Button>
+        </div>
+        <p class="small howto-tip" data-testid="howto-tips">
+          {t.tips}
+        </p>
+        <p class="small howto-tip" data-testid="howto-pause-hint">
+          {t.pauseHint}
+        </p>
+        {props.sensorNote && (
+          <Notice kind="warn" testId="howto-sensors">
+            {props.sensorNote}
+          </Notice>
+        )}
+        {props.wakeLockNote && (
+          <Notice kind="warn" testId="howto-wakelock">
+            {t.wakeLock}
+          </Notice>
+        )}
+        <p class="small muted" data-testid="intro-safety">
           {t.safety}
-        </Notice>
-        <p class="muted small">{s.session.intro.choice}</p>
+        </p>
         <Toggle
           testId="tgl-sitting"
           checked={props.session.protocol.posture === 'sitting'}
@@ -719,11 +862,17 @@ function HowToCard(props: {
   );
 }
 
-/** The intro of a block: one tap (naming the hand) starts it. */
+/**
+ * The intro of a block: one tap (naming the hand) starts it. What changes comes first and stays above
+ * the Start button on small and landscape screens: the hand line worded against what the participant
+ * was last told or did (`introRef`, sessionFlow.introWording), then the grip, then the animation.
+ */
 function BlockIntro(props: {
   session: SessionRecord;
   planned: PlannedTrial;
   auto: boolean;
+  /** the runner's reference for the wording (null: the plan's previous block) */
+  introRef: IntroRef | null;
   headerRight: ComponentChildren;
   enabled: boolean;
   notices: ComponentChildren;
@@ -736,16 +885,21 @@ function BlockIntro(props: {
   const block = blockOf(session, planned.block_index);
   const hand = block?.hand ?? planned.condition.hand;
   const orientation = block?.orientation ?? planned.condition.orientation;
+  const wording = introWording({ hand, orientation }, props.introRef ?? planIntroRef(session, planned.block_index));
   const change = blockChange(session, planned.block_index);
-  const prev = previousBlock(session, planned.block_index);
-  const switchHands = !!prev && prev.kind !== 'choice' && prev.hand !== hand;
   const pos = blockPosition(session, planned.block_index);
   const title = typeof block?.tier === 'number' ? s.session.intro.tier(block.tier) : s.session.blockOf(pos.position, pos.count);
   const varies = block ? variesLine(block, s) : null;
-  const needsSafety = block?.kind === 'odd' || !!block?.trials.some((t) => t.condition.speed === 'fast');
+  const fast = !!block?.trials.some((t) => t.condition.speed === 'fast');
   const hasChoiceBlock = session.protocol.plan.some((b) => b.kind === 'choice');
   const g = gestureFor(planned.condition);
   const grip = s.common.orientations[orientation];
+  const line =
+    wording.line === 'phoneIn'
+      ? s.session.intro.phoneIn(hand)
+      : wording.line === 'turnTo'
+        ? s.session.intro.turnTo[orientation]
+        : s.session.intro.keepIn(hand);
   return (
     <Screen
       title={title}
@@ -757,25 +911,31 @@ function BlockIntro(props: {
         </Button>
       }
     >
-      {/* the notices come first: below the animation they sat under the sticky Start button */}
-      <section class="stack session-center block-intro" data-testid="block-intro" data-block-index={planned.block_index}>
-        {change.afterBasics && (
-          <Notice kind="ok" testId="intro-encourage">
-            {s.session.intro.basicsDone}
-          </Notice>
-        )}
+      <section
+        class="stack session-center block-intro"
+        data-testid="block-intro"
+        data-block-index={planned.block_index}
+        data-intro-line={wording.line}
+        data-switch={wording.switchHands ? '1' : '0'}
+      >
         {props.notices}
-        <div style={{ width: '100%' }}>
-          <ProgressBar
-            value={props.progress.total > 0 ? props.progress.done / props.progress.total : 0}
-            label={title}
-            right={s.session.live.minutesLeft(props.minutes)}
-          />
-        </div>
-        {switchHands && <p class="new-hand">{s.session.intro.newHand}</p>}
+        {wording.switchHands && (
+          <p class="new-hand" data-testid="intro-switch">
+            {s.session.intro.newHand}
+          </p>
+        )}
         <p class={`intro-hand hand-${hand}`} data-testid="intro-hand">
-          {change.handChanged ? s.session.intro.phoneIn(hand) : s.session.intro.keepIn(hand)}
+          {line}
         </p>
+        {wording.sameHand && (
+          <p class="intro-same" data-testid="intro-same-hand">
+            {s.session.intro.sameHand(hand)}
+          </p>
+        )}
+        <h2 class="intro-grip" data-testid="intro-grip">
+          {grip.label}
+        </h2>
+        <p class="session-sub intro-grip-how">{grip.how}</p>
         <div class="intro-gesture" data-testid="intro-gesture">
           <GestureAnimation
             view="pov"
@@ -788,8 +948,6 @@ function BlockIntro(props: {
             label={s.session.intro.gestureAria(s.common.hands[hand], grip.label)}
           />
         </div>
-        <h2 class="intro-grip">{grip.label}</h2>
-        <p class="session-sub">{grip.how}</p>
         {varies && (
           <p class="intro-varies" data-testid="intro-varies">
             {varies}
@@ -805,15 +963,23 @@ function BlockIntro(props: {
             {s.session.intro.odd}
           </Notice>
         )}
-        {needsSafety ? (
-          <Notice kind="warn" testId="intro-safety">
-            {s.common.safety}
-          </Notice>
-        ) : (
+        {fast && (
           <p class="muted small" data-testid="intro-safety">
-            {s.common.safety}
+            {s.session.intro.fastGentle}
           </p>
         )}
+        {change.afterBasics && (
+          <p class="muted small intro-basics" data-testid="intro-encourage">
+            {s.session.intro.basicsDone}
+          </p>
+        )}
+        <div class="intro-progress">
+          <ProgressBar
+            value={props.progress.total > 0 ? props.progress.done / props.progress.total : 0}
+            label={s.session.trialsDone(props.progress.done, props.progress.total)}
+            right={s.session.live.minutesLeft(props.minutes)}
+          />
+        </div>
         {!hasChoiceBlock && <p>{s.common.movementSummary}</p>}
       </section>
     </Screen>
@@ -845,20 +1011,12 @@ function HandReport(props: { enabled: boolean; onAnswer: (answer: Hand | 'unsure
   );
 }
 
-function Checkpoint(props: {
-  done: number;
-  bonusMinutes: number;
-  enabled: boolean;
-  headerRight: ComponentChildren;
-  onFinish: () => void;
-  onBonus: () => void;
-}) {
+function Checkpoint(props: { done: number; bonusMinutes: number; enabled: boolean; onFinish: () => void; onBonus: () => void }) {
   const s = useStrings();
   const t = s.session.checkpoint;
   return (
     <Screen
       title={t.title}
-      headerRight={props.headerRight}
       testId="screen-session"
       footer={
         <>
@@ -879,9 +1037,19 @@ function Checkpoint(props: {
   );
 }
 
+/** "LEFT hand · FAST" (or the special movement): which movement the sheet's Redo / wrong hand refer to. */
+export function movementText(c: TrialCondition, s: Strings): string {
+  const words = panelWords(c, s);
+  const hand = isChoiceTrial(c) && c.hand_source !== 'reported' ? s.session.live.anyHand : s.common.hands[c.hand];
+  return `${hand} · ${words.label ?? words.speed}`;
+}
+
 function PauseSheet(props: {
   reason: PauseReason;
+  /** the grip of the current trial, in words (reason 'wrong_grip') */
+  gripWords: string | null;
   canRedo: boolean;
+  redoTarget: RedoTarget | null;
   enabled: boolean;
   busy: boolean;
   onContinue: () => void;
@@ -893,13 +1061,27 @@ function PauseSheet(props: {
   const s = useStrings();
   const t = s.session.pause;
   const live = props.enabled && !props.busy;
+  // Finish now takes two taps, at least TAP_GUARD_MS apart: a sheet that opened by itself must not end
+  // the visit with one (or a double) nose touch
+  const [confirmFinish, setConfirmFinish] = useState(false);
+  const firstFinishAt = useRef(0);
+  const onFinish = () => {
+    const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
+    if (!confirmFinish) {
+      firstFinishAt.current = now;
+      setConfirmFinish(true);
+    } else if (now - firstFinishAt.current >= TAP_GUARD_MS) {
+      props.onFinish();
+    }
+  };
+  const reasonText = props.reason === 'wrong_grip' && props.gripWords ? t.gripReason(props.gripWords) : t.reasons[props.reason];
   return (
     <Screen title={t.title} testId="screen-session">
       {/* session-exit: the pause dialog's id since v1 (e2e); pause-sheet: v2 */}
       <div class="pause-wrap" data-testid="session-exit">
         <Card testId="pause-sheet">
           <p class="pause-reason" data-testid="pause-reason" data-reason={props.reason}>
-            {t.reasons[props.reason]}
+            {reasonText}
           </p>
           <div class="pause-actions">
             <Button size="xl" block testId="btn-continue-session" disabled={!live} onClick={props.onContinue}>
@@ -917,10 +1099,21 @@ function PauseSheet(props: {
             >
               {t.wrongHand}
             </Button>
-            <Button variant="danger" block testId="btn-finish-now" disabled={!live} onClick={props.onFinish}>
-              {t.finish}
+            {props.canRedo && props.redoTarget && (
+              <p class="muted small pause-last" data-testid="pause-last-movement">
+                {t.lastMovement(movementText(props.redoTarget.condition, s))}
+              </p>
+            )}
+            <Button
+              variant="secondary"
+              block
+              testId="btn-finish-now"
+              disabled={!live}
+              onClick={onFinish}
+            >
+              <span data-confirm={confirmFinish ? '1' : '0'}>{confirmFinish ? t.finishConfirm : t.finish}</span>
             </Button>
-            <Button variant="ghost" block testId="btn-exit-pause" disabled={props.busy} onClick={props.onLater}>
+            <Button variant="ghost" block testId="btn-exit-pause" disabled={!live} onClick={props.onLater}>
               {t.later}
             </Button>
           </div>
@@ -954,13 +1147,14 @@ export function SessionScreen() {
   );
   const recorder = useTrialRecorder((record, uiAbort, error) => runner.finished(record, uiAbort, error));
   recorderRef.current = recorder;
-  const { view, pause, cursor, bonus, busy, attemptsReady, canRedo } = runner.state();
+  const { view, pause, cursor, bonus, busy, attemptsReady, canRedo, redoTarget, introRef, slowArm } = runner.state();
 
   // double-tap guard: taps within TAP_GUARD_MS of a step change are ignored (see the module doc)
   const [tap] = useState(createTapGuard);
   const stepKey = `${view.kind}|${pause ?? ''}|${cursor}`;
   tap.shown(stepKey);
-  const armed = useArmed(stepKey);
+  // after a trial whose arm was not seen going back out, the next screen arms late (runner.slowArm)
+  const armed = useArmed(stepKey, slowArm ? ARM_DELAY_SLOW_MS : ARM_DELAY_MS);
   /** a button press, unless it came too soon after the screen changed (or before the arm delay) */
   const press =
     (fn: () => void, needsArm = false) =>
@@ -1021,17 +1215,20 @@ export function SessionScreen() {
   }
 
   if (pause !== null) {
+    const current = plannedAt(session, cursor);
     return (
       <PauseSheet
         reason={pause}
+        gripWords={current ? s.session.live.gripWords[current.condition.orientation] : null}
         canRedo={canRedo && attemptsReady}
+        redoTarget={redoTarget}
         enabled={armed}
         busy={busy}
         onContinue={press(() => void runner.continueSession())}
         onRedo={press(() => void runner.revoke(null))}
         onWrongHand={press(() => void runner.revoke('wrong_hand'))}
         onFinish={press(() => void runner.finishNow())}
-        onLater={() => void runner.later()}
+        onLater={press(() => void runner.later(), true)}
       />
     );
   }
@@ -1048,7 +1245,7 @@ export function SessionScreen() {
   }
 
   const headerRight = !busy ? (
-    <Button variant="ghost" testId="btn-session-exit" onClick={() => runner.openPause('paused')}>
+    <Button variant="ghost" testId="btn-session-exit" onClick={press(() => runner.openPause('paused'))}>
       {s.session.pause.open}
     </Button>
   ) : undefined;
@@ -1063,7 +1260,6 @@ export function SessionScreen() {
         done={progressOf(session, cursor, false).done}
         bonusMinutes={roundMinutes(secondsLeft(session, cursor, 'only'))}
         enabled={armed && !busy}
-        headerRight={headerRight}
         onFinish={press(() => void runner.finishNow(), true)}
         onBonus={press(() => runner.startBonus(), true)}
       />
@@ -1161,7 +1357,10 @@ export function SessionScreen() {
           headerRight={headerRight}
           enabled={enabled}
           notices={notices}
+          sensorNote={sensorNote(st.capabilities ?? session.capabilities, st.settings.simulate, s.session.howTo)}
+          wakeLockNote={!st.settings.simulate && !wakeLockActive()}
           onStart={onStart}
+          onTestBeep={press(playTestBeep)}
           onSitting={(sitting) => runner.setSitting(sitting)}
         />
       );
@@ -1171,6 +1370,7 @@ export function SessionScreen() {
         session={session}
         planned={next}
         auto={auto}
+        introRef={introRef}
         headerRight={headerRight}
         enabled={enabled}
         notices={notices}

@@ -23,7 +23,7 @@ backend/                    Upload backends: heroku/ (live uploads into Postgres
 server/                     Local receiver (Python standard library only) for lab sessions and development
 analysis/                   Python starter kit: the motionlab package, scripts/, tests/
 schema/records.schema.json  The data contract (JSON Schema 2020-12)
-docs/                       Project documentation, 00 to 09
+docs/                       Project documentation, 00 to 10
 .github/workflows/          CI (ci.yml) and GitHub Pages deployment (deploy.yml)
 ```
 
@@ -60,7 +60,7 @@ Motion sensors work only on HTTPS pages. On a plain `http://192.168.x.x` address
 
 ### (c) Collect data centrally
 
-By default the app uploads nothing (`"mode": "none"` in `app/public/config.json`). Records stay on the phone and can be exported from the Data screen. The v2 study uploads live to [backend/heroku](backend/heroku/README.md), a small FastAPI service with Postgres on Heroku and an admin page, which the app reaches with upload mode `json_post` (`"endpoint": "https://<your-app>.herokuapp.com/api/ingest"`); its README covers deployment, the admin page and the export for the analysis kit (`analysis/scripts/pull_live.py`). Every saved trial and session update is sent at once, so a participant who stops early loses nothing. Without a server of your own, the free Google Apps Script backend works too:
+Without an upload configuration the app uploads nothing (`"mode": "none"`, the built-in default): records stay on the phone and can be exported from the Data screen. The v2 study uploads live to [backend/heroku](backend/heroku/README.md), a small FastAPI service with Postgres on Heroku and an admin page, which the app reaches with upload mode `json_post` (`"endpoint": "https://<your-app>.herokuapp.com/api/ingest"`, set in this repository's `app/public/config.json`); its README covers deployment, the admin page and the export for the analysis kit (`analysis/scripts/pull_live.py`). Every saved trial and session update is sent at once, so a participant who stops early loses nothing. Without a server of your own, the free Google Apps Script backend works too:
 
 1. Set up the free Google Apps Script backend by following [backend/google-apps-script/README.md](backend/google-apps-script/README.md). In short, create the script from a dedicated Gmail account, paste `Code.gs` and `appsscript.json`, run `setup()`, and deploy it as a web app with "Execute as: Me" and "Who has access: Anyone".
 2. Point the app at the deployment in `app/public/config.json`:
@@ -109,7 +109,7 @@ cd ..
 python -m pytest analysis/tests server -q   # with the analysis venv active
 ```
 
-`npm run e2e` covers a whole street visit (schema-checked export, timings printed), finishing early, the setup screen, the researchers' tap-review mode, live uploads (answered by the test itself, nothing leaves the computer), a whole visit in Hebrew, back and pause, resuming, double taps, small phone screens and sideways blocks in landscape. It never makes a sound: every spec runs through `e2e/fixtures.ts`, which replaces speech and Web Audio in the page, and Chromium starts with `--mute-audio`. Never run it headed. `SCREENS=1 npx playwright test e2e/screens.spec.ts` saves a screenshot of every screen. The Heroku upload service has its own tests (`backend/heroku`, see its README).
+`npm run e2e` covers a whole street visit (schema-checked export, timings printed), finishing early, the setup screen, the researchers' tap-review mode, live uploads (answered by the test itself), a whole visit in Hebrew, back and pause, resuming, double taps, small phone screens and sideways blocks in landscape. It never makes a sound: every spec runs through `e2e/fixtures.ts`, which replaces speech and Web Audio in the page, and Chromium starts with `--mute-audio`. Nothing leaves the computer either: the same fixtures serve `config.json` with uploads off and block (and fail the test on) every request to another host than the dev server. Never run it headed. `npm run e2e:live` is different: it runs the simulated journeys against the deployed site, and their records **are uploaded** to the live backend (marked `simulated: true`); run it only on purpose ([Deployment](docs/07_DEPLOYMENT.md)). `SCREENS=1 npx playwright test e2e/screens.spec.ts` saves a screenshot of every screen. The Heroku upload service has its own tests (`backend/heroku`, see its README).
 
 CI (`.github/workflows/ci.yml`) runs the typecheck, the unit tests and pytest on pushes to `main` and on pull requests; it does not run the e2e journeys (`app/tests/e2eHarness.test.ts` checks their silence set-up instead). The deploy workflow also runs `npm test` before it publishes.
 
@@ -132,9 +132,11 @@ These four conventions decide whether left and right come out the right way roun
 | [03 Sensors and platforms](docs/03_SENSORS_AND_PLATFORMS.md) | iOS vs Android behaviour, calibration, normalisation rules, high-rate alternatives, real-device checklist |
 | [04 Segmentation](docs/04_SEGMENTATION.md) | `online_v1`, its parameters and overrides, offline methods, validation |
 | [05 Modeling plan](docs/05_MODELING_PLAN.md) | Preprocessing, mirror symmetry, features, baselines, evaluation, subgroup analysis, handedness add-on |
-| [06 Considerations](docs/06_CONSIDERATIONS.md) | Prioritised checklist: ethics and law, privacy, safety, confounds, statistics, recruitment |
+| [06 Considerations](docs/06_CONSIDERATIONS.md) | Prioritised checklist: consent and law, privacy, safety, confounds, statistics, recruitment |
 | [07 Deployment](docs/07_DEPLOYMENT.md) | Local run, phone tunnel, GitHub Pages, backend configuration, troubleshooting |
 | [08 Stage 3 predictor](docs/08_STAGE3_PREDICTOR.md) | Predict mode, model packaging, the PI's evaluation protocol |
+| [09 Stage 2 and 3 plan](docs/09_STAGE2_3_PLAN.md) | Decisions for training, the predictor link, the report and the deck; milestones |
+| [10 Field guide](docs/10_FIELD_GUIDE.md) | One page for running sessions: the link, what to say, browsers, permission fixes, live uploads, pulling and deleting data |
 | [backend/README.md](backend/README.md), [Apps Script setup](backend/google-apps-script/README.md) | Backend options; step-by-step Apps Script deployment |
 | [server/README.md](server/README.md) | Local receiver |
 | [analysis/README.md](analysis/README.md) | Python kit: setup, data layout, QA, baselines, adding a model |
@@ -153,19 +155,19 @@ These four conventions decide whether left and right come out the right way roun
 **Not done yet:**
 
 - **Real-device verification of 0.2.0.** The hands-free chain, the implicit calibration and the new sensor streams have run only in the simulator. Check on at least one iPhone and one Android phone: the motion prompt on the Start tap, beeps after the block-intro tap (iOS plays audio only after a tap and stops it when the page is hidden), the screen staying on through a block (wake lock), sideways grips that rotate the page, and the sign conventions (checklist in [03](docs/03_SENSORS_AND_PLATFORMS.md)).
-- **Study details in `app/public/config.json`:** the upload endpoint and study key, and the researcher's contact (until it is filled in, the consent tells participants to contact the researcher who sent them the link). The Hebrew consent text has not yet been proofread by a native speaker.
+- **Study details in `app/public/config.json`:** the upload endpoint and study key are set (the Heroku service); the researcher's contact is still empty, so the consent tells participants to contact the researcher who sent them the link. The Hebrew consent text has not yet been proofread by a native speaker.
 - **The phyphox experiment file** for the high-rate validation cohort.
 - **Stages 2 and 3.** Stage 2 has only the starter baselines; the plan is [09](docs/09_STAGE2_3_PLAN.md). Stage 3 has only the `Predictor` interface in `app/src/core/predictor.ts`.
 
 **Known limitations:**
 
 - **Sample rate.** Web pages get at most about 60 Hz of motion data, and Chrome quantises the values. Higher rates need native apps, and iOS caps even native apps at 100 Hz ([Apple, WWDC23](https://developer.apple.com/videos/play/wwdc2023/10179)). The project uses phyphox as the high-rate reference instead of building a native app.
-- **Foreground only.** Recording works only in the foreground with the screen on. If the page is hidden during a trial, the trial stops and the session waits on its pause sheet; an attempt that had reached GO is kept as `interrupted`, an earlier one is discarded, and one that was already recording the return of the arm stays complete (warning `return_cut_short`).
+- **Foreground only.** Recording works only in the foreground with the screen on. If the page is hidden during a trial, the trial stops and the session waits on its pause sheet; an attempt that had reached GO is kept as `interrupted`, an earlier one is discarded, and one that was already recording the return of the arm stays complete (warnings `return_cut_short` and `hidden_after_end`; `quality.hidden_during` covers only the movement).
 - **Safari storage.** Safari deletes a site's stored data after 7 days without use; Home Screen web apps are exempt ([WebKit](https://webkit.org/blog/10218/full-third-party-cookie-blocking-and-more/)). The app therefore uploads after every record and offers an export.
-- **Screen rotation on iOS.** iOS web pages cannot lock the screen orientation, so the display may rotate in sideways and upside-down trials. The data are unaffected, because the sensor frame is fixed to the device, and the rotations are recorded (`streams.screen_events`).
+- **Screen rotation on iOS.** iOS web pages cannot lock the screen orientation, so the display may rotate in sideways and upside-down trials. The data are unaffected, because the sensor frame is fixed to the device, and the rotations are recorded (`streams.screen_events`; one during a movement adds the warning `screen_rotated_during_movement`).
 - **Other browsers.**
   - Firefox for Android works but has been tested less.
   - Brave for Android has been reported to block motion sensors ([2021 report](https://community.brave.app/t/device-motion-data-accelerometer-gyro-not-available-on-android/292620)).
-  - The app detects in-app browsers (Instagram, Facebook, ...) and asks the participant to open the link in Safari or Chrome.
+  - The app detects in-app browsers (WhatsApp, Instagram, Facebook, ...) and asks the participant to open the link in Safari or Chrome, with a "Copy the link" button.
 - **Public endpoint.** The upload endpoint is public by design. The backends validate records and cap their size. They never store a rejected upload: they log only metadata and identifiers (Heroku: `ingest_log`; Apps Script: a `quarantine` sheet), at most 500 refusals per day. Keep the database, the admin token and the Drive folder private: the records hold participants' names.
 - **Deploy branch.** The deploy workflow listens for pushes to `main`. If your default branch is `master`, rename it or edit the workflow.

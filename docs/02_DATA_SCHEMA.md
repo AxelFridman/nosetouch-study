@@ -13,7 +13,7 @@ Related documents: [Protocol](01_PROTOCOL.md) (what the conditions mean), [Senso
 | Session | `SessionRecord` | at session start, then rewritten after every attempt and at the end | 10–35 KB | `session.json`, one per session |
 | Trial attempt | `TrialRecord` | once per attempt, including failed and redone attempts | 30–75 KB | one file per attempt |
 | Upload envelope | `UploadEnvelope` | per upload request; wraps one record | record + ~100 B | HTTP request body only |
-| Export bundle | `ExportBundle` | when the participant taps "export my data" | sum of its records | one `.json` file the participant shares or downloads |
+| Export bundle | `ExportBundle` | when the participant taps "Save / share my data" (Done screen) or an export on the "My data" screen | sum of its records | one `.json` file the participant shares or downloads |
 
 Sizes were measured on schema-valid synthetic records with the app's rounding: about 8 KB per second of recording (details in [section 7](#7-storage-layout)).
 
@@ -40,7 +40,7 @@ erDiagram
 | `interval_raw` | `event.interval` of the first motion event, exactly as reported. Its unit differs by platform (about 0.0167 s on iOS, 16 ms on Chrome), so treat it as metadata and never use it for timing ([03](03_SENSORS_AND_PLATFORMS.md#2-what-the-browser-delivers)). |
 | Rounding | Stream values are rounded at serialisation (`ROUNDING` in [`constants.ts`](../app/src/core/constants.ts)): time 0.01 ms, acceleration 1e-4 m/s², rotation rate 1e-3 deg/s, angles 1e-3 deg, quaternion components 1e-6. Halves round away from zero and −0 becomes 0. This is far below sensor noise and below Chrome's own 0.1-unit quantisation, so Chrome values pass through unchanged. |
 | Nulls | JSON has no NaN, so a missing value is `null`. Inside a stream, `null` at index i means that field was missing in sample i. All columns of a stream have the same length. A stream object that is `null` (`orientation`, `quaternion`) was not available on that device. |
-| Optional vs nullable | Only the three schema-1.1 additions (`device.engine`, `device.in_app_browser`, `calibration.axis_check`) may be absent. Every other field is always present, possibly as `null`. Readers must treat "absent" like `null`. |
+| Optional vs nullable | Only the additions of schema 1.1 (`device.engine`, `device.in_app_browser`, `calibration.axis_check`) and 1.2 ([section 8](#8-versioning-policy)) may be absent. Every other field is always present, possibly as `null`. Readers must treat "absent" like `null` (and an absent `condition.hand_source` as `instructed`). |
 | Ids | `participant_id`: `P-` plus 6 symbols from `ABCDEFGHJKLMNPQRSTUVWXYZ23456789` (no 0/O/1/I, about 1.07×10⁹ codes, crypto-random). `session_id` and `trial_id`: UUID v4. `study_code`: from `public/config.json`, pattern `[A-Za-z0-9_-]{1,64}`. |
 | Indices | `trial_index` is global and contiguous from 0 in plan order. `block_index` and `trial_in_block` are contiguous from 0. `attempt` starts at 1 and `rep` at 0. |
 | Simulated data | `simulated: true` on every record produced by the built-in simulator (`?sim=1`) or by `npm run synth`. Never pool simulated and real records. |
@@ -117,7 +117,7 @@ The field-name form assumes the W3C axis mapping. On a device whose `axis_check.
 | `study_code` | Id | no | From `config.json` (default `nose-touch-v1`) |
 | `started_at`, `updated_at` | ISO time | no | Creation and last change; `updated_at` decides which copy is newest |
 | `ended_at` | ISO time | yes | `null` while `in_progress` |
-| `status` | `in_progress` / `completed` / `ended_early` / `abandoned` | no | `completed`: every trial of the non-optional blocks is done (the bonus blocks never count). `ended_early` (schema 1.2): the participant tapped Finish before that |
+| `status` | `in_progress` / `completed` / `ended_early` / `abandoned` | no | `completed`: every trial of the non-optional blocks is done (the bonus blocks never count). `ended_early` (schema 1.2): the participant tapped Finish before that. `abandoned`: protocol 1.0.0's Finish; in protocol 2.0.0 an unfinished session that was never resumed, closed by the app when the same participant starts a new session or at the next app start on that phone after 24 h untouched (`ended_at` = its last update) |
 | `participant` | `ParticipantProfile` | no | Snapshot taken at session start, already redacted ([4.2](#42-participant-participantprofile)) |
 | `device` | `DeviceInfo` | no | [4.3](#43-device-deviceinfo) |
 | `capabilities` | `SensorCapabilities` | no | [4.4](#44-capabilities-sensorcapabilities) |
@@ -149,6 +149,8 @@ The field-name form assumes the W3C axis mapping. On a device whose `axis_check.
 | `phone_case` | boolean | yes | Phone in a case (mass, grip) |
 | `created_at`, `updated_at` | ISO time | no | |
 
+App 0.2.0 asks only for the full name (stored in `nickname`; uploaded in this study, whose `config.json` sets `upload_nickname: true`), age, sex, dominant hand, phone hand and height. It writes `ehi_sf`, `ehi_lq`, `ehi_class`, `phone_model` and `phone_case` as null and `arm_issue` as false (the consent checkbox covers arm and hand injuries), and never omits a key: the loader skips a record whose required key is missing.
+
 ### 4.3 `device` (`DeviceInfo`)
 
 | Field | Type | Null | Meaning |
@@ -165,7 +167,7 @@ The field-name form assumes the W3C axis mapping. On a device whose `axis_check.
 | `device_memory_gb` | number | yes | [`navigator.deviceMemory`](https://developer.mozilla.org/en-US/docs/Web/API/Navigator/deviceMemory), Chromium only |
 | `time_origin_ms` | number | no | `performance.timeOrigin` (epoch ms) |
 | `engine` | `webkit` / `blink` / `gecko` / `unknown` | absent in 1.0 | Schema 1.1. `webkit` means every iOS browser, detected by `'webkitCompassHeading' in DeviceOrientationEvent.prototype`. Its acceleration values are sign-inverted relative to W3C |
-| `in_app_browser` | string | yes, absent in 1.0 | Schema 1.1. Detected in-app browser or WebView, e.g. `instagram`, `facebook`, `android_webview` |
+| `in_app_browser` | string | yes, absent in 1.0 | Schema 1.1. Detected in-app browser or WebView, e.g. `whatsapp`, `instagram`, `facebook`, `android_webview`, `ios_webview` |
 
 ### 4.4 `capabilities` (`SensorCapabilities`)
 
@@ -242,8 +244,8 @@ Two methods exist (`method`, schema 1.2; absent = guided). **`guided_v1`** is th
 | `settings.segmentation_params` | **Base** `SegmentationParams` of the session (`DEFAULT_SEGMENTATION_PARAMS`). The per-trial values after speed/variant overrides are in each trial's `segmentation.params` |
 | `settings.review_mode` | Schema 1.2. `auto`: the hands-free flow (complete trials accepted automatically, next trial at once); `tap`: every trial reviewed with a tap (researcher setting). Absent before 1.2 (every attempt was reviewed) |
 | `progress.next_trial_index` | Next planned trial to run (index into the flattened plan) |
-| `progress.n_attempts`, `progress.n_accepted` | Attempts saved and attempts accepted so far |
-| `consent.version`, `consent.accepted_at` | Consent text version (`config.consent_version`, currently `2026-10-v2`) and acceptance time |
+| `progress.n_attempts`, `progress.n_accepted` | Attempts saved and attempts accepted so far. Resuming and finishing recount them (and `next_trial_index`) from the attempts stored on the phone |
+| `consent.version`, `consent.accepted_at` | Consent text version (`config.consent_version`, currently `2026-10-v3`) and acceptance time |
 
 ## 5. TrialRecord
 
@@ -259,15 +261,16 @@ One record per attempt. It holds the label, the outcome, the online segmentation
 | `session_id`, `participant_id`, `study_code` | | Foreign keys |
 | `created_at` | ISO time | When the attempt finished |
 | `block_index`, `trial_index`, `trial_in_block` | integer ≥ 0 | Position in the plan |
-| `attempt` | integer ≥ 1 | 1 = first attempt at this `trial_index`; each redo adds 1 |
+| `attempt` | integer ≥ 1 | 1 = first attempt at this `trial_index`; each redo adds 1. If the session screen could not read the stored attempts (4 tries, 1 s apart), its numbers continue from 101, so that they never repeat a stored attempt: a jump above 100 marks such a page |
 | `simulated` | boolean | Simulator data |
-| `condition.hand` | `left` / `right` | **The label**: the instructed hand |
-| `condition.orientation` | `OrientationId` | Instructed grip, one of 10 |
+| `condition.hand` | `left` / `right` | **The label**: the instructed hand, or on the street visit's free-choice trial (`hand_source = reported`) the hand the participant reported. Copies of the free trial noted `hand_not_reported` or `hand_unsure` keep the plan's placeholder hand: never use them as labels |
+| `condition.orientation` | `OrientationId` | Instructed grip, one of 10 (protocol 2.0.0 never instructs the `*_away` grips) |
 | `condition.speed` | `natural` / `fast` / `slow` | |
 | `condition.start_position` | `natural` / `shoulder` / `center` | |
-| `condition.variant` | `standard` + 9 odd variants | `curved`, `pause`, `twist`, `elbow_high`, `bent_start`, `lean_in`, `chin`, `forehead`, `jerky` |
+| `condition.variant` | `standard` + 10 odd variants | `curved`, `pause`, `twist`, `elbow_high`, `bent_start`, `lean_in`, `chin`, `forehead`, `jerky`, and `tilted_touch` (schema 1.2) |
 | `condition.posture` | `standing` / `sitting` | |
 | `condition.rep` | integer ≥ 0 | Repetition of this exact condition within its block |
+| `condition.hand_source` | `instructed` / `reported` | Schema 1.2, optional (absent = instructed); `reported` on every attempt of the choice trial, answered or not (see `hand`) |
 
 ### 5.2 `outcome`
 
@@ -280,29 +283,32 @@ One record per attempt. It holds the label, the outcome, the online segmentation
 | | `interrupted` | Page hidden or sensors stalled |
 | `accepted` | boolean | Hands-free (`settings.review_mode` `auto`): `true` for a complete attempt unless its grip was detected as another one (`detected.orientation_match == false`). Tap review: `true` only for a complete attempt the participant confirmed with "Yes, next". `false` for failed attempts, revoked ones, rejected ones and unanswered placeholders (notes below). The attempt is kept either way |
 | `participant_flag` | `wrong_hand` / `wrong_orientation` / `other_problem` / null | Problem reported by the participant: on the review screen (tap mode), with "Last one was the wrong hand" on the pause sheet (`wrong_hand`), or "Not sure" at the hand question of the choice trial (`other_problem`) |
-| `note` | string ≤ 500 or null | Set by the app. `auto_accept` / `auto_reject:orientation`: the hands-free decision (a rejected trial is run again at once). `review_interrupted` (tap mode) and `hand_not_reported` (the choice trial before its hand question): placeholder copies saved before the participant answered; the answer re-saves the attempt and replaces the note, so they remain only on unanswered attempts. `hand_unsure`: "Not sure" at the hand question (not accepted, not re-run). `redo_requested`: an accepted attempt revoked from the pause sheet ("Redo last movement", or with `participant_flag` `wrong_hand`); the planned trial is run again as a new attempt |
+| `note` | string ≤ 500 or null | Set by the app. `auto_accept` / `auto_reject:orientation`: the hands-free decision (a rejected trial is run again at once). `review_interrupted` (tap mode) and `hand_not_reported` (the choice trial before its hand question): placeholder copies saved before the participant answered; the answer re-saves the attempt and replaces the note, so they remain only on unanswered attempts. A failed attempt of the choice trial is never asked about and keeps `hand_not_reported` (its `hand` is the plan's placeholder). `hand_unsure`: "Not sure" at the hand question (not accepted, not re-run). `redo_requested`: an accepted attempt revoked from the pause sheet ("Redo last movement", or with `participant_flag` `wrong_hand`); the planned trial is run again as a new attempt |
 
 ### 5.3 `timing`
 
 All `*_ms` fields are on the stream clock (ms since `t0_perf_ms`).
 
 ```
- t=0              still_ms            go_ms     onset_ms             end_ms    end_detected_ms           stop_ms
-  |-- settling --|== still_hold ==|== foreperiod ==|- RT -|== movement ==|== end_sustain ==|== post_roll ==|
-  ready cue                                         GO cue                                  end cue (double beep)
-                 [--------- baseline window (still run up to GO) ---------]
+t=0                         still_ms         go_ms  onset_ms       end_ms          end_detected_ms                             stop_ms
+|-- settling, hold, gates --|-- foreperiod --|- RT -|-- movement --|- end_sustain -|-- post_roll, then the return of the arm --|
+ready cue                                    GO cue                                end cue (double beep)
+            [ baseline: the still run up to GO ]
 ```
+
+The ready cue sounds only on the first trial after a tap; chained trials of the hands-free flow start without it. Protocol 2.0.0 records at least `post_roll_ms` after `end_detected_ms`, then until the arm is still again after its return, at most `return_cap_ms` after `end_detected_ms` ([04 §4.1](04_SEGMENTATION.md#41-around-the-segmenter-gates-false-starts-and-the-return-of-the-arm-protocol-200)).
 
 | Field | Null | Meaning |
 |---|---|---|
 | `t0_perf_ms` | no | `performance.now()` when recording started. Every stream `t` is relative to it |
 | `t0_epoch_ms` | no | Unix epoch ms of t0 (phone clock) |
-| `still_ms` | yes | When the hold-still requirement was last met before GO |
+| `still_ms` | yes | When the hold-still requirement and the gates before GO were last met, i.e. when the foreperiod started. Protocol 2.0.0 gates are the return of the arm (`awaitReturn`), the grip gate and the reading time of a new instruction: GO is never scheduled before 2.5 s (a new special movement or start position) or 1.2 s (a new speed) after t0, nor before the words spoken at the start of the trial are over, so `still_ms` can be at or after that reading time. The reading time itself is not stored. `[still_ms − still_hold_ms, go_ms]` is always a still window |
 | `go_ms` | yes | When the GO cue was emitted. It sits on the motion-sample grid because GO is triggered inside a sample handler |
 | `onset_ms` | yes | Online onset, back-dated to the end of the stillness. It can be up to 300 ms **before** `go_ms` (anticipation) |
 | `end_ms` | yes | Online end, back-dated to the start of the final stillness |
 | `end_detected_ms` | yes | When the end was confirmed (end cue). At least `end_sustain_ms` after `end_ms` |
 | `stop_ms` | no | When recording stopped |
+| `return_onset_ms`, `return_end_ms` | yes, absent before 1.2 | Schema 1.2. The first sample of the return movement after the end, and the first sample of the stillness that followed it; null when the return was not observed (the next chained trial then waits for it, `awaitReturn`) |
 | `first_touch_ms` | yes | First `touchstart` after GO. With the screen toward the face this is a candidate for the moment of nose contact; screen-away grips produce no nose touch, and a finger can also touch the screen |
 | `foreperiod_ms` | yes | Random foreperiod drawn for this trial |
 | `false_starts` | no | Movements detected during the hold before GO |
@@ -321,33 +327,34 @@ The online detector drives cues and QA only. The offline re-segmentation is the 
 | `peak_gyro_dps`, `peak_acc_ms2` | number or null | Peaks of the **smoothed** \|ω\| and \|a\| between onset and end |
 | `baseline` | `Baseline` or null | Frozen at GO: `n`, `gyro_mean`, `gyro_sd`, `acc_mean`, `acc_sd` (population SD of the smoothed signals over the still run) and `gravity` = mean **raw** accg of the still run (platform sign) |
 
-`SegmentationParams` (defaults from `DEFAULT_SEGMENTATION_PARAMS`):
+`SegmentationParams` (defaults from `DEFAULT_SEGMENTATION_PARAMS` of protocol 2.0.0; the protocol-1.0.0 values, which the pilot's records carry, are listed next to them in [04 §4](04_SEGMENTATION.md#4-parameters)):
 
 | Parameter | Default | Meaning |
 |---|---|---|
 | `smoothing_ms` | 40 | EMA time constant applied to \|ω\| and \|a\| |
 | `gravity_tau_ms` | 600 | EMA time constant of the gravity estimate (`highpass` source only) |
-| `still_gyro_dps`, `still_acc_ms2` | 15, 0.35 | Hold-still: smoothed \|ω\| and \|a\| below these |
-| `still_hold_ms` | 600 | Continuous stillness required before GO is scheduled |
-| `foreperiod_min_ms`, `foreperiod_max_ms` | 500, 1200 | Random delay between stillness and GO |
+| `still_gyro_dps`, `still_acc_ms2` | 20, 0.5 | Hold-still: smoothed \|ω\| and \|a\| below these |
+| `still_hold_ms` | 400 | Continuous stillness required before GO is scheduled |
+| `foreperiod_min_ms`, `foreperiod_max_ms` | 400, 900 | Random delay between stillness and GO |
 | `onset_k_sd` | 6 | Onset threshold = max(floor, baseline mean + k·SD) |
 | `onset_gyro_min_dps`, `onset_acc_min_ms2` | 30, 0.6 | Floors of the onset thresholds |
 | `onset_sustain_ms` | 60 | Threshold must be exceeded this long |
-| `end_gyro_dps`, `end_acc_ms2` | 20, 0.45 | End: smoothed \|ω\| and \|a\| below these ... |
-| `end_sustain_ms` | 300 | ... continuously for this long |
+| `end_gyro_dps`, `end_acc_ms2` | 30, 0.6 | End: smoothed \|ω\| and \|a\| below these ... |
+| `end_sustain_ms` | 250 | ... continuously for this long |
 | `min_movement_ms` | 150 | No end before onset + this |
-| `max_wait_ms` | 6000 | No onset within this after GO gives `no_movement` |
-| `max_movement_ms` | 8000 | Movement longer than this gives `too_long` |
-| `post_roll_ms` | 1000 | Recording continues this long after the end is confirmed |
+| `max_wait_ms` | 3000 | No onset within this after GO gives `no_movement` |
+| `max_movement_ms` | 6000 | Movement longer than this gives `too_long` |
+| `post_roll_ms` | 500 | Recording continues at least this long after the end is confirmed (then through the return of the arm) |
+| `return_cap_ms` | 3000 | Schema 1.2, optional: the recording stops at the latest this long after the end was confirmed. Absent in 1.0.0 records, which end after `post_roll_ms` |
 
-Overrides: `slow` trials lower the thresholds and extend `end_sustain_ms` (450) and `max_movement_ms` (12000); `fast` shortens `onset_sustain_ms` (40); `pause` and `jerky` extend `end_sustain_ms` (1800 and 600). The exact rules are in `protocol.resolveParams` and [04](04_SEGMENTATION.md).
+Overrides: `slow` trials lower the onset floors (25 deg/s, 0.55 m/s²) and the end thresholds (10 deg/s, 0.25 m/s²) and extend `end_sustain_ms` (450) and `max_movement_ms` (12000); `fast` shortens `onset_sustain_ms` (40); `pause` extends `end_sustain_ms` (1800) and `max_movement_ms` (12000), `jerky` extends `end_sustain_ms` (600). The exact rules are in `protocol.resolveParams` and [04](04_SEGMENTATION.md).
 
 ### 5.5 `detected`
 
 | Field | Meaning |
 |---|---|
 | `rotation_start` | Phone rotation inferred from `baseline.gravity` (`upright` / `upside_down` / `top_left` / `top_right` / `flat` / `unknown`), given the calibrated sign (without one, the browser engine's known sign) and the instructed screen facing |
-| `rotation_end` | Same, from the mean accg of the last 200 ms before `stop_ms`. That window is in the post-roll and may already include the arm lowering |
+| `rotation_end` | Same, from the mean accg at the nose: the samples from `end_ms` to `end_detected_ms` (the hold that confirmed the end). For an attempt without an end, the last 200 ms before `stop_ms`. App 0.1.0 always used the last 200 ms before `stop_ms`, which lay in the post-roll |
 | `tilt_change_deg` | Angle between the start and end gravity vectors (nullable) |
 | `orientation_match` | `rotation_start` equals the instructed rotation; `null` when it cannot be checked (e.g. `free`). Screen facing cannot be verified from gravity |
 
@@ -360,8 +367,8 @@ Overrides: `slow` trials lower the thresholds and extend `end_sustain_ms` (450) 
 | `motion_dt_ms_median`, `motion_dt_ms_max` | Sample-interval statistics (nullable) |
 | `gaps_over_50ms` | Number of motion intervals longer than 50 ms |
 | `acc_available`, `rotation_available` | Whether `acc_*` and `rr_*` carried values |
-| `hidden_during` | The page was hidden at some point during the trial. It is polled at each motion sample, and sensors deliver nothing while the page is hidden, so also check `gaps_over_50ms` and `status == 'interrupted'` |
-| `warnings` | Strings from the app; inspect them rather than parse them. Known codes: `return_cut_short` (stopped while recording the return of the arm; the trial is still complete), `ui_abort:<reason>` (the session stopped the trial: `user`, `page_hidden`, `sensor_stall`, `idle`, `save_failed`, `unmount`, `start_failed`), `sensor_error:<code>`, `source_ended`, `source_start_failed: …`, `motion_t_invalid`, `motion_t_not_monotonic`, `no_motion_samples`, `acc_unavailable`, `rotation_unavailable`, `low_motion_rate`, and for the optional streams of schema 1.2 (written at most once per session) `quaternion_unavailable`, `abs_orientation_unavailable` / `abs_orientation_denied`, `magnetometer_unavailable` / `magnetometer_denied` |
+| `hidden_during` | The page was hidden while the movement was being recorded: before `end_detected_ms + post_roll_ms`, or at any time in an attempt without an end. It is polled at each motion sample and at the stop, and sensors deliver nothing while the page is hidden, so also check `gaps_over_50ms` and `status == 'interrupted'`. A page hidden only later, during the return of the arm, leaves it false and adds the warning `hidden_after_end` (the trial stays complete; the stop that the hide caused adds `return_cut_short`). Earlier builds of app 0.2.0 (the same `app_version`; their sessions carry `consent.version` `2026-10-v2`) set it for such a late hide too; rule T4 ([section 12](#12-data-quality-and-exclusion-rules)) recognises those records |
+| `warnings` | Strings from the app; inspect them rather than parse them. Known codes: `return_cut_short` (stopped while recording the return of the arm; the trial is still complete), `hidden_after_end` (the page was hidden only after the movement window, see `hidden_during`), `screen_rotated_during_movement` (a screen rotation in `streams.screen_events` between GO and the confirmed end, or the stop of an attempt without an end), `wake_lock_not_held` (a real phone's screen wake lock was not held when an attempt that reached GO ended: the screen may have dimmed or locked during the block), `ui_abort:<reason>` (the session stopped the trial: `user`, `page_hidden`, `sensor_stall`, `idle`, `save_failed`, `unmount`, `start_failed`), `sensor_error:<code>`, `source_ended`, `source_start_failed: …`, `motion_t_invalid`, `motion_t_not_monotonic`, `no_motion_samples`, `acc_unavailable`, `rotation_unavailable`, `low_motion_rate`, and for the optional streams of schema 1.2 (written at most once per session) `quaternion_unavailable`, `abs_orientation_unavailable` / `abs_orientation_denied`, `magnetometer_unavailable` / `magnetometer_denied`. `wrong_grip_at_stop` (stopped before GO while the grip gate held GO back) exists in the engine but is not expected in stored records: the hands-free flow discards attempts that never reached GO, and the tap mode has no grip gate |
 
 ### 5.7 `screen`
 
@@ -422,8 +429,9 @@ Transport facts that shape the design ([`core/uploader.ts`](../app/src/core/uplo
 
 - Mode `apps_script`: a POST with a plain string body and no custom headers is a CORS "simple request" (text/plain), so no preflight is sent, and the Apps Script response is readable JSON ([Fetch spec](https://fetch.spec.whatwg.org/), [Tanaike's Web Apps tests](https://github.com/tanaikech/taking-advantage-of-Web-Apps-with-google-apps-script)). Success means the JSON says `ok: true`.
 - A "Failed to fetch" can still mean "stored": Apps Script runs `doPost` before its redirect. The item stays queued and is resent; the backend overwrites by record id, so this is safe.
-- Mode `json_post`: `application/json` to a server that answers CORS preflights (the local [`server/receiver.py`](../server/receiver.py)).
-- Requests time out after 45 s and are retried with backoff, one at a time per phone. `sendBeacon` / `keepalive` are never used, because their bodies are capped at 64 KiB ([Fetch spec](https://fetch.spec.whatwg.org/)).
+- Mode `json_post`: `application/json` to a server that answers CORS preflights: the study's Heroku service ([backend/heroku](../backend/heroku/README.md)) or the local [`server/receiver.py`](../server/receiver.py).
+- Requests time out after 45 s and are retried with backoff, one at a time per phone. The normal queue never uses `sendBeacon` / `keepalive`, because their bodies are capped at 64 KiB ([Fetch spec](https://fetch.spec.whatwg.org/)). Only when the page is left (pagehide, or the page going hidden) are the queued envelopes smaller than 60 KiB sent once more with `fetch(…, {keepalive: true})` as CORS simple requests (`text/plain`, within a 60 KiB budget in total); larger ones wait for the next visit.
+- On the phone, a trial, its session update and both outbox items are written in one IndexedDB transaction (`LocalStore.commit`): all or nothing. At every app start, and when a session is resumed, any stored trial without an outbox item is queued again (`enqueueMissing`).
 - A permanent rejection (the backend answers `ok: false` with `retry: false`, e.g. a wrong study key or an invalid record) is not retried automatically. The record stays on the phone, marked failed, and "Upload now" (Done and Data screens) sends it again, for example after a configuration fix. The backend does not store rejected uploads.
 
 **`ExportBundle`** is the "export my data" fallback for participants without upload.
@@ -441,10 +449,10 @@ File name: `nosetouch_<participant_id or all>_<YYYYMMDD-HHMM>.json` (phone's loc
 
 ## 7. Storage layout
 
-The backend (Apps Script on Google Drive), the local receiver and the synthetic generator all write the same tree:
+The Heroku service's `/api/export.zip` (which `analysis/scripts/pull_live.py` unpacks into `analysis/data/live/`), the Apps Script backend on Google Drive, the local receiver and the synthetic generator all use the same tree:
 
 ```
-<root>/                                   Drive folder | server/received/ | analysis/data/synthetic/
+<root>/                                   analysis/data/live/ | Drive folder | server/received/ | analysis/data/synthetic/
   <study_code>/                           e.g. nose-touch-v1
     <participant_id>/                     e.g. P-7KQ2XM
       <session_id>/                       UUID
@@ -477,7 +485,7 @@ The synthetic figures come from `npm run synth -- --participants 12 --seed 42` w
 | `schema_version` | every record | `1.2.0` | The schema changes (rules below) |
 | `app_version` | every record | `0.2.0` | Any app release |
 | `protocol.protocol_version` | session | `2.0.0` | Presets or ordering rules change (same seed would give a different plan) |
-| `consent.version` | session | `2026-10-v2` | The consent text changes |
+| `consent.version` | session | `2026-10-v3` | The consent text changes |
 | `segmentation.method` | trial | `online_v1` | The online algorithm changes in any way that alters indices |
 
 Schema rules (the schema accepts `^1\.\d+\.\d+$`):
@@ -496,7 +504,7 @@ What 1.2.0 added (app 0.2.0, protocol 2.0.0; every addition optional, so 1.0 and
 | `PlannedBlock` | `tier` (0–9), `optional` | street tiers and the bonus blocks ([4.6](#46-protocol)) |
 | `calibration` | `method` (`guided_v1` / `implicit_v1`) | [4.5](#45-calibration-calibrationresult) |
 | `settings` | `review_mode` (`auto` / `tap`) | [4.7](#47-settings-progress-consent) |
-| `condition` | `hand_source` (`instructed` / `reported`) | `reported` on the choice trial: `hand` is what the participant said after the trial |
+| `condition` | `hand_source` (`instructed` / `reported`) | `reported` on the choice trial: `hand` is what the participant said after the trial, except on copies noted `hand_not_reported` / `hand_unsure` (placeholder hand) |
 | `segmentation.params` | `return_cap_ms` | [04, section 4](04_SEGMENTATION.md#4-parameters) |
 | `timing` | `return_onset_ms`, `return_end_ms` (nullable) | the return of the arm after the end ([04, section 4.1](04_SEGMENTATION.md#41-around-the-segmenter-gates-false-starts-and-the-return-of-the-arm-protocol-200)) |
 | `streams.touches[]` | `radius_x`, `radius_y`, `force`, `rotation_angle` (nullable), `x_norm`, `y_norm` (0–1 of the viewport) | the contact of each touch (`Touch.radiusX` …) |
@@ -519,22 +527,23 @@ What leaves the phone:
 | Device metadata | `device.*`, `capabilities.*` | Includes the full user-agent string |
 | Sensor data | streams, calibration | Motion and orientation only |
 | Touches | `touches[]` | Time, type and coordinates of screen contacts during recording |
+| Name | `participant.nickname` (the full name) | Uploaded only when `config.upload_nickname` is true, as in this study, with the participants' consent |
 | Free text | `session.notes`, `outcome.note` | Uploaded as typed |
 | Times | ISO times, `t0_epoch_ms`, `timezone_offset_min` | When the person took part |
 
-Not collected: name (the nickname stays on the phone), camera, microphone, location. The iOS `compass` heading is a magnetic direction, not a location.
+Not collected: camera, microphone, location. The iOS `compass` heading is a magnetic direction, not a location.
 
-Redaction rule (`core/config.ts`): `nickname` becomes `null` unless `config.upload_nickname` is true. It is applied when the session snapshot is created, again before upload, and to every profile and session in an export. The phone's own `participants` store keeps the nickname so the participant recognises their profile.
+Redaction rule (`core/config.ts`): `nickname` becomes `null` unless `config.upload_nickname` is true. It is applied when the session snapshot is created, again before upload, and to every profile and session in an export. The phone's own `participants` store keeps the nickname so the participant recognises their profile. This study sets `upload_nickname: true` (decided on 2026-10-24; the consent says that the name is stored on the research server), so names sit in the database, on the admin page and in downloaded raw records ([06 §2](06_CONSIDERATIONS.md#2-privacy-and-security)).
 
 Recommendations:
 
-1. Keep `upload_nickname: false`.
+1. Keep names out of analysis tables, reports and the repository; `participant_id` is the key everywhere. Set `upload_nickname: false` in any study that does not need names.
 2. Tell participants not to type names into the free-text fields.
-3. Keep the Drive folder private (not shared by link) and the backend URL out of public posts.
+3. Keep the database, the admin token and any Drive folder private, and the backend URL out of public posts.
 4. Drop `user_agent` from any dataset shared beyond the lab; `platform`, `engine`, `browser`, `os_version` and `phone_model` are enough for analysis.
-5. Deletion on request, by participant code: on the phone, the data screen deletes the participant with all sessions, trials and queue items. On the server, delete the folder `<study_code>/<participant_id>/` and the participant's rows in the `sessions`, `trials` and `quarantine` sheets of the index (with the local receiver: their lines in `quarantine.log`), plus any derived copies. Rejected uploads are not stored as files, so nothing else holds their data ([06 §1](06_CONSIDERATIONS.md#1-ethics-and-law)).
+5. Deletion on request, by participant code (or by name, which the admin page lists): on the server, the admin page's "Delete a participant" or `DELETE /api/participants/<code>` with the admin token removes the participant, their sessions, their trials and their `ingest_log` rows ([backend/heroku](../backend/heroku/README.md#deletion-on-request)); on the phone, the data screen deletes the participant with all sessions, trials and queue items (otherwise queued records would upload again); then delete every pulled snapshot and derived copy. With the Apps Script backend, delete the folder `<study_code>/<participant_id>/` and the participant's rows in the `sessions`, `trials` and `quarantine` sheets of the index (with the local receiver: their lines in `quarantine.log`). Rejected uploads are never stored, so nothing else holds their data. Steps: [10](10_FIELD_GUIDE.md#delete-a-participant-on-request) and [06 §1](06_CONSIDERATIONS.md#1-ethics-and-law).
 
-Collect from people other than the student only after Bar-Ilan ethics approval. Israel's Privacy Protection Law Amendment 13 has been in force since 14 Aug 2025 ([IAPP summary](https://iapp.org/news/a/israel-marks-a-new-era-in-privacy-law-amendment-13-ushers-in-sweeping-reform)). Restrict participation to Israel unless GDPR basics are added.
+The researcher decided on 2026-10-24 that this collection needs no ethics review: the participants are adult college friends who consent in the app ([06 §1](06_CONSIDERATIONS.md#1-ethics-and-law)). Israel's Privacy Protection Law Amendment 13 has been in force since 14 Aug 2025 ([IAPP summary](https://iapp.org/news/a/israel-marks-a-new-era-in-privacy-law-amendment-13-ushers-in-sweeping-reform)), and names next to motion data are personal information. Recruit people located in Israel unless GDPR basics are added (`region` in `config.json` can add the location to the consent checkbox).
 
 ## 10. Deduplication rules
 
@@ -542,9 +551,9 @@ Duplicates are expected by design: sessions are re-uploaded after every change, 
 
 1. **Sessions**: several copies of one `session_id` are versions of the same record. Keep the one with the latest `updated_at`. On Drive the file is replaced in place, so normally only one copy exists.
 2. **Trials**: one `trial_id` is one attempt. Copies with the same `trial_id` (retried uploads, an export loaded next to a Drive download) are the same record; keep one. The app saves an attempt up to three times, with the same `created_at`, in this order: a placeholder before the participant answered (`accepted: false`, `note` `review_interrupted` when the review opens in tap mode, `hand_not_reported` before the hand question of the choice trial), the decided copy, and possibly a revoked copy later (`note` `redo_requested`, from the pause sheet). If copies disagree, keep the one latest in that order: a placeholder loses to the decided copy, which loses to a revoked one. `motionlab.io` and the Heroku service apply this rule; Drive keeps only the newest file.
-3. **Attempts**: `(session_id, trial_index, attempt)` should be unique, because `attempt` = 1 + the number of attempts already stored for that `trial_index`. Two different `trial_id`s with the same triple (e.g. the same session resumed on two copies of the app) are both kept and flagged.
+3. **Attempts**: `(session_id, trial_index, attempt)` should be unique, because `attempt` = 1 + the number of attempts already stored for that `trial_index` (from 101 on when the session screen could not read the stored attempts, [5.1](#51-identity-and-labels)). Two different `trial_id`s with the same triple (e.g. the same session resumed on two copies of the app) are both kept and flagged.
 4. **One row per planned trial**: use the attempt with `outcome.accepted = true`. The session only advances on acceptance, so there is normally at most one per `trial_index`. If there are several, keep the latest `created_at` and flag the trial. Keep all attempts for failure and redo analyses.
-5. **Resumed and repeated sessions**: resuming (within 24 h) continues the same `session_id`. A new session gets a new id, seed and plan; both are valid data. Order a participant's sessions by `started_at`, and decide in the analysis plan whether second sessions count (learning effects).
+5. **Resumed and repeated sessions**: resuming (within 24 h) continues the same `session_id`. A new session gets a new id, seed and plan, and the app closes the same participant's unfinished sessions on that phone as `abandoned`; both are valid data. Order a participant's sessions by `started_at`, and decide in the analysis plan whether second sessions count (learning effects).
 6. **One person, two codes**: Safari and the Home Screen copy of the app have separate storage, as does a second phone, so the same person can appear under two participant codes. The data cannot reveal this. Ask participants to stay in one browser, and look for near-identical profiles with close timestamps. An undetected duplicate person leaks across subject-wise folds.
 7. **Index Sheet rows** can repeat for the same record id; deduplicate by id and keep the last row.
 8. **Simulated records** are never duplicates of real ones. Filter `simulated == true` before anything else: in-app simulation mode (`?sim=1`) uploads to the same backend.
@@ -580,7 +589,10 @@ for tr in trials.values():
         "trial_id": tr["trial_id"], "participant_id": tr["participant_id"],
         "trial_index": tr["trial_index"], "attempt": tr["attempt"], **tr["condition"],
         "status": tr["outcome"]["status"], "accepted": tr["outcome"]["accepted"],
-        "flag": tr["outcome"]["participant_flag"], "hidden": tr["quality"]["hidden_during"],
+        "flag": tr["outcome"]["participant_flag"],
+        # rule T4: hidden during the movement (older 0.2.0 builds also set it during the return of the arm)
+        "hidden": tr["quality"]["hidden_during"] and not (
+            tr["outcome"]["status"] == "complete" and "return_cut_short" in tr["quality"]["warnings"]),
         "gaps": tr["quality"]["gaps_over_50ms"], "motion_hz": tr["quality"]["motion_hz"],
         "simulated": tr["simulated"],
         "engine": s.get("device", {}).get("engine"),  # optional field (schema 1.1)
@@ -609,7 +621,7 @@ Recommended defaults. Pre-register them, together with the sensitivity variants,
 | T1 | Not completed | `outcome.status != 'complete'` | exclude | No valid movement window. Keep for failure-rate analysis |
 | T2 | Not accepted | `outcome.accepted == false` | exclude | Redo or failure |
 | T3 | Flagged by the participant | `outcome.participant_flag != null` | exclude | `wrong_hand` is label noise; do not relabel automatically |
-| T4 | Page hidden | `quality.hidden_during` | exclude | Sensors stop while hidden, so the stream has a hole |
+| T4 | Page hidden during the movement | `quality.hidden_during`, except on a complete trial that carries the warning `return_cut_short` | exclude | Sensors stop while hidden, so the stream has a hole. `hidden_during` covers the movement window only (up to `end_detected_ms + post_roll_ms`); a hide during the return of the arm adds `hidden_after_end` instead and keeps the trial. Earlier 0.2.0 builds set `hidden_during` for that late hide too; such records are complete with `return_cut_short` and are kept (`motionlab.evaluate.hidden_during_movement`) |
 | T5 | Low rate | `quality.motion_hz < 50` | exclude | Every current browser targets 60 Hz; much lower rates mean a degraded path, e.g. Firefox fires only every 100 ms when one of its three sensors is missing (inferred from the [Gecko source](https://github.com/mozilla-firefox/firefox/blob/main/dom/system/nsDeviceSensors.cpp)) |
 | T6 | Gaps | `quality.gaps_over_50ms > 0` | exclude | Sensitivity analysis: allow gaps outside [onset − 0.5 s, end + 0.5 s] |
 | T7 | No gyroscope | `quality.rotation_available == false` | exclude | Most features and the segmentation depend on the gyroscope |
@@ -635,8 +647,8 @@ Recommended defaults. Pre-register them, together with the sensitivity variants,
 ## 13. Open questions for the PI
 
 1. Retention period of the raw data, who may access the Drive folder, and whether the data may later be reused for publication.
-2. Is storing pseudonymous data in a project Google account's Drive acceptable to the ethics committee, or must it stay on university infrastructure?
-3. Should nicknames ever be uploaded? The recommendation is no (`upload_nickname: false`).
+2. Is the Heroku Postgres database (its region is set when the app is created) an acceptable place for the data, or must they move to university infrastructure ([06 §1](06_CONSIDERATIONS.md#1-ethics-and-law))?
+3. Names: decided on 2026-10-24. Full names are uploaded with the participants' consent (`upload_nickname: true`) and kept private ([06 §2](06_CONSIDERATIONS.md#2-privacy-and-security)); how long they are kept follows the retention answer of question 1.
 4. Which exclusion rules are primary and which are sensitivity analyses (especially T6 gaps and T8 orientation mismatch)?
 5. May a participant contribute more than one session, and do later sessions count in the main analysis?
 6. Is `height_cm` needed? It is optional; dropping it would further minimise the data.
