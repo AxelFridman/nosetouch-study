@@ -1,0 +1,774 @@
+% sections/C_interpretable.tex: Lane m1.
+% Owner: the writer named in the report plan. Numbers only through \R / \Rci; figures through \genfig,
+% tables through \gentab (report/README.md). Preliminary version: written in full, awaiting the
+% researcher's comments.
+\section{Interpretable models and the feature catalogue}\label{app:m1}
+
+Lane m1 asks two questions: which physical quantity carries the hand, and how far simple, explainable
+models go. This appendix states every decision of the lane with its options, its evidence and its
+rationale. The main text uses its results in Section~\ref{sec:physics} and Section~\ref{sec:results}.
+
+\subsection{Evaluation contract and designs}\label{app:m1:contract}
+
+Every experiment ran through the shared harness of Appendix~\ref{app:data}: LOSO over \R{m1/n_folds}
+folds on the \R{m1/n_trials} primary trials of \R{m1/n_persons} persons. The lane ran
+\R{m1/n_experiments} experiments; \R{m1/n_leak_all_folds} of them passed the harness leak check on
+every fold. Every fitted quantity is fitted on the training persons only: hyperparameters, in-fold
+feature and treatment choices, thresholds, scalers, winsorising limits, spline knots, calibrators and
+the aggregation exponent. Choices use an inner split of the training persons into groups
+(GroupKFold over persons). The free-choice trials are scored and never trained on.
+
+Each model carries one of six design labels. \emph{Pre-specified}: fixed before the data were seen.
+\emph{Specified after the pooled description}: PHYS6 (defined below), chosen after a pooled look at the
+components of all persons. \emph{Nested}: a choice made inside every fold, so its estimate is
+selection-aware. \emph{Exploratory}: a member of a family of configurations compared on the outer
+folds; its number of configurations is given. \emph{Sensitivity run} and \emph{window analysis}: never
+candidates for selection.
+
+Paired differences come with a paired person-bootstrap CI (\R{m1/n_boot} resamples) and an exact
+sign-flip test over persons. Each family of comparisons is Holm-adjusted and named where it is used:
+the \R{m1/family_vs_rule_size} contrasts against the rule, the \R{m1/family_vs_reference_size}
+models against the reference, the \R{m1/family_m1_lr_phys6_options_size} options against PHYS6, and
+the four post-hoc remedies of one model. The ECE uses \R{m1/ece_bins} equal-mass bins. It is reported
+with the 95th percentile and the p value of its perfect-calibration null, in which the labels are
+redrawn from the model's own \pright. The calibration slope is the slope of a logistic regression of
+the outcome on logit(\pright), with a person-bootstrap CI; a slope above 1 means under-confidence. The
+intercept of the same regression is reported in Table~\ref{tab:m1_calibration} as a point estimate
+only: the lane computed no CI for it. On
+the free-choice trials, a \pright{} of exactly 0.5 counts one half. All \R{m1/nat_n} free-choice
+trials are right-hand choices, so the natural-use score of this appendix is right-hand recall on the
+free-choice trials (a constant right answer would score 100\,\%), with a Wilson 95\,\% interval.
+The column \emph{k = 3} is the per-person balanced accuracy when the \pright{} of three attempts of
+one person and hand are averaged.
+
+\subsection{The body frame, the catalogue and the physics}\label{app:m1:catalogue}
+
+\paragraph{A heading-free body frame.} From the gyro-propagated up vector $\ghat$ and the screen
+normal, lane m1 builds two horizontal unit vectors: $\hat{\mathbf h}$, out of the screen towards the
+face, and $\hat{\mathbf s} = \ghat\times\hat{\mathbf h}$, towards the person's right. The yaw rate
+$\vomega\cdot\ghat$, the roll rate $\vomega\cdot\hat{\mathbf h}$ and the lateral acceleration
+$\va\cdot\hat{\mathbf s}$ are chiral: they change sign under the mirror of eq.~\eqref{eq:mirror}.
+Pitch, forward and vertical acceleration are mirror-even. The three screen-toward grips differ by a
+rotation about the screen normal, which leaves every feature unchanged. Under the screen-away flip,
+yaw is unchanged but roll and lateral change sign, because $\hat{\mathbf h}$ follows the screen
+normal. Unit tests of the lane check the three properties. A feature name gives the component and the
+fraction of the approach over which it is accumulated: \code{yaw_q50} is the yaw rotation over the
+first half (the first-half yaw), \code{yaw_q100} the net yaw, \code{roll_q50} the roll rotation and
+\code{latvel_q50} the lateral velocity change (the integral of $\va\cdot\hat{\mathbf s}$) up to the
+half of the approach.
+
+\paragraph{Options for the univariate score.} Each feature was scored alone by its LOSO AUC
+\cite{hanley1982roc}. A univariate logistic model with an intercept was rejected: in
+LOSO, the fitted intercept follows the class balance of the training persons, which is anticorrelated
+with the balance of the held-out person, and it drags the AUC of an uninformative feature below 0.5.
+The catalogue therefore uses a direction-only rule, $\pright = \sigma(s\,x/\mathrm{RMS}(x))$, whose
+direction $s$ and scale are fitted on the training persons, with no intercept.
+
+\paragraph{Only chiral features carry the hand.} The catalogue holds \R{m1/cat_n_features} features,
+\R{m1/cat_n_odd} odd and \R{m1/cat_n_even} even (Figure~\ref{fig:M1_01_feature_catalogue},
+Table~\ref{tab:m1_feature_catalogue}). Odd features reach a univariate AUC of up to
+\R{m1/cat_odd_auc_max}: \code{latvel_q75} reaches \Rci{m1/cat_latvel_q75_auc} and orders the trials
+of \R{m1/cat_latvel_q75_persons} of the persons correctly more often than not. Every even feature stays
+between \R{m1/cat_even_auc_min} and \R{m1/cat_even_auc_max}. For \R{m1/cat_n_direction_flips}
+features the learned direction changes across folds. For such a feature, an AUC below 0.5 means that
+the direction learned on the other persons fails on the held-out person; it is not evidence for the
+opposite direction. \emph{Decision:} models are built from chiral features; even descriptors enter at
+most as modulators of the chiral slopes.
+
+\begin{figure}[p]
+  \centering
+  \genfig[height=0.84\textheight,keepaspectratio]{m1/M1_01_feature_catalogue}
+  \caption{Feature catalogue: univariate LOSO AUC of each of the \R{m1/cat_n_features} features
+  (direction and scale fitted on the training persons, no intercept; 95\,\% CI) and the share of
+  persons whose own trials the feature orders correctly more often than not (\R{m1/n_trials} trials,
+  \R{m1/n_persons} persons). Odd (chiral) features reach \R{m1/cat_odd_auc_max}; even features stay
+  between \R{m1/cat_even_auc_min} and \R{m1/cat_even_auc_max}. It supports building the models from
+  chiral features only.}
+  \label{fig:M1_01_feature_catalogue}
+\end{figure}
+
+\gentab{m1/m1_feature_catalogue}
+
+\paragraph{The yaw turns early and turns back.} The first-half yaw has a higher AUC than
+the net yaw (the CIs overlap and no paired test was run): \code{yaw_q50} reaches an AUC of \Rci{m1/cat_yaw_q50_auc} and separates
+\R{m1/cat_yaw_q50_persons} of the persons; the net yaw reaches \Rci{m1/cat_yaw_q100_auc}
+(\R{m1/cat_yaw_q100_persons} of the persons) and the second-half yaw \Rci{m1/cat_yaw_second_half_auc}
+(\R{m1/cat_yaw_second_half_persons}). The describe step finds the same ordering with pooled AUCs of
+\R{describe/fhy_auc_pooled}, \R{describe/net_yaw_auc_pooled} and
+\R{describe/second_half_yaw_auc_pooled} (Table~\ref{tab:describe_first_half_yaw}). The phone turns
+towards the side of the hand during the first part of the reach and partly back during the second.
+Whole-movement integrals lose part of the evidence.
+
+\gentab{describe/describe_first_half_yaw}
+
+\paragraph{The mirror maps one hand onto the other.} After the left-hand mean is mirrored, the
+right-hand mean of the yaw rate is closer to it than to the unmirrored left mean for
+\R{describe/mirror_persons_closer} of \R{describe/mirror_persons} persons
+(Table~\ref{tab:describe_mirror_symmetry}). The RMS difference between the two mean yaw-rate curves
+falls from \R{describe/unmirrored_rms_yaw_rate} to \R{describe/mirror_rms_yaw_rate}~deg/s. The mirror
+does not change the even channels, so their small left-right differences stay as they are. This
+supports the antisymmetric models below: one set of weights serves both hands.
+
+\gentab{describe/describe_mirror_symmetry}
+
+\paragraph{Three chiral components with different timing.} Figure~\ref{fig:M1_02_chiral_components}
+shows the mean time course of the three components per hand, with the left-hand mean mirrored. The
+right-minus-left difference of the mean rate peaks first for roll, then for yaw, then for lateral
+acceleration: at \R{m1/physics_peak_roll}, \R{m1/physics_peak_yaw} and \R{m1/physics_peak_lateral}
+per cent of the approach. The mirrored left mean follows the right mean in all three components. The PHYS6 feature set takes each component at the half and at the end of the approach:
+\code{yaw_q50}, \code{yaw_q100}, \code{roll_q50}, \code{roll_q100}, \code{latvel_q50} and
+\code{latvel_q100}.
+
+\begin{figure}[tbp]
+  \centering
+  \genfig{m1/M1_02_chiral_components}
+  \caption{Mean time course of the three chiral components per hand (mean over the
+  \R{m1/physics_n_persons} persons of each person's mean; bands: person-bootstrap 95\,\% CI). Top:
+  rates; bottom: their integrals over the approach. Dashed: the left-hand mean mirrored. The hand
+  shows in yaw, roll and lateral motion, at different times of the approach.}
+  \label{fig:M1_02_chiral_components}
+\end{figure}
+
+\paragraph{Even descriptors do not tell the hand.} Figure~\ref{fig:M1_03_key_distributions} shows
+the per-hand distributions of six key features. The odd features shift in opposite directions for the
+two hands. The even ones overlap: the duration reaches an AUC of \R{m1/cat_duration_s_auc_2} and the
+peak angular speed \R{m1/cat_peak_gyro_auc_2}. They were tested only as modulators of the chiral
+slopes (Appendix~\ref{app:m1:treatment}).
+
+\begin{figure}[tbp]
+  \centering
+  \genfig{m1/M1_03_key_distributions}
+  \caption{Per-hand distributions of four chiral and two even features (clipped at the 1st and 99th
+  percentiles for display); titles give the univariate LOSO AUC. Even descriptors cannot tell the
+  hand alone.}
+  \label{fig:M1_03_key_distributions}
+\end{figure}
+
+\paragraph{Why the lateral feature behaves like yaw.} This is a derivation, not a fitted result. The
+pair $(\hat{\mathbf h}, \hat{\mathbf s})$ turns with the heading of the screen normal at a rate $W$,
+which is the yaw rate for a turn about the vertical. Then
+$\mathrm{d}\hat{\mathbf s}/\mathrm{d}t = -W\hat{\mathbf h}$ and, with $\mathbf v$ the velocity,
+\begin{equation}
+  \frac{\mathrm{d}}{\mathrm{d}t}\left(\mathbf v\cdot\hat{\mathbf s}\right)
+  = \va\cdot\hat{\mathbf s} - W\left(\mathbf v\cdot\hat{\mathbf h}\right) .
+  \label{eq:m1-lateral}
+\end{equation}
+For a movement that starts and ends at rest, the integral of $\va\cdot\hat{\mathbf s}$ over the
+approach equals the integral of $W(\mathbf v\cdot\hat{\mathbf h})$: the turn rate weighted by the speed
+towards the face, plus sensor drift. The lateral feature is thus a speed-weighted yaw. Its univariate
+AUC (\code{latvel_q100}: \R{m1/cat_latvel_q100_auc}) lies above that of the net yaw
+(\R{m1/cat_yaw_q100_auc}) and close to that of the first-half yaw (\R{m1/cat_yaw_q50_auc}).
+
+\paragraph{Integration drift of the lateral feature.} \emph{Detection:} over the still hold, the
+lateral acceleration has a median absolute bias of \R{m1/drift_bias_abs_median}~m/s$^2$ (90th
+percentile \R{m1/drift_bias_abs_q90}). Carried through the approach, this bias amounts to
+\R{m1/drift_ratio_median} of $|$\code{latvel_q100}$|$ in the median trial, and to more than half of it
+in \R{m1/drift_share_ratio_above_half} of the trials. The bias itself differs between the hands (AUC
+\Rci{m1/drift_bias_auc}). \emph{Why it matters:} a drift of that size could carry sensor or protocol
+artefacts instead of the movement. \emph{Option tested:} PHYS6 with the lateral velocities integrated
+after removing the hold bias (exploratory, \R{m1/lr_phys6_dedrift_configs} configurations):
+\Rci{m1/lr_phys6_dedrift_acc}; against PHYS6 \Rcib{m1/lr_phys6_dedrift_vs_base_acc}~points and log
+loss \Rcib{m1/lr_phys6_dedrift_vs_base_ll}, Holm $p = \R{m1/lr_phys6_dedrift_vs_base_p_ll_holm}$ over
+the \R{m1/family_m1_lr_phys6_options_size} options. \emph{Decision:} the raw lateral integral is
+kept; its drift is a stated limitation.
+
+\paragraph{The still hold and the lead-in.} A negative control was planned on the still hold
+\R{m1/pre_s_start}~s to \R{m1/pre_s_end}~s before the onset, where chance was expected. It is not at
+chance. The single features reach AUCs of \Rci{m1/cat_yaw_pre_auc} (yaw), \Rci{m1/cat_roll_pre_auc}
+(roll) and \Rci{m1/cat_latvel_pre_auc} (lateral); the three together reach \Rci{m1/lr_control_acc},
+AUC \Rci{m1/lr_control_auc}. Two explanations fit and cannot be separated here: a hand-specific drift
+of the held arm, and the settling of the arm after the previous trial, which used the same hand
+because hands are blocked. The v0 cue-free detector finds such an earlier movement first in
+\R{m1/cuefree_share_earlier_movement} of the recordings. In production, the hold is done with the hand
+being judged, so the hold is legitimate evidence, but its size here may be inflated by the blocked
+protocol. In the last \R{m1/lead_s}~s before the onset (the lead-in), roll carries the most evidence
+(AUC \Rci{m1/cat_roll_lead_auc}); the three components together reach \Rci{m1/lr_lead_acc}. The
+movement starts slightly before the detected onset, so a cue-free detector should open its window
+earlier, not later (Appendix~\ref{app:prod}).
+
+\FloatBarrier
+\subsection{Which components to keep}\label{app:m1:sets}
+
+\emph{Options:} antisymmetric logistic models on one component (two features each), on the three
+pairs, on all three (PHYS6), with the set chosen inside every fold, on every chiral approach feature,
+and with up to four features chosen in-fold by forward selection
+(Figure~\ref{fig:M1_04_channel_sets}). Each is paired against PHYS6 with the Holm adjustment over the
+\R{m1/family_m1_lr_phys6_options_size} options of that family.
+
+\emph{Evidence:} yaw alone reaches \Rci{m1/lr_yaw2_acc} and lateral alone \Rci{m1/lr_lat2_acc}.
+Roll alone reaches only \Rci{m1/lr_roll2_acc} (AUC \R{m1/lr_roll2_auc}); it is worse than PHYS6 after
+the correction (log loss \Rcib{m1/lr_roll2_vs_base_ll}, Holm $p = \R{m1/lr_roll2_vs_base_p_ll_holm}$).
+Yaw and lateral together reach \Rci{m1/lr_yaw_lat_acc}; adding roll changes nothing measurable (yaw +
+lateral against PHYS6: \Rcib{m1/lr_yaw_lat_vs_base_acc}~points, log loss
+\Rcib{m1/lr_yaw_lat_vs_base_ll}, Holm $p = \R{m1/lr_yaw_lat_vs_base_p_ll_holm}$). The three
+components taken at fixed times (0.5~s and 1.0~s after the onset, a window analysis independent of
+the end bound) reach \Rci{m1/lr_fix6_acc}, against PHYS6 \Rcib{m1/lr_fix6_vs_base_acc}~points
+(Holm $p = \R{m1/lr_fix6_vs_base_p_acc_holm}$).
+
+\emph{Guards against the optimism of PHYS6.} PHYS6 was specified after a pooled look at all persons,
+not pre-registered. Two nested guards test whether that look made it optimistic. The set chosen inside
+every fold among yaw, roll, lateral, the three pairs and PHYS6 is PHYS6 in
+\R{m1/sets_nested_top_folds} of \R{m1/n_folds} folds and reaches \Rci{m1/lr_sets_nested_acc}
+(against PHYS6 \Rcib{m1/lr_sets_nested_vs_base_acc}~points, log loss
+\Rcib{m1/lr_sets_nested_vs_base_ll}, Holm $p = \R{m1/lr_sets_nested_vs_base_p_ll_holm}$). The
+in-fold forward selection over every chiral approach feature reaches \Rci{m1/lr_fwd_acc}, with a
+higher log loss than PHYS6 (\Rcib{m1/lr_fwd_vs_base_ll}; unadjusted CI above 0, Holm
+$p = \R{m1/lr_fwd_vs_base_p_ll_holm}$). Every chiral approach feature with an L2 penalty only
+(exploratory, \R{m1/lr_chiral_all_configs} configurations) reaches \Rci{m1/lr_chiral_all_acc}, against
+PHYS6 \Rcib{m1/lr_chiral_all_vs_base_acc}~points (Holm $p = \R{m1/lr_chiral_all_vs_base_p_acc_holm}$).
+
+\emph{Decision:} PHYS6 is the baseline of the lane. Yaw about gravity and lateral motion carry the
+hand; roll is a weak, largely redundant early signal. Choosing the set inside the folds costs nothing
+measurable, and the wider in-fold search does no better (its higher log loss passes the unadjusted CI
+only): the small physical set is not an artefact of the pooled look.
+
+\begin{figure}[tbp]
+  \centering
+  \genfig{m1/M1_04_channel_sets}
+  \caption{Accuracy and AUC (95\,\% CI) of antisymmetric logistic models on one, two or three chiral
+  components, with the set or the features chosen in-fold, and on three windows (grey: absolute time
+  after the onset, the lead-in and the still hold before the onset). Yaw and lateral carry the hand;
+  the still hold is not at chance.}
+  \label{fig:M1_04_channel_sets}
+\end{figure}
+
+\paragraph{Where in the movement.} Antisymmetric logistic ``temporal filters'' on the binned chiral
+rates (\R{m1/tc_bins} bins of the time-normalised approach) show where the evidence lies
+(Figure~\ref{fig:M1_06_temporal_filter}). The yaw-rate weights average \R{m1/tf_yaw_w_early} in the
+first half of the approach and \R{m1/tf_yaw_w_late} in the second, and turn negative from
+\R{m1/tf_yaw_first_negative} per cent of the approach onwards: the turn back. In the three-channel filter, the
+lateral weights are largest in the first third, and the first bin of roll and of lateral carries a
+negative weight. \emph{Decision:} features must be time-resolved, not whole-movement integrals; PHYS6
+samples each component at the half and at the end of the approach.
+
+\begin{figure}[tbp]
+  \centering
+  \genfig{m1/M1_06_temporal_filter}
+  \caption{Weight profiles of the antisymmetric temporal filters on the binned chiral rates (median
+  over the \R{m1/tf_n_folds} LOSO folds; band: 10th to 90th percentile across folds). A positive
+  weight means that a positive rate in that bin argues for the right hand. The yaw evidence sits in
+  the first half of the approach and reverses near its end.}
+  \label{fig:M1_06_temporal_filter}
+\end{figure}
+
+\FloatBarrier
+\subsection{The model ladder}\label{app:m1:ladder}
+
+The ladder climbs from rules to fitted models (Figure~\ref{fig:M1_05_model_ladder}). Every model of
+the lane, with its design and number of configurations, is in Table~\ref{tab:m1_models}.
+
+\paragraph{Rules.} Four rules were compared (Table~\ref{tab:m1_rules}; per person in
+Table~\ref{tab:m1_rules_per_person}). The pilot rule says right if and only if the first-half yaw is
+positive. It has no fitted parameter and reaches \Rci{m1/rule_fhy_sign_acc}. Its direction came from
+the pilot session of P01, a person of the evaluation set, and its \pright{} is 0 or 1, so its log
+loss is not finite. The calibrated sign rule learns its direction on the training persons and outputs
+its training hit rate $q$ (or $1-q$) as \pright{}. It makes the same decisions
+(\Rci{m1/rule_fhy_sign_cal_acc}; median person \R{m1/rule_fhy_sign_cal_person_median}). A fitted
+threshold (exploratory, \R{m1/rule_fhy_threshold_configs} configurations) does not help:
+\Rci{m1/rule_fhy_threshold_acc}. The best single-feature rule, with feature, direction and threshold
+chosen inside every fold (exploratory, \R{m1/rule_nested_configs} configurations), reaches
+\Rci{m1/rule_nested_acc}; it picks \code{latvel_q75} in \R{m1/rule_nested_mode_folds} of
+\R{m1/rule_nested_n_folds} folds.
+
+\gentab{m1/m1_rules}
+\gentab{m1/m1_rules_per_person}
+
+\paragraph{PHYS6: an antisymmetric logistic model.} PHYS6 is a logistic model on the six chiral
+features, scaled by their RMS on the training persons, with no intercept and an L2 penalty whose
+strength is chosen on inner splits (half-decade grid from \R{m1/grid_c_min} to \R{m1/grid_c_max}).
+With no intercept and odd features only, the logit is odd: $\pright(m(\mathbf x)) = 1-\pright(\mathbf x)$
+for every trial, as eq.~\eqref{eq:parity} requires. The model cannot learn a prior for one hand. It
+reaches \Rci{m1/lr_phys6_acc}, AUC \Rci{m1/lr_phys6_auc} and log loss \Rci{m1/lr_phys6_ll}. Its
+coefficients are stable across folds (Table~\ref{tab:m1_phys6_coefficients}): per RMS unit,
+\code{yaw_q50} \R{m1/phys6_coef_yaw_q50}, \code{yaw_q100} \R{m1/phys6_coef_yaw_q100},
+\code{latvel_q50} \R{m1/phys6_coef_latvel_q50}, \code{latvel_q100} \R{m1/phys6_coef_latvel_q100},
+\code{roll_q50} \R{m1/phys6_coef_roll_q50} and \code{roll_q100} \R{m1/phys6_coef_roll_q100}, each
+with the same sign in every fold. The small finalist, the same model with asinh-compressed features
+(Appendix~\ref{app:m1:treatment}), has coefficients of the same signs
+(Table~\ref{tab:m1_small_coefficients}).
+
+\gentab{m1/m1_phys6_coefficients}
+\gentab{m1/m1_small_coefficients}
+
+\paragraph{Augmentation or antisymmetry.} The alternative to the antisymmetric constraint is mirror
+augmentation \cite{um2017augmentation}: train with an intercept on every trial and on its mirror
+image with the hand swapped. On odd features the two are the same model, with the L2 penalty halved
+because the rows are doubled; a unit test pins the equivalence at $C \to 2C$. In practice they share
+\R{m1/aug_same_decisions} of the decisions (largest $|\Delta\pright|$ \R{m1/aug_max_dp}). The
+antisymmetric form was kept because it holds the symmetry exactly by construction, in the spirit of
+symmetry-constrained models \cite{cohen2016group}.
+
+\paragraph{Temporal filter.} The three-channel temporal filter of Figure~\ref{fig:M1_06_temporal_filter}
+is, with its post-hoc calibrated variants, the most accurate model of the lane, but it is exploratory
+(\R{m1/tf_multi_configs} configurations):
+\Rci{m1/tf_multi_acc}, AUC \Rci{m1/tf_multi_auc}, log loss \R{m1/tf_multi_ll}. Against PHYS6 it gains
+\Rcib{m1/tf_multi_vs_base_acc}~points, Holm $p = \R{m1/tf_multi_vs_base_p_acc_holm}$ over the
+\R{m1/family_m1_lr_phys6_options_size} options, and its log loss does not differ
+(\Rcib{m1/tf_multi_vs_base_ll}). Its probabilities are under-confident
+(Appendix~\ref{app:m1:calibration}).
+
+\paragraph{Shallow tree.} A tree of depth at most \R{m1/tree_depth_cap}, mirror-augmented and
+symmetrised (exploratory, \R{m1/tree_configs} configurations), reaches \Rci{m1/tree_acc}, log loss
+\R{m1/tree_ll} (Figure~\ref{fig:M1_07_tree}). Its first question is \code{latvel_q75} in
+\R{m1/tree_root_mode_folds} of \R{m1/tree_n_folds} folds, and it splits almost only on chiral
+features; the one even feature it uses is the mean tilt rate. Its depth sits at the cap of its grid in
+\R{m1/grid_tree_depth_edge} folds; the cap is a design choice that keeps the tree readable. Against
+PHYS6: \Rcib{m1/tree_vs_base_acc}~points, log loss \Rcib{m1/tree_vs_base_ll}, Holm
+$p = \R{m1/tree_vs_base_p_ll_holm}$.
+
+\begin{figure}[tbp]
+  \centering
+  \genfig{m1/M1_07_tree}
+  \caption{Left: the shallow tree with the hyperparameters chosen most often in the folds
+  (\R{m1/tree_config_folds} of \R{m1/tree_n_folds}), refitted on every trial and its mirror image for
+  illustration; a leaf shows \pright{} and its number of (augmented) training rows. Right: how often
+  each feature is split on across the fold trees. The first question is the same in every fold.}
+  \label{fig:M1_07_tree}
+\end{figure}
+
+\paragraph{Generalised additive model.} A generalised additive model (GAM) on PHYS6 replaces each
+linear term by a cubic spline (mirror-augmented and symmetrised; number of knots and L2 strength
+chosen in-fold: 7 knots in \R{m1/gam_knots_7_folds} folds, 9 in \R{m1/gam_knots_9_folds}). It is
+exploratory (\R{m1/gam_phys6_configs} configurations): \Rci{m1/gam_phys6_acc}, log loss
+\R{m1/gam_phys6_ll}. Its shapes are steepest around zero (Figure~\ref{fig:M1_08_gam_shapes}): the
+slope over the outer fifths of the range is smaller than the central slope for
+\R{m1/gam_n_saturating} of \R{m1/gam_n_shapes} features and reverses its sign for
+\R{m1/gam_n_turning}. Beyond the bulk of the trials, a larger value adds no further evidence. This is
+the saturation that the asinh treatment imposes on the linear model. Against PHYS6 the GAM's log loss
+does not differ after the correction (\Rcib{m1/gam_phys6_vs_base_ll}, Holm
+$p = \R{m1/gam_phys6_vs_base_p_ll_holm}$).
+
+\begin{figure}[tbp]
+  \centering
+  \genfig{m1/M1_08_gam_shapes}
+  \caption{Shape functions of the GAM on PHYS6: median over the \R{m1/gam_n_folds} folds and range
+  across folds, in the units of each feature; each shape is odd. The evidence saturates beyond the
+  bulk of the trials.}
+  \label{fig:M1_08_gam_shapes}
+\end{figure}
+
+\paragraph{What fitted numbers add to the rule.} \R{m1/family_vs_rule_size} fitted models were paired
+against the calibrated sign rule, with the Holm adjustment over these contrasts. PHYS6 gains
+\Rcib{m1/lr_phys6_vs_rule_acc}~points (Holm $p = \R{m1/lr_phys6_vs_rule_p_acc_holm}$) and lowers the
+log loss by \Rcib{m1/lr_phys6_vs_rule_ll} (Holm $p = \R{m1/lr_phys6_vs_rule_p_ll_holm}$): neither
+survives. Three gains survive the correction. The small finalist lowers the log loss by
+\Rcib{m1/fin_small_vs_rule_ll} (Holm $p = \R{m1/fin_small_vs_rule_p_ll_holm}$); its accuracy gain of
+\Rcib{m1/fin_small_vs_rule_acc}~points does not survive (Holm $p = \R{m1/fin_small_vs_rule_p_acc_holm}$,
+just above the 0.05 level). The GAM lowers the log loss by \Rcib{m1/gam_phys6_vs_rule_ll} (Holm
+$p = \R{m1/gam_phys6_vs_rule_p_ll_holm}$). The temporal filter gains
+\Rcib{m1/tf_multi_vs_rule_acc}~points of accuracy (Holm $p = \R{m1/tf_multi_vs_rule_p_acc_holm}$). Against
+the pre-specified reference, a logistic model on the yaw at 8 instants (\Rci{m1/ref_acc}),
+\R{m1/ladder_n_better_raw} of the \R{m1/ladder_n_models} models of
+Figure~\ref{fig:M1_05_model_ladder} are more accurate beyond the unadjusted paired CI, and
+\R{m1/ladder_n_better_holm} after the Holm correction over the \R{m1/family_vs_reference_size} lane
+models paired with it. The small finalist gains \Rcib{m1/fin_small_vs_ref_acc}~points over the
+reference (Holm $p = \R{m1/fin_small_vs_ref_p_acc_holm}$).
+
+\begin{figure}[tbp]
+  \centering
+  \genfig{m1/M1_05_model_ladder}
+  \caption{Accuracy and log loss (95\,\% CI) of the interpretable models, LOSO (grey: rules; blue:
+  fitted models; black: the pre-specified reference, dotted line). Diamonds mark the finalists;
+  dashed: the log loss of a constant 0.5. The zero-parameter rule has no finite log loss.}
+  \label{fig:M1_05_model_ladder}
+\end{figure}
+
+\gentab{m1/m1_models}
+
+\FloatBarrier
+\subsection{Data treatment and model form}\label{app:m1:treatment}
+
+\emph{Options:} \R{m1/family_m1_lr_phys6_options_size} variants of PHYS6, each paired against it on
+the same trials (Figure~\ref{fig:M1_13_data_treatment}, Table~\ref{tab:m1_data_treatment}). Scaling:
+none, robust (median $|x|$) or RMS. Tails: winsorised at the training 99th percentile, or compressed by
+asinh. Per-trial amplitude normalisation. The de-drifted lateral velocity. The treatment chosen inside
+every fold. Model form: mirror augmentation with an intercept; an unconstrained model with an intercept
+and even descriptors; odd-by-even interactions with log duration and log peak speed. More features,
+in-fold selections, splines and the temporal filters complete the family.
+
+\emph{Evidence:} no option lowers the log loss of PHYS6 after the Holm correction over the
+\R{m1/family_m1_lr_phys6_options_size} options. Asinh compression lowers it beyond the unadjusted
+paired CI (\Rcib{m1/lr_phys6_win_asinh_vs_base_ll}, $p = \R{m1/cal_lr_phys6_win_asinh_p_ll}$, Holm
+$p = \R{m1/lr_phys6_win_asinh_vs_base_p_ll_holm}$). Chosen inside every fold, the treatment is asinh
+in \R{m1/nested_top_folds} of \R{m1/n_folds} folds, so the nested model and the asinh model make
+identical predictions. Worse after the correction: roll only, the lead-in and the still hold. The
+unconstrained model has a higher log loss than PHYS6
+(\Rcib{m1/lr_phys6_free_vs_base_ll}, unadjusted CI above 0, Holm
+$p = \R{m1/lr_phys6_free_vs_base_p_ll_holm}$).
+
+\emph{Decision:} the small model keeps the antisymmetric form, and its data treatment is chosen inside
+every fold (in practice asinh). The rationale is calibration rather than accuracy: the tail compression
+is the one remedy that removes the miscalibration of PHYS6 (Appendix~\ref{app:m1:calibration}). The
+unconstrained form was rejected because it may learn asymmetries of this mostly right-handed sample
+that would not transfer to a left-handed user.
+
+\emph{Hyperparameter grids.} \R{m1/grid_n_edge_rows} pairs of an experiment and a hyperparameter chose
+an edge of their grid in at least one fold. Only the tree's depth (\R{m1/grid_tree_depth_edge} folds)
+and its minimum leaf size (\R{m1/grid_tree_min_leaf_edge} folds) sit at an edge in most folds.
+
+\begin{figure}[tbp]
+  \centering
+  \genfig{m1/M1_13_data_treatment}
+  \caption{Data treatments and model forms against PHYS6 on the same trials: accuracy and log-loss
+  differences (paired person-bootstrap 95\,\% CI); text: Holm-adjusted p of the per-person log-loss
+  difference over the \R{m1/family_m1_lr_phys6_options_size} options of the family. The component sets
+  and windows of the family are in Figure~\ref{fig:M1_04_channel_sets}; all options are in
+  Table~\ref{tab:m1_data_treatment}. No option lowers the log loss after the correction.}
+  \label{fig:M1_13_data_treatment}
+\end{figure}
+
+\gentab{m1/m1_data_treatment}
+
+\FloatBarrier
+\subsection{Finalists and their calibration}\label{app:m1:calibration}
+
+\paragraph{Selection.} The lane hands three finalists to the synthesis, one per slot, under fixed
+criteria. A slot is judged by the log loss, because the product is a probability, and a replacement
+of the slot's anchor must survive the Holm correction over its family. \emph{Rule:} the calibrated
+sign rule (pre-specified, \R{m1/fin_rule_configs} configuration). \emph{Small model:} PHYS6 with its
+data treatment chosen in-fold (nested, \R{m1/fin_small_configs} configuration); no member of the
+small-model family beats it in log loss after the correction. \emph{Tree or GAM:} the GAM, which has
+the lowest LOSO log loss of the \R{m1/fin_tree_gam_configs} tree and GAM configurations; this is an
+outer-fold choice, so the GAM is exploratory. The selection-aware result of the lane is the small
+finalist: \Rci{m1/fin_small_acc}, AUC \Rci{m1/fin_small_auc}, log loss \Rci{m1/fin_small_ll}, Brier
+score \R{m1/fin_small_brier} \cite{brier1950verification}. The synthesis re-selects across lanes in a
+nested loop (Appendix~\ref{app:final}).
+
+\paragraph{Detection: PHYS6 is miscalibrated.} PHYS6 has an ECE of \R{m1/cal_phys6_ece}, above the
+95th percentile of its perfect-calibration null (\R{m1/cal_phys6_ece_null_q95};
+$p = \R{m1/cal_phys6_ece_p}$). \R{m1/cal_phys6_bins_outside} of its \R{m1/cal_n_bins} reliability
+bins lie outside their person-bootstrap band (\R{m1/cal_phys6_bins_under} under-confident,
+\R{m1/cal_phys6_bins_over} over-confident; binomial $p$~\R{m1/cal_phys6_bins_p}), while its calibration slope,
+\Rci{m1/cal_phys6_cox_slope}, is compatible with 1 (Figure~\ref{fig:M1_11_calibration}, left). This
+is an S-shaped error: the bins miss the diagonal on both sides, so no single global map of the logit
+can fix it. The temperature fitted on inner predictions is below 1 in \R{m1/cal_phys6_t_below_1} of
+\R{m1/cal_phys6_t_n_folds} folds. \emph{Why it matters:} the product shows \pright{} as a percentage;
+a miscalibrated model misleads the user even when its decision is right.
+
+\paragraph{Remedies.} Four post-hoc maps were fitted on the inner cross-fitted predictions of the
+training persons (Table~\ref{tab:m1_calibration_remedies}): Platt scaling
+\cite{platt1999probabilistic}, temperature scaling \cite{guo2017calibration}, isotonic regression and
+beta calibration. None lowers the log loss of PHYS6: Platt \Rcib{m1/cal_lr_phys6_cal_platt_dll},
+temperature \Rcib{m1/cal_lr_phys6_cal_temp_dll}, isotonic \Rcib{m1/cal_lr_phys6_cal_iso_dll} and beta
+\Rcib{m1/cal_lr_phys6_cal_beta_dll}, each with Holm $p = 1$ over the four. The asinh treatment is the
+effective remedy. It lowers the log loss by \Rcib{m1/cal_lr_phys6_win_asinh_dll} (beyond the
+unadjusted CI; Holm $p = \R{m1/lr_phys6_win_asinh_vs_base_p_ll_holm}$ over the
+\R{m1/family_m1_lr_phys6_options_size} options) and leaves no miscalibration beyond chance: ECE
+\R{m1/cal_lr_phys6_win_asinh_ece} (null 95th percentile \R{m1/cal_lr_phys6_win_asinh_ece_null_q95},
+$p = \R{m1/cal_lr_phys6_win_asinh_ece_p}$), slope \Rci{m1/cal_lr_phys6_win_asinh_cox_slope},
+\R{m1/cal_lr_phys6_win_asinh_bins_outside} bins outside their band (binomial
+$p = \R{m1/cal_lr_phys6_win_asinh_bins_p}$; Figure~\ref{fig:M1_11_calibration}, middle). On the small
+finalist itself no post-hoc map lowers the log loss: Platt \Rcib{m1/cal_lr_phys6_nested_cal_platt_dll}
+(Holm $p = \R{m1/cal_lr_phys6_nested_cal_platt_p_holm}$), temperature
+\Rcib{m1/cal_lr_phys6_nested_cal_temp_dll} (Holm $p = \R{m1/cal_lr_phys6_nested_cal_temp_p_holm}$),
+isotonic \Rcib{m1/cal_lr_phys6_nested_cal_iso_dll} (Holm
+$p = \R{m1/cal_lr_phys6_nested_cal_iso_p_holm}$) and beta \Rcib{m1/cal_lr_phys6_nested_cal_beta_dll}
+(Holm $p = \R{m1/cal_lr_phys6_nested_cal_beta_p_holm}$). \emph{Decision:} no calibration step is
+shipped on top of the small finalist. Every calibration result of the lane, with the calibration
+intercepts, is in Table~\ref{tab:m1_calibration}.
+
+\begin{figure}[tbp]
+  \centering
+  \genfig{m1/M1_11_calibration}
+  \caption{Calibration of PHYS6 and its remedies. Left, middle: reliability diagrams (10 equal-mass
+  bins; band: person-bootstrap 95\,\% CI of the observed share; circled: bins whose band misses the
+  diagonal) of PHYS6 and of the small finalist. Right: the log-loss change of each remedy against
+  PHYS6 (paired 95\,\% CI). Post-hoc maps do not help; the asinh treatment does.}
+  \label{fig:M1_11_calibration}
+\end{figure}
+
+\gentab{m1/m1_calibration_remedies}
+
+\paragraph{The calibration of each finalist.} Figure~\ref{fig:M1_15_finalist_calibration} shows the
+three finalists. The small finalist has an ECE of \R{m1/fin_small_ece} (null 95th percentile
+\R{m1/fin_small_ece_null_q95}, $p = \R{m1/fin_small_ece_p}$) and a slope of
+\Rci{m1/fin_small_cox_slope}: consistent with calibration. Per platform, its ECE also stays below the
+95th percentile of its null: Android \R{m1/cal_lr_phys6_nested_android_ece} (null
+\R{m1/cal_lr_phys6_nested_android_ece_null_q95}, $p = \R{m1/cal_lr_phys6_nested_android_ece_p}$), iOS
+\R{m1/cal_lr_phys6_nested_ios_ece} (null \R{m1/cal_lr_phys6_nested_ios_ece_null_q95},
+$p = \R{m1/cal_lr_phys6_nested_ios_ece_p}$); the lane computed no per-platform slope. The GAM has
+an ECE of \R{m1/fin_tree_gam_ece} (null \R{m1/fin_tree_gam_ece_null_q95},
+$p = \R{m1/fin_tree_gam_ece_p}$), a slope of \Rci{m1/fin_tree_gam_cox_slope} and
+\R{m1/fin_tree_gam_cal_bins_outside} bins outside their band. The rule's ECE of \R{m1/fin_rule_ece}
+(null \R{m1/fin_rule_ece_null_q95}, $p$~\R{m1/fin_rule_ece_p}) and its AUC of \R{m1/fin_rule_auc} are distorted and
+do not describe it. Its \pright{} takes two values per fold ($q$ or $1-q$), so equal-mass bins and the
+ranking of the trials mostly sort the folds by $q$; in LOSO, $q$ is lower when the held-out person is
+easy. Judged by its two decisions, the rule is consistent with calibration (slope
+\Rci{m1/fin_rule_cox_slope}; the intercept CI was not saved): when it says right, its mean \pright{} is
+\R{m1/rule_fhy_sign_cal_says_right_p} against an observed share of right hands of
+\R{m1/rule_fhy_sign_cal_says_right_obs} (\R{m1/rule_fhy_sign_cal_says_right_n} trials); when it says
+left, \R{m1/rule_fhy_sign_cal_says_left_p} against \R{m1/rule_fhy_sign_cal_says_left_obs}
+(\R{m1/rule_fhy_sign_cal_says_left_n} trials). Its slope is \Rci{m1/fin_rule_cox_slope}.
+
+\begin{figure}[tbp]
+  \centering
+  \genfig{m1/M1_15_finalist_calibration}
+  \caption{Reliability of the three finalists (LOSO probabilities; band: person-bootstrap 95\,\% CI
+  of the observed share of right hands; dashed: perfect calibration). The rule's panel shows its two
+  decision groups instead of bins. The small finalist and the GAM are consistent with calibration.}
+  \label{fig:M1_15_finalist_calibration}
+\end{figure}
+
+\gentab{m1/m1_calibration}
+
+\paragraph{The temporal filter.} The uncalibrated temporal filter is under-confident: ECE
+\R{m1/tf_multi_ece} (null \R{m1/tf_multi_ece_null_q95}, $p$~\R{m1/tf_multi_ece_p}), slope
+\Rci{m1/tf_multi_cox_slope}, \R{m1/cal_tf_multi_bins_outside} of \R{m1/cal_n_bins} bins outside their
+band, all under-confident. Isotonic regression fitted on inner predictions lowers its log loss by
+\Rcib{m1/tf_multi_best_remedy_dll} (Holm $p = \R{m1/tf_multi_best_remedy_p_holm}$ over its four
+remedies), to \R{m1/tf_multi_cal_iso_ll}, with an ECE of \R{m1/tf_multi_cal_iso_ece}, still just above
+its null band (null \R{m1/tf_multi_cal_iso_ece_null_q95}, $p = \R{m1/tf_multi_cal_iso_ece_p}$), and a
+slope of \Rci{m1/tf_multi_cal_iso_cox_slope}. The filter itself is exploratory (\R{m1/tf_multi_configs}
+configurations) and does not beat the small finalist after the correction
+(\Rcib{m1/tf_multi_vs_anchor_acc}~points, Holm $p = \R{m1/tf_multi_vs_anchor_p_acc_holm}$; log loss
+\Rcib{m1/tf_multi_vs_anchor_ll}). It is reported as an exploratory alternative for the synthesis.
+
+\FloatBarrier
+\subsection{Combining k attempts}\label{app:m1:k}
+
+The inference app combines several attempts, and the probability it shows must stay honest for the
+aggregate. Let $z_i$ be the logit of attempt $i$ and $\sigma$ the logistic function. Four aggregates
+of the small finalist were compared (Figure~\ref{fig:M1_12_k_attempts},
+Table~\ref{tab:m1_k_aggregation}): the mean of \pright{}; the mean of the logits; and two scaled sums,
+$\pright = \sigma(\sum_i z_i/\tauk)$, with $\tauk = 1$ (the plain sum of the logits) or
+$\tauk = k^{\alpha}$, where $\alpha$ is fitted on the training persons of each fold (median
+\R{m1/agg_alpha_median}). The draws take $k$ random trials of one person and hand
+(\R{m1/agg_n_draws} draws per cell, \R{m1/agg_n_persons} persons with at least five trials per hand).
+
+At $k = 3$ the four aggregates have about the same accuracy (sum of logits
+\R{m1/agg_lr_phys6_nested_k3_sum_logit_acc}). They differ in log loss: mean of \pright{}
+\Rci{m1/agg_lr_phys6_nested_k3_mean_p_ll}, mean of logits \Rci{m1/agg_lr_phys6_nested_k3_mean_logit_ll},
+sum of logits \Rci{m1/agg_lr_phys6_nested_k3_sum_logit_ll} and fitted $\alpha$
+\Rci{m1/agg_lr_phys6_nested_k3_fitted_alpha_ll}. The ECE and its signed lean, shown without a null
+band, say why: averaging \pright{} (ECE \R{m1/agg_lr_phys6_nested_k3_ece_mean_p}, lean
+\R{m1/agg_lr_phys6_nested_k3_mean_p_lean}) or logits (ECE \R{m1/agg_lr_phys6_nested_k3_ece_mean_logit},
+lean \R{m1/agg_lr_phys6_nested_k3_mean_logit_lean}) keeps the confidence of one attempt while the
+accuracy rises, so the aggregate is under-confident. The sum of logits leans slightly over-confident
+(ECE \R{m1/agg_lr_phys6_nested_k3_ece_sum_logit}, lean \R{m1/agg_lr_phys6_nested_k3_sum_logit_lean}),
+as expected for correlated attempts treated as independent evidence. The fitted exponent and the plain
+sum cannot be told apart: log loss \Rcib{m1/agg_lr_phys6_nested_k3_dll}, ECE
+\Rcib{m1/agg_lr_phys6_nested_k3_dece}. \emph{Decision:} for this lane, the parameter-free sum of
+logits ($\tauk = 1$). The final model fits its own $\tauk$ on the training persons
+(Appendix~\ref{app:final}).
+
+\begin{figure}[tbp]
+  \centering
+  \genfig{m1/M1_12_k_attempts}
+  \caption{Combining $k$ attempts of one person and hand with the small finalist
+  (\R{m1/agg_n_persons} persons; \R{m1/agg_n_draws} random draws per cell; bands: person-bootstrap
+  95\,\% CI; the ECE is shown without a band). Averages of \pright{} or of logits become
+  under-confident; the sums of logits stay close to calibrated.}
+  \label{fig:M1_12_k_attempts}
+\end{figure}
+
+\gentab{m1/m1_k_aggregation}
+
+\FloatBarrier
+\subsection{Failures and conditions}\label{app:m1:failures}
+
+\paragraph{Persons.} The small finalist's accuracy ranges from \R{m1/person_p05_acc} (P05) to
+\R{m1/person_max_acc} (Figure~\ref{fig:M1_09_per_person}, Table~\ref{tab:m1_per_person}).
+\R{m1/persons_below_70} persons are below \R{m1/threshold_70}: P05 (\R{m1/person_p05_acc}), P09
+(\R{m1/person_p09_acc}) and P17 (\R{m1/person_p17_acc}). In each of them, one hand is at or below
+chance (per-hand ticks in Figure~\ref{fig:M1_09_per_person}).
+The \R{m1/n_left_handed} left-handed persons are shown individually: P17 ranks
+\R{m1/person_p17_rank} from the lowest and P11 (\R{m1/person_p11_acc}) ranks
+\R{m1/person_p11_rank}. The model has no intercept and no even feature, so it cannot learn a
+right-hand prior from this mostly right-handed sample. With \R{m1/n_left_handed} left-handed persons,
+a gap cannot be told apart from the variation between persons.
+
+\begin{figure}[tbp]
+  \centering
+  \genfig{m1/M1_09_per_person}
+  \caption{LOSO accuracy of each of the \R{m1/n_persons} persons with the small finalist (bars,
+  coloured by platform) and per hand (ticks); * marks the two left-handed persons. Persons differ;
+  the weakest have one hand near chance.}
+  \label{fig:M1_09_per_person}
+\end{figure}
+
+\gentab{m1/m1_per_person}
+
+\paragraph{Conditions.} Figure~\ref{fig:M1_10_conditions} and Table~\ref{tab:m1_conditions} stratify
+the small finalist's accuracy after prediction; conditions are never model inputs. The strata are
+descriptive: no test was run across levels, and overlapping CIs are not a test. Android reaches
+\Rci{m1/strata_lr_phys6_nested_platform_android_acc} and iOS
+\Rci{m1/strata_lr_phys6_nested_platform_ios_acc}. The sideways grips reach
+\Rci{m1/strata_lr_phys6_nested_instructed_rotation_top_left_acc} (top left) and
+\Rci{m1/strata_lr_phys6_nested_instructed_rotation_top_right_acc} (top right); the upright grip
+\Rci{m1/strata_lr_phys6_nested_instructed_rotation_upright_acc}. Fast movements reach
+\Rci{m1/strata_lr_phys6_nested_speed_fast_acc} and slow ones
+\Rci{m1/strata_lr_phys6_nested_speed_slow_acc} (\R{m1/strata_lr_phys6_nested_speed_slow_n} trials).
+Among the movement variants with enough persons, the curved approach is the weakest
+(\Rci{m1/strata_lr_phys6_nested_variant_curved_acc}, \R{m1/strata_lr_phys6_nested_variant_curved_n}
+trials), against \R{m1/strata_lr_phys6_nested_variant_standard_acc} for the standard movement. The
+bent start covers only \R{m1/strata_lr_phys6_nested_variant_bent_start_persons} persons and gets no
+CI (\R{m1/strata_lr_phys6_nested_variant_bent_start_acc} of
+\R{m1/strata_lr_phys6_nested_variant_bent_start_n} trials). The
+\R{m1/strata_lr_phys6_nested_handedness_left_persons} left-handed persons pooled reach
+\R{m1/strata_lr_phys6_nested_handedness_left_acc} (no CI).
+
+\begin{figure}[tbp]
+  \centering
+  \genfig{m1/M1_10_conditions}
+  \caption{Accuracy of the small finalist by condition (strata after prediction; levels with at least
+  8 trials; person-bootstrap 95\,\% CIs only for levels with at least 5 persons, grey otherwise;
+  dashed: overall). Descriptive: where the model is weak.}
+  \label{fig:M1_10_conditions}
+\end{figure}
+
+\gentab{m1/m1_conditions}
+
+\paragraph{Confident errors.} A confident error has \pright{} of the true hand below
+\R{m1/confident_threshold}. The small finalist makes \R{m1/fail_n_confident} of them among
+\R{m1/fail_n_errors} errors on \R{m1/fail_n_trials} trials (Figure~\ref{fig:M1_14_failures},
+Table~\ref{tab:m1_confident_errors}). Their mean yaw time course has the other hand's sign by
+construction, because they are selected on that evidence; it does not explain them. Slow movements are
+the most over-represented: \R{m1/fail_top_n} of the \R{m1/fail_n_confident} confident errors (Wilson
+95\,\% interval \R{m1/fail_top_share_lo} to \R{m1/fail_top_share_hi}) against
+\R{m1/fail_top_share_trials} of all trials, \R{m1/fail_top_ratio} times; this rests on a handful of
+trials. The non-circular evidence is block clustering. The confident errors fall in
+\R{m1/fail_blocks_with_confident} of \R{m1/fail_n_blocks} blocks, against
+\R{m1/fail_blocks_null_mean} expected when each person's confident errors are spread at random over
+that person's trials (one-sided $p$~\R{m1/fail_blocks_p}, \R{m1/fail_blocks_n_perm} permutations). They cluster
+in blocks, as a hand swap for a whole block would make them.
+
+\begin{figure}[tbp]
+  \centering
+  \genfig{m1/M1_14_failures}
+  \caption{Left: mean yaw rate of correctly classified trials and of confident errors, by instructed
+  hand (descriptive only: the errors are selected on this evidence). Right: share of confident errors
+  over share of trials per condition, with the count of confident errors. Slow movements are
+  over-represented.}
+  \label{fig:M1_14_failures}
+\end{figure}
+
+\gentab{m1/m1_confident_errors}
+
+\FloatBarrier
+\subsection{Natural-use transfer per component}\label{app:m1:natural}
+
+All \R{m1/nat_n} free-choice trials, one per person, are right-hand choices. Every natural-use number
+in this section is therefore right-hand recall on the free-choice trials; a constant right answer
+would score 100\,\%. Model-level recall rests on \R{m1/nat_n} trials and differs little across
+models: the rule answers \R{m1/fin_rule_nat_correct} of \R{m1/nat_n} correctly
+(\Rci{m1/fin_rule_nat}), PHYS6 \R{m1/lr_phys6_nat_correct}, the small finalist
+\R{m1/fin_small_nat_correct} and the GAM \R{m1/fin_tree_gam_nat_correct}. Exact McNemar tests of the
+rule against \R{m1/nat_mcnemar_n} other models find no difference after the Holm correction over
+them; the closest is the rule against the best single-feature rule
+(\R{m1/nat_mcnemar_rule_nested_rule_only} trials right only for the rule,
+\R{m1/nat_mcnemar_rule_nested_other_only} only for the other; Holm
+$p = \R{m1/nat_mcnemar_rule_nested_p_holm}$).
+
+\paragraph{Abstentions.} Two exploratory models abstain on a free-choice trial: they give \pright{}
+exactly 0.5, which is never a right-hand answer. The tree abstains on \R{m1/tree_nat_ties} trial
+(coverage \R{m1/tree_nat_coverage}) and answers \R{m1/tree_nat_correct} of the remaining trials
+correctly. The isotonic-calibrated PHYS6 abstains on \R{m1/lr_phys6_cal_iso_nat_ties} trial (coverage
+\R{m1/lr_phys6_cal_iso_nat_coverage}) and answers \R{m1/lr_phys6_cal_iso_nat_correct} of the remaining
+trials correctly. Table~\ref{tab:m1_models} scores each abstention with half credit (tree
+\R{m1/tree_nat}, isotonic PHYS6 \R{m1/lr_phys6_cal_iso_nat}). No forced choice was run: depending on
+how the tie is broken, a forced choice would answer the same number of trials correctly or one
+more.
+
+\paragraph{A person-matched test per feature.} A sharper question is whether each chiral component
+transfers from the instructed protocol to free choice (Figure~\ref{fig:M1_16_natural_transfer},
+Table~\ref{tab:m1_natural_transfer}). For every free-choice trial, the sign of a feature (direction
+learned on the other persons) is compared with the reported hand. The expected count is the
+Poisson-binomial count from the same persons' instructed trials of that hand, so differences between
+persons cannot explain a shortfall. Two lateral features transfer worse after the Holm correction
+over the \R{m1/nat_n_features} features: \code{latvel_q75} points to the reported hand in
+\R{m1/nat_latvel_q75_observed} of \R{m1/nat_transfer_n} trials against \R{m1/nat_latvel_q75_expected}
+expected (Holm $p = \R{m1/nat_latvel_q75_p_holm}$), and \code{latvel_q100} in
+\R{m1/nat_latvel_q100_observed} against \R{m1/nat_latvel_q100_expected} (Holm
+$p = \R{m1/nat_latvel_q100_p_holm}$). Yaw shows no detectable drop: \code{yaw_q50}
+\R{m1/nat_yaw_q50_observed} against \R{m1/nat_yaw_q50_expected}, \code{yaw_q100}
+\R{m1/nat_yaw_q100_observed} against \R{m1/nat_yaw_q100_expected}. Nor does roll. This
+explains the low recall of the best single-feature rule: it picks \code{latvel_q75} in
+\R{m1/rule_nested_mode_folds} of \R{m1/rule_nested_n_folds} folds, and scores
+\R{m1/rule_nested_nat_correct} of \R{m1/nat_n}.
+
+\paragraph{Logit contributions.} In the small finalist, the mean contribution of each component
+towards the reported hand falls from the instructed to the free-choice trials
+(Table~\ref{tab:m1_natural_contributions}): yaw from \R{m1/natc_lr_phys6_nested_yaw_prim} to
+\R{m1/natc_lr_phys6_nested_yaw_nat} (difference \Rcib{m1/natc_lr_phys6_nested_yaw_diff}, Holm
+$p = \R{m1/natc_lr_phys6_nested_yaw_p_holm}$ over the three components) and lateral from
+\R{m1/natc_lr_phys6_nested_lateral_prim} to \R{m1/natc_lr_phys6_nested_lateral_nat} (difference
+\Rcib{m1/natc_lr_phys6_nested_lateral_diff}, Holm $p = \R{m1/natc_lr_phys6_nested_lateral_p_holm}$).
+Neither drop survives the correction; with one trial per person, the person-matched sign test above is
+the sharper evidence.
+
+\emph{Decision:} the lateral evidence depends on the instructed protocol; the yaw evidence shows no detectable dependence.
+The yaw-only rule is the robust candidate for natural use, even at a lower instructed accuracy. This
+rests on \R{m1/nat_n_right} right-hand trials and must be checked on free-choice trials of both
+hands.
+
+\begin{figure}[tbp]
+  \centering
+  \genfig{m1/M1_16_natural_transfer}
+  \caption{Natural use, per component. Left: free-choice trials whose feature sign points to the
+  reported hand (dot) against the count expected from the same persons' instructed trials (bar: 95\,\%
+  range; red: lower than expected after the Holm correction). Right: mean logit contribution of each
+  component of the small finalist towards the reported hand. All \R{m1/nat_n} free-choice trials are
+  right-hand choices, so these counts measure right-hand recall only (a constant right answer would
+  score every trial). The lateral features transfer worse than yaw.}
+  \label{fig:M1_16_natural_transfer}
+\end{figure}
+
+\gentab{m1/m1_natural_transfer}
+\gentab{m1/m1_natural_contributions}
+
+\FloatBarrier
+\subsection{Suspected wrong-hand blocks and sensitivity}\label{app:m1:blocks}
+
+Hands are blocked in the protocol, so a person who used the wrong hand for a whole block would leave a
+block of reversed trials. Labels are never changed; the analysis only flags and tests. \emph{Detection
+1:} a data-driven swap-signature screen flags blocks \R{m1/swap_p08_s1_block_1} and
+\R{m1/swap_p08_s1_block_2} of P08's first session (\R{m1/swap_n_trials} trials;
+Table~\ref{tab:m1_swap_person_blocks}). The small finalist is right on \R{m1/swap_acc} of them,
+against \R{m1/swap_acc_without} on every other trial. \emph{Detection 2:} candidate wrong-hand blocks are
+blocks of at least two trials whose mean \pright{} of the instructed hand is below
+\R{m1/confident_threshold} (Table~\ref{tab:m1_candidate_blocks}). They are block \R{m1/cand_p05_s1_b12_index} of P05's first session
+(\R{m1/cand_p05_s1_b12_n} trials, mean \R{m1/cand_p05_s1_b12_p}, neighbouring blocks
+\R{m1/cand_p05_s1_b12_nb}), block \R{m1/cand_p09_s2_b4_index} of P09's second session
+(\R{m1/cand_p09_s2_b4_n} trials, \R{m1/cand_p09_s2_b4_p} against \R{m1/cand_p09_s2_b4_nb}) and block
+\R{m1/cand_p20_s1_b3_index} of P20's first session (\R{m1/cand_p20_s1_b3_n} trials,
+\R{m1/cand_p20_s1_b3_p} against \R{m1/cand_p20_s1_b3_nb}). Without them the accuracy would be
+\R{m1/acc_without_candidates}, an upper bound if they are label errors.
+
+\emph{Sensitivity:} each finalist was retrained without the swap-signature blocks, and with the
+pre-registered wrong-hand screen inside every fold, which removes from training the trials with a
+\pright{} of their label below 0.05 and runs of at least three confidently reversed trials
+(Table~\ref{tab:m1_sensitivity}). The evaluation is unchanged; Holm is applied over the two runs of
+each finalist. Without the swap blocks, the small finalist changes by
+\Rcib{m1/sens_small_noswap_vs_base_acc}~points (log loss \Rcib{m1/sens_small_noswap_vs_base_ll}).
+With the screen, which drops a median of \R{m1/sens_sens_small_d6_dropped} training trials per fold,
+it changes by \Rcib{m1/sens_small_d6_vs_base_acc}~points (Holm
+$p = \R{m1/sens_small_d6_vs_base_p_acc_holm}$; log loss \Rcib{m1/sens_small_d6_vs_base_ll}). The rule
+does not change. \emph{Decision:} keep the instructed labels and train on every trial. The open
+question, whether to ask the participants about the candidate blocks, is left to the researcher.
+
+\gentab{m1/m1_swap_person_blocks}
+\gentab{m1/m1_candidate_blocks}
+\gentab{m1/m1_sensitivity}
+
+\FloatBarrier
+\subsection{Caveats of the lane}\label{app:m1:caveats}
+
+\begin{itemize}[leftmargin=1.2em,itemsep=1pt]
+  \item \R{m1/n_persons} persons: the CI of every model spans several points, and the per-person
+    values are uncertain.
+  \item PHYS6 was specified after a pooled look at all persons; its nested guards are reported in
+    Appendix~\ref{app:m1:sets}. The nested treatment selection was added after a first run had shown
+    the outer-fold result of the asinh compression.
+  \item The ECE null treats trials as independent given \pright{}. Person effects make the real
+    sampling variation larger, so its p value is optimistic. The reliability bands and the
+    calibration slope resample persons. The calibration intercepts are point estimates without a CI.
+  \item Roll and lateral acceleration assume the screen faces the person, as in every recorded grip.
+    Under a screen-away grip they change sign; yaw does not. A production model must check the grip
+    or rely on yaw for screen-away use.
+  \item The natural-use set is one free-choice trial per person, all right-hand choices: it measures
+    right-hand recall only, with a wide interval.
+  \item The pilot rule's direction comes from a pilot session of P01, which is part of the evaluation
+    set; the rule finalist learns its direction in-fold instead and makes the same decisions.
+  \item The approach bounds are the oracle window. A cue-free pipeline finds its own window
+    (Appendix~\ref{app:prod}).
+\end{itemize}

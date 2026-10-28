@@ -1,0 +1,549 @@
+% sections/F_final.tex: Lane final (final-model selection, calibration and export).
+% Numbers only through \R / \Rci; figures through \genfig, tables through \gentab (report/README.md).
+% One \subsection per decision group, so that each can be trimmed on its own.
+\section{Final-model selection, calibration and export}\label{app:final}
+
+This appendix documents how the final model was chosen among the finalists of the model lanes, how its percentage \pright{} was checked and calibrated, and how it was exported for the Stage~3 inference page.
+Every number comes from leave-one-person-out evaluation: each model is trained on the other persons and tested on the held-out person.
+Paired comparisons score two models on the same trials.
+Their statistic is the mean per-person difference, its 95~\% CI comes from a paired person bootstrap, and its $p$-value from an exact sign-flip test over persons.
+Holm's adjustment runs within each named family of comparisons.
+
+The final model is the body-frame 1D CNN of lane m3 (Appendix~\ref{app:m3}).
+It is an ensemble of four 1D CNNs on 12 channels: 8 gravity-frame channels and 4 body-frame channels (roll rate, pitch rate, lateral and forward acceleration).
+Its pipeline z-scores the channels, augments the training trials by mirroring, time warping, scaling and jitter \cite{um2017augmentation}, and ends with a Platt calibrator \cite{platt1999probabilistic} fitted inside each fold.
+Its own LOSO numbers are exploratory: it was the best of \R{final/final_configs} configurations in lane m3 and was then chosen here among \R{final/n_candidates} candidates.
+On the \R{final/final_n_trials} primary trials of \R{final/final_n_persons} persons it reaches an accuracy of \Rci{final/final_accuracy}, an AUC of \Rci{final/final_auc}, a log loss of \Rci{final/final_log_loss} and a Brier score \cite{brier1950verification} of \R{final/final_brier} (all exploratory).
+The selection-aware estimate of the whole selection is an accuracy of \Rci{final/nested_accuracy} (Appendix~\ref{app:final:decision}).
+
+% -------------------------------------------------------------------------------------------------
+\subsection{The candidates and the context of every experiment}\label{app:final:candidates}
+
+\textbf{Options.}
+The final model could have come from any of the several hundred experiments of the model lanes.
+Choosing among all of them on the outer folds that also report the winner's accuracy would make that accuracy optimistic.
+The lane therefore restricted the choice to a pre-specified list of \R{final/n_candidates} candidates:
+\begin{itemize}[nosep]
+  \item every trial-level finalist of lanes m1, m2, m3 and p1, read from their finalists files;
+  \item the reference floor, a logistic regression on the cumulative yaw about gravity at 8 instants;
+  \item three engineered models given the body-frame channels (Appendix~\ref{app:final:input});
+  \item one pre-specified ensemble, the mean logit of one finalist per lane (the body-frame CNN, the m2 logistic and the m1 PHYS6 logistic).
+\end{itemize}
+Lane m4, whose unit is a cue-free recording, and lane x1, the descriptive PD01 case study, provide no trial-level candidate.
+
+\textbf{Evidence.}
+Figure~\ref{fig:FINAL_02_overview} places every experiment of the lanes' registries on one plane of accuracy against log loss: \R{final/overview_n} experiments, of which \R{final/overview_exploratory} were compared on the outer folds before being kept.
+Accuracy and log loss move together.
+The finalists sit at the upper-left edge of their lanes' clouds.
+The few lane m3 points further left are post hoc checks of the body-frame CNN, not finalists (Appendix~\ref{app:m3}).
+Table~\ref{tab:final_master} lists the candidates as their lanes deliver them, with their representation, data treatment, calibration, natural-use recall and number of outer-fold configurations.
+Its natural-use column is right-hand recall on the free-choice trials (all right-hand so far; a constant right answer would score 100~\%).
+Of the \R{final/n_candidates} candidates, \R{final/n_exploratory_candidates} were chosen among several configurations on the outer folds of their own lane, so their numbers are exploratory.
+Figure~\ref{fig:FINAL_01_master_forest} in Section~\ref{sec:results} plots the same comparison as a forest.
+
+\textbf{Reproduction.}
+Before comparing the candidates, the lane rebuilt every finalist from its finalists file (module, feature builder, model factory and parameters) and re-ran it through the LOSO harness.
+\R{final/repro_ok} of \R{final/repro_n} finalists reproduce their saved predictions on every primary and free-choice trial; the largest difference in \pright{} is \R{final/repro_max_dp}.
+The m2 stack was not re-run because of its cost; its saved result is used as lane m2 saved it.
+
+\begin{figure}[htbp]
+  \centering
+  \genfig{final/FINAL_02_overview}
+  \caption{Every experiment of the model lanes' registries, the reference and lane final's own models (\R{final/overview_n} with a log loss below 1.2; the stress tests of lane final are left out): LOSO accuracy against log loss, coloured by lane.
+    Open markers: compared on the outer folds before being kept (exploratory; \R{final/overview_exploratory}).
+    Squares: lane m4, whose unit is a cue-free recording, whose classifier is its own reference model (not the final model) and whose abstentions score one half; they are not comparable with the trial-level points.
+    Points near 50~\% and a log loss of 0.69 are ablations that cannot see the hand by design.
+    The figure gives the context of the selection: the candidates come from the upper-left edge of their lanes.}
+  \label{fig:FINAL_02_overview}\label{fig:app:final-overview}
+\end{figure}
+
+\gentab{final/final_master}
+
+% -------------------------------------------------------------------------------------------------
+\subsection{The selection rule and the leaders}\label{app:final:rule}
+
+\textbf{Options.}
+Three rules were considered: the highest LOSO accuracy, the lowest LOSO log loss, and a pre-specified rule that also weighs robustness and simplicity.
+Accuracy is a coarse score on \R{final/final_n_trials} trials and ignores the percentage shown to the user.
+Log loss scores the percentage itself, but the lowest log loss among \R{final/n_candidates} candidates is optimistic, and its lead over its neighbours may be chance.
+
+\textbf{Decision.}
+The lane used the pre-specified rule (\code{final_finalmodel.recommend}), in five steps.
+\begin{enumerate}[nosep]
+  \item \emph{Production form.} Every candidate is scored as it would ship: its own pipeline plus a calibration remedy (none, temperature, Platt or beta) chosen inside every outer fold by grouped cross-validation on the training persons' inner cross-fitted predictions. The product is the calibrated percentage, so the comparison uses it.
+  \item \emph{Leaders.} A leader is not detectably worse than the lowest-log-loss candidate in accuracy or in log loss (paired, Holm over the comparisons against that candidate). Two candidates whose log losses differ by less than 0.001 with no trial changing its answer are called identical.
+  \item \emph{Robust leaders.} A robust leader shows no Holm-significant accuracy drop on grips absent from training, no natural-use shortfall against the person-matched expectation, and no screen-away failure that the rest-pose check cannot repair (Appendices~\ref{app:final:robustness}, \ref{app:final:natural} and~\ref{app:final:screen}).
+  \item \emph{Portability.} Among the robust leaders, the rule takes the one easiest to port to the browser (portability rank from 1, easiest, to 6).
+  \item \emph{Ties.} Remaining ties go to the candidate with the fewest upstream outer-fold choices, then to the lowest log loss.
+\end{enumerate}
+
+\textbf{Evidence.}
+Figure~\ref{fig:FINAL_04_paired} and Table~\ref{tab:final_paired} compare every candidate with the lowest-log-loss candidate, the body-frame CNN.
+After Holm over the \R{final/paired_best_m} comparisons against it, \R{final/paired_best_sep} candidates are worse in accuracy or in log loss.
+The \R{final/concl_n_leaders} leaders are the CNN, the ensemble, the m2 stack (logistic regression, support vector machine and LightGBM), the m2 LightGBM, the m2 logistic on \R{final/m2_n_features} features and the p1 LightGBM with its calibrator.
+The data cannot rank the leaders at \R{final/final_n_persons} persons.
+Against the reference floor (Holm over \R{final/paired_ref_m} comparisons), \R{final/paired_ref_better} candidates are more accurate.
+The CNN gains \Rcib{final/final_vs_ref_acc}~points of accuracy over the reference (Holm $p < 0.001$) and changes the log loss by \R{final/final_vs_ref_ll} (Holm $p = {}$\R{final/final_vs_ref_holm_ll}).
+
+\begin{figure}[htbp]
+  \centering
+  \genfig{final/FINAL_04_paired}
+  \caption{Every candidate against the lowest-log-loss candidate (the body-frame CNN) on the same trials, each in its production form: mean per-person difference in accuracy (left, points) and in log loss (right) with paired person-bootstrap 95~\% CIs.
+    Filled red: Holm-adjusted sign-flip $p$ below 0.05 over the \R{final/paired_best_m} comparisons.
+    The candidates with open markers in both panels are the leaders, among which robustness and portability decide.}
+  \label{fig:FINAL_04_paired}\label{fig:app:final-paired}
+\end{figure}
+
+\gentab{final/final_paired}
+
+% -------------------------------------------------------------------------------------------------
+\subsection{Robustness to unseen test conditions}\label{app:final:robustness}
+
+\textbf{Tests.}
+The PI will hold the phone in ways the training data may not cover.
+The lane ran four tests on every candidate (Table~\ref{tab:final_robustness}).
+\begin{enumerate}[nosep]
+  \item \emph{A grip absent from training:} train on the upright trials only and test on the sideways trials (top left and top right).
+  \item \emph{The screen held away:} test on screen-away twins synthesised from the recorded trials (Appendix~\ref{app:final:screen}).
+  \item \emph{The other platform:} train on the persons of one platform (Android or iOS) and test on the persons of the other.
+  \item \emph{Label noise:} train without the blocks that curation flagged as possible wrong-hand or swapped recordings (Appendix~\ref{app:data}).
+\end{enumerate}
+Each test gives a paired accuracy change on the same test trials, with Holm over the candidates within the test.
+Figure~\ref{fig:FINAL_06_robustness} in Section~\ref{sec:results} plots the grip and screen-away tests for every candidate.
+
+\textbf{Evidence: grips.}
+The grip test separates the leaders.
+The leaders built on lane m2's and lane p1's device-frame features lose accuracy on the sideways grips after Holm.
+The m2 logistic falls to \R{final/rob_m2_lr_grip} (\Rb{final/rob_m2_lr_grip_d}~points, Holm $p < 0.001$), the m2 LightGBM to \R{final/rob_m2_lgbm_grip} (\Rb{final/rob_m2_lgbm_grip_d}~points, Holm $p = {}$\R{final/rob_m2_lgbm_grip_holm}), the m2 stack to \R{final/rob_m2_stack_grip} (\Rb{final/rob_m2_stack_grip_d}~points, Holm $p = {}$\R{final/rob_m2_stack_grip_holm}) and the p1 LightGBM to \R{final/rob_p1_gbm_grip} (\Rb{final/rob_p1_gbm_grip_d}~points, Holm $p = {}$\R{final/rob_p1_gbm_grip_holm}).
+The CNN keeps \R{final/rob_m3_deep_grip} (\Rb{final/rob_m3_deep_grip_d}~points, Holm $p = {}$\R{final/rob_m3_deep_grip_holm}).
+The ensemble keeps \R{final/rob_ens_mean3_grip} (\Rb{final/rob_ens_mean3_grip_d}~points, Holm $p = {}$\R{final/rob_ens_mean3_grip_holm}): a large drop, but not significant after Holm.
+Over all candidates, \R{final/fig_grip_fail} of \R{final/fig_grip_tested} fail the grip test: the device-frame leaders above and the m2 logistic with the body-frame channels added (\R{final/rob_m2_all21_lr_grip}, \Rb{final/rob_m2_all21_lr_grip_d}~points, Holm $p < 0.001$).
+Lane m3 reports the same grip test for its own models (Appendix~\ref{app:m3:grip}).
+
+\textbf{Evidence: platform and label noise.}
+No candidate changes detectably when it is trained on the other platform or without the suspect blocks (Holm over the candidates; Table~\ref{tab:final_robustness}).
+Training on the other platform also means fewer training persons, so the CNN had a size-matched control: as many training persons, drawn at random from both platforms.
+Trained on the other platform only, the CNN reaches \R{final/plat_only_acc}; the control reaches \R{final/plat_ctl_acc}.
+The platform switch changes the accuracy by \Rcib{final/plat_vs_ctl_d}~points (Holm $p = {}$\R{final/plat_vs_ctl_holm}), and the smaller training set by \Rcib{final/ctl_vs_all_d}~points (Holm $p = {}$\R{final/ctl_vs_all_holm}).
+This Holm family holds the four paired accuracy comparisons of the final model: these two and the two screen-flip augmentation tests of Appendix~\ref{app:final:screen}.
+Without the suspect blocks, the CNN changes by \Rb{final/rob_m3_deep_noise_d}~points (Holm $p = {}$\R{final/rob_m3_deep_noise_holm}).
+
+\textbf{Decision.}
+The grip test removes the device-frame leaders.
+The robust leaders in the sense of the rule (no Holm-significant drop) are the CNN and the ensemble; the CNN's own paired CI of the grip change still excludes zero (\Rcib{final/final_grip_d}~points, unadjusted $p = {}$\R{final/final_grip_p}).
+The platform and label-noise tests exclude no candidate.
+
+\gentab{final/final_robustness}
+
+% -------------------------------------------------------------------------------------------------
+\subsection{The decision and the selection-aware estimate}\label{app:final:decision}
+
+\textbf{Decision.}
+Table~\ref{tab:final_decision} applies the rule to every candidate.
+Of the \R{final/concl_n_leaders} leaders, only the CNN and the ensemble are robust.
+Neither shows a natural-use shortfall, and the rest-pose check repairs the screen-away failure of both.
+The rule then takes the more portable of the two: the CNN (portability rank \R{final/final_port_rank}).
+The ensemble needs the CNN and two more models.
+The setting \code{FINAL_MODEL} of the lane agrees with the rule.
+Lane p1 kept the default data treatment in \R{final/p1_keep} of its \R{final/p1_choices} choices (Appendix~\ref{app:prep}), so the final model uses the preprocessing of the cache unchanged.
+
+\textbf{Options for the headline number.}
+The CNN's own LOSO accuracy is the best of \R{final/n_candidates} candidates on the folds that report it, so it is optimistic.
+A selection-aware estimate repeats the whole selection inside every outer fold (nested selection).
+In each outer fold, every candidate was cross-validated on the training persons only (5 inner person folds).
+The candidate with the lowest pooled inner log loss, the pre-specified criterion, was refitted on all training persons and predicted the held-out person.
+
+\textbf{Evidence.}
+Table~\ref{tab:final_selection} shows how often each candidate was chosen.
+The CNN was chosen in \R{final/sel_m3_deep} of \R{final/sel_folds} outer folds, the ensemble in \R{final/sel_ens_mean3}, and the m2 LightGBM and the m2 stack in \R{final/sel_m2_lgbm} and \R{final/sel_m2_stack}.
+The CNN also has the lowest mean inner log loss (\R{final/inner_ll_best}).
+The nested estimate is an accuracy of \Rci{final/nested_accuracy}, an AUC of \Rci{final/nested_auc} and a log loss of \Rci{final/nested_log_loss} (Table~\ref{tab:final_nested} and Figure~\ref{fig:FINAL_03_nested_selection} in Section~\ref{sec:results}).
+The naive pick, the CNN at \R{final/naive_accuracy} (exploratory), is optimistic by \Rcib{final/optimism_accuracy}~points of accuracy and \Rcib{final/optimism_log_loss} in log loss (pooled differences).
+As a mean per-person difference, the optimism in accuracy is \Rcib{final/naive_vs_nested_acc}~points (sign-flip $p = {}$\R{final/naive_vs_nested_p}).
+The headline of the report is therefore the nested estimate.
+
+\textbf{Caveat.}
+The nested selection removes the optimism of choosing among the \R{final/n_candidates} candidates.
+It does not remove the optimism of the lanes' own design choices, made on the same outer folds before the candidates reached this lane.
+Of the candidates, \R{final/n_exploratory_candidates} were chosen among several configurations, and lane m3 designed the body-frame input post hoc.
+
+\gentab{final/final_decision}
+\gentab{final/final_selection}
+
+% -------------------------------------------------------------------------------------------------
+\subsection{Input against model class}\label{app:final:input}
+
+\textbf{Question.}
+The CNN differs from the engineered models in two ways at once: its input (the body-frame channels) and its model class (a network on time courses).
+If the input carried the whole gain, a simpler model on the same channels would do.
+Lane m3 asked the same question with its own comparisons (Appendix~\ref{app:m3:engineered}); this test gives the body-frame channels themselves to engineered models.
+
+\textbf{Options tested.}
+The lane gave the body-frame channels to three engineered models and evaluated them like the other candidates (per-trial features, nested tuning of the regularisation):
+\begin{itemize}[nosep]
+  \item lane m2's feature families and logistic regression on the CNN's own 12 channels;
+  \item lane m2's logistic regression on its 17 channels plus the 4 body-frame channels (21 channels);
+  \item an antisymmetric logistic regression on \R{final/lr_body_tc_n_features} features: 8 time bins of the yaw rate, the cumulative yaw, the roll rate and the lateral acceleration, the mirror-odd (chiral) channels of the CNN's input.
+\end{itemize}
+
+\textbf{Evidence.}
+Figure~\ref{fig:FINAL_05_input_vs_class} and Table~\ref{tab:final_input_class} give six paired comparisons, with Holm over the six.
+\begin{itemize}[nosep]
+  \item On the same 12 channels, the CNN is more accurate than lane m2's features and logistic regression by \Rcib{final/ic_cnn_vs_m2_same12_acc}~points (Holm $p = {}$\R{final/ic_cnn_vs_m2_same12_holm_acc}); the log loss changes by \Rcib{final/ic_cnn_vs_m2_same12_ll} (Holm $p = {}$\R{final/ic_cnn_vs_m2_same12_holm_ll}).
+  \item Against the 32-feature logistic on the mirror-odd channels of its input, the CNN gains \Rcib{final/ic_cnn_vs_lrtc_same_acc}~points (Holm $p = {}$\R{final/ic_cnn_vs_lrtc_same_holm_acc}); the log loss changes by \Rcib{final/ic_cnn_vs_lrtc_same_ll} (Holm $p < 0.001$).
+  \item The two engineered models on the body-frame input do not differ detectably in accuracy: \Rcib{final/ic_m2_body12_vs_lrtc_acc}~points (Holm $p = {}$\R{final/ic_m2_body12_vs_lrtc_holm_acc}).
+  \item Adding the body-frame channels to lane m2's logistic changes its accuracy by \Rcib{final/ic_m2_all21_vs_m2_acc}~points (Holm $p = {}$\R{final/ic_m2_all21_vs_m2_holm_acc}): not detectable after Holm.
+  \item The 21-channel logistic does not differ detectably from the CNN in accuracy (\Rcib{final/ic_m2_all21_vs_cnn_acc}~points, Holm $p = {}$\R{final/ic_m2_all21_vs_cnn_holm_acc}), but its log loss is higher by \Rcib{final/ic_m2_all21_vs_cnn_ll} (Holm $p = {}$\R{final/ic_m2_all21_vs_cnn_holm_ll}).
+  \item The time-course logistic does not differ detectably from the m1 PHYS6 logistic, which summarises the same components in six features (\Rcib{final/ic_lrtc_vs_phys6_acc}~points, Holm $p = {}$\R{final/ic_lrtc_vs_phys6_holm_acc}).
+\end{itemize}
+
+\textbf{Conclusion.}
+On the same input, the CNN is more accurate and has a lower log loss than both engineered models.
+Its gain needs more than the body-frame channels.
+The comparison is not symmetric in tuning effort: the CNN's configuration was the best of \R{final/final_configs} in lane m3, while each engineered model ran once with nested tuning of its regularisation.
+
+\begin{figure}[htbp]
+  \centering
+  \genfig{final/FINAL_05_input_vs_class}
+  \caption{Input against model class: paired accuracy differences, model A minus model B, between models given the same channels (mean per person, paired person-bootstrap 95~\% CI).
+    Filled red: Holm-adjusted $p$ below 0.05 over the six comparisons.
+    On the same input the CNN is more accurate than both engineered models, so its gain needs more than the body-frame channels.}
+  \label{fig:FINAL_05_input_vs_class}\label{fig:app:final-input}
+\end{figure}
+
+\gentab{final/final_input_class}
+
+% -------------------------------------------------------------------------------------------------
+\subsection{Transfer to natural use}\label{app:final:natural}
+
+\textbf{Why.}
+A model could learn motion that only the instructed protocol produces.
+The free-choice trials test whether its evidence transfers to movements whose hand the person chose.
+Natural-use accuracy is right-hand recall on the free-choice trials (all right-hand so far; a constant right answer would score 100~\%), not a balanced accuracy.
+
+\textbf{Test.}
+Raw recall on \R{final/final_nat_n} trials compares models poorly, because persons differ in how readable they are.
+The lane therefore used a person-matched test.
+The expected correctness of each free-choice trial is the same person's right-hand accuracy on the instructed trials.
+The observed number of correct free-choice trials is compared with the Poisson-binomial distribution of these expectations (lower tail, Holm over the candidates).
+
+\textbf{Evidence.}
+No candidate falls short of its expectation after Holm (Figure~\ref{fig:FINAL_07_natural_transfer}, Table~\ref{tab:final_natural}).
+The CNN answers \R{final/final_nat_credit} of \R{final/final_nat_n} free-choice trials correctly (right-hand recall \R{final/final_nat_recall}; all right-hand so far, so a constant right answer would score 100~\%), against \R{final/nat_m3_deep_exp} expected (Holm $p = {}$\R{final/nat_m3_deep_holm}).
+
+\textbf{Which evidence transfers.}
+An occlusion analysis asks which input components carry the CNN's evidence.
+The channels of one component are set to zero in the test window; the resulting change in the logit toward the reported hand is the component's contribution.
+On the free-choice trials, the yaw component points to the reported hand in \R{final/natc_m3_deep_yaw_right} of \R{final/natc_m3_deep_yaw_n} trials, the roll component in \R{final/natc_m3_deep_roll_right} and the lateral component in \R{final/natc_m3_deep_lateral_right}.
+Against the same persons' instructed trials of that hand (free choice minus instructed), the lateral contribution changes by \Rcib{final/natc_m3_deep_lateral_diff} (Holm over the three components, $p = {}$\R{final/natc_m3_deep_lateral_holm}) and the yaw contribution by \Rcib{final/natc_m3_deep_yaw_diff} (Holm $p = {}$\R{final/natc_m3_deep_yaw_holm}).
+The whole logit is \R{final/natc_m3_deep_total_nat} on the free-choice trials against \R{final/natc_m3_deep_total_prim} on the instructed ones (difference \Rcib{final/natc_m3_deep_total_diff}, unadjusted sign-flip $p = {}$\R{final/natc_m3_deep_total_p}).
+So the CNN is less sure on uninstructed movements, and the lateral component points to the reported hand least often.
+For the body-frame time-course logistic, both the lateral contribution (\Rcib{final/natc_lr_body_tc_lateral_diff}, Holm $p = {}$\R{final/natc_lr_body_tc_lateral_holm}) and the yaw contribution (\Rcib{final/natc_lr_body_tc_yaw_diff}, Holm $p = {}$\R{final/natc_lr_body_tc_yaw_holm}) shrink after Holm.
+
+\textbf{Calibration on natural use.}
+With one hand only, the mean level is the only calibration check.
+The mean \pright{} on the free-choice trials is \R{final/cal_nat_meanp}, against \R{final/cal_nat_primary} on the same persons' instructed right-hand trials (per-person difference \Rcib{final/cal_nat_diff}~points, sign-flip $p = {}$\R{final/cal_nat_p}): no detectable shift.
+
+\textbf{Decision.}
+The natural-use criterion of the rule excludes no leader.
+The lateral evidence transfers less than the yaw evidence, as lane m1 found for its lateral feature (Appendix~\ref{app:m1}); leaning on yaw is the safer direction for Stage~3.
+The set holds one free-choice trial per person, so every interval here is wide.
+
+\begin{figure}[htbp]
+  \centering
+  \genfig{final/FINAL_07_natural_transfer}
+  \caption{Person-matched natural-use test.
+    Dots: free-choice trials answered correctly by each candidate, out of \R{final/final_nat_n} (right-hand recall: every reported hand is the right one, so a constant right answer would score 100~\%).
+    Ticks: the count expected from the same persons' right-hand accuracy on the instructed trials; grey: its 95~\% Poisson-binomial range.
+    No candidate falls short after Holm over the candidates, so the natural-use criterion excludes none; the final model is in bold.}
+  \label{fig:FINAL_07_natural_transfer}\label{fig:app:final-natural}
+\end{figure}
+
+\gentab{final/final_natural}
+
+% -------------------------------------------------------------------------------------------------
+\subsection{Calibration: no remedy shipped}\label{app:final:calibration}
+
+\textbf{Why.}
+The product is the percentage shown to the user.
+An over- or under-confident percentage misleads even when the decision is right.
+
+\textbf{Standard.}
+Calibration is judged by three numbers together.
+The first is the ECE with its perfect-calibration null band: the ECE values that a perfectly calibrated model with the same predictions shows by chance, with outcomes simulated from the predicted probabilities.
+The other two are the calibration slope and intercept with person-bootstrap CIs; perfect calibration gives a slope of 1 and an intercept of 0.
+A model is called miscalibrated only when the slope CI excludes 1, the intercept CI excludes 0, or the ECE lies above its band.
+The null band treats trials as independent and ignores clustering by person.
+An ECE inside it is good evidence of calibration; one above it is weaker evidence of miscalibration than it looks.
+Table~\ref{tab:final_master} gives the 95th percentile of the null, Table~\ref{tab:final_calibration} the upper end of its central 95~\% band, so the two thresholds of the CNN differ slightly.
+
+\textbf{Detection.}
+Without an extra remedy, the CNN has an ECE of \R{final/final_cal_ece} (null band up to \R{final/final_cal_ece_null_hi}, $p = {}$\R{final/cal_none_ece_p}), a slope of \Rci{final/final_cal_slope} and an intercept of \Rci{final/final_cal_intercept}: consistent with calibration.
+
+\textbf{Options.}
+Four remedies were tried on top of the model's own in-fold Platt step: Platt scaling \cite{platt1999probabilistic}, temperature scaling \cite{guo2017calibration}, isotonic regression and beta calibration.
+Each was fitted in every outer fold on the training persons' inner cross-fitted predictions and applied to the held-out person.
+
+\textbf{Evidence.}
+No remedy lowers the log loss (Figure~\ref{fig:FINAL_09_remedies}, Table~\ref{tab:final_calibration}).
+The paired log-loss differences against no remedy are \Rcib{final/cal_platt_dll} for Platt, \Rcib{final/cal_temperature_dll} for temperature, \Rcib{final/cal_isotonic_dll} for isotonic and \Rcib{final/cal_beta_dll} for beta.
+After Holm over the four remedies, their $p$-values are \R{final/cal_platt_holm}, \R{final/cal_temperature_holm}, \R{final/cal_isotonic_holm} and \R{final/cal_beta_holm}.
+
+\textbf{Decision.}
+A remedy ships only when its paired log-loss difference against none is negative with a Holm-adjusted $p$ below 0.05; among several, the one with the fewest fitted parameters ships.
+None qualifies, so the model ships without an extra remedy.
+
+\textbf{Platforms.}
+On Android (\R{final/cal_android_persons} persons), the ECE is \R{final/cal_android_ece} (band up to \R{final/cal_android_null_hi}) and the slope \Rci{final/cal_android_slope}.
+On iOS (\R{final/cal_ios_persons} persons), the ECE is \R{final/cal_ios_ece} (band up to \R{final/cal_ios_null_hi}) and the slope \Rci{final/cal_ios_slope}.
+On neither platform does the ECE lie above its band or the slope CI exclude 1; the lane saved no per-platform intercept, so the platform check rests on the ECE, the slope and the calibration-in-the-large difference below.
+Figure~\ref{fig:FINAL_08_calibration} in Section~\ref{sec:results} shows the reliability curves, overall and per platform.
+The differences, Android minus iOS with persons resampled within each platform, are \Rcib{final/cal_platdiff_slope} in slope ($p = {}$\R{final/cal_platdiff_slope_p}), \Rcib{final/cal_platdiff_citl} in calibration-in-the-large ($p = {}$\R{final/cal_platdiff_citl_p}) and \Rcib{final/cal_platdiff_ll} in log loss ($p = {}$\R{final/cal_platdiff_ll_p}).
+After Holm over these three, the smallest adjusted $p$ is \R{final/cal_platdiff_holm_min}.
+With \R{final/cal_ios_persons} and \R{final/cal_android_persons} persons, these platform intervals are wide.
+
+\begin{figure}[htbp]
+  \centering
+  \begin{subfigure}[t]{0.49\linewidth}
+    \centering
+    \genfig{final/FINAL_09_remedies}
+    \caption{Calibration remedies of the final model: paired per-person log-loss difference against no remedy (95~\% CI). None lowers the log loss (Holm over the four remedies), so none is shipped.}
+    \label{fig:FINAL_09_remedies}\label{fig:app:final-remedies}
+  \end{subfigure}\hfill
+  \begin{subfigure}[t]{0.49\linewidth}
+    \centering
+    \genfig{final/FINAL_14_prior}
+    \caption{Left- and right-hand recall and balanced accuracy on the primary trials when a deployment prior of the right hand shifts every logit (Equation~\ref{eq:app-final-prior}). The shipped prior is 0.5.}
+    \label{fig:FINAL_14_prior}\label{fig:app:final-prior}
+  \end{subfigure}
+  \caption{The percentage shown to the user: (a) no calibration remedy is shipped; (b) the prior stays at 0.5.}
+\end{figure}
+
+\gentab{final/final_calibration}
+
+% -------------------------------------------------------------------------------------------------
+\subsection{The prior}\label{app:final:prior}
+
+The model assumes equal prior odds of the two hands, because its training data are balanced.
+A deployment prior $\pi$ of the right hand would shift every logit $z$ (\code{final_infer.apply_prior}):
+\begin{equation}\label{eq:app-final-prior}
+  z' = z + \log\frac{\pi}{1-\pi}.
+\end{equation}
+Figure~\ref{fig:FINAL_14_prior} shows the cost on the primary trials.
+At a prior of \R{final/prior_hi}, the right-hand recall rises to \R{final/prior_right_hi}, while the left-hand recall falls from \R{final/prior_left_lo} to \R{final/prior_left_hi}.
+
+\textbf{Decision.}
+The default stays at $\pi = 0.5$.
+The PI chooses the hand freely, and a right-leaning prior would buy natural-use recall with left-hand errors.
+The shift is exported and documented, so a later deployment can set it.
+
+% -------------------------------------------------------------------------------------------------
+\subsection{Several attempts: the displayed aggregate}\label{app:final:attempts}
+
+\textbf{Question.}
+The page can combine $k$ attempts of one person and hand.
+The aggregates below take nearly the same decision; they differ in the percentage they display.
+
+\textbf{Options.}
+Four aggregates of the attempts' logits $z_1, \dots, z_k$ were compared: the mean \pright{}, the mean logit, the sum of the logits, and the sum divided by a fitted scale \tauk:
+\begin{equation}\label{eq:app-final-aggregate}
+  \pright_k = \sigma\Big(\frac{1}{\tauk}\sum_{i=1}^{k} z_i\Big),
+\end{equation}
+where $\sigma$ is the logistic function.
+A scale $\tauk = 1$ gives the sum and $\tauk = k$ the mean logit.
+The scale \tauk{} was fitted in every outer fold on the training persons' inner cross-fitted logits.
+
+\textbf{Evidence.}
+Table~\ref{tab:final_aggregation} and Figure~\ref{fig:FINAL_10_attempts} (Section~\ref{sec:results}) evaluate the aggregates on $k$-subsets of the attempts of one person and hand (\R{final/agg_persons} persons with enough trials of each hand, the same persons for every $k$).
+Calibration is judged here only in the large, by the mean confidence minus the accuracy: positive values are over-confident, and an aggregate is neither over- nor under-confident on average when the CI contains 0. The ECE with its null band, the slope and the intercept of the aggregates were not computed.
+At $k = 3$, all four aggregates reach the same accuracy, \R{final/agg_k3_sum_tau_acc}.
+The mean \pright{} is under-confident (\Rcib{final/agg_k3_mean_p_over}), and so is the mean logit (\Rcib{final/agg_k3_mean_logit_over}).
+The sum of the logits (\Rcib{final/agg_k3_sum_logit_over}) and the scaled sum (\Rcib{final/agg_k3_sum_tau_over}) are neither over- nor under-confident on average.
+The median $\tau_3$ over the outer folds is \R{final/agg_tau3}.
+Against the mean \pright{}, the scaled sum changes the log loss by \Rcib{final/agg_dll_k3} (Holm over the two paired log-loss comparisons at $k = 3$, $p = {}$\R{final/agg_dll_k3_holm}).
+At $k = 5$, the scaled sum stays so (\Rcib{final/agg_k5_sum_tau_over}) and reaches \R{final/agg_k5_sum_tau_acc}.
+At $k = 1$, the four aggregates are identical by construction.
+The harness's own $k = 3$ curve, which averages \pright{} over the attempts, gives the CNN \Rci{final/final_kthree} (Table~\ref{tab:final_master}).
+
+\textbf{Decision.}
+The page shows $\sigma(\sum_i z_i/\tauk)$, with \tauk{} exported in the model file, and never the mean \pright{}.
+The scaled sum is calibrated in the large and has the lower log loss; the mean \pright{} understates the evidence of attempts that agree.
+These numbers use the oracle windows of instructed trials; how many attempts the cue-free pipeline accepts is a question for Appendix~\ref{app:prod}.
+
+\gentab{final/final_aggregation}
+
+% -------------------------------------------------------------------------------------------------
+\subsection{Breakdown by stratum and the learning curve}\label{app:final:strata}
+
+\textbf{Strata.}
+Table~\ref{tab:final_breakdown} stratifies the CNN's LOSO predictions; nothing is refitted.
+Figure~\ref{fig:FINAL_11_persons} in Section~\ref{sec:results} shows the same breakdown by person and by grip-by-speed cell.
+Strata with fewer than 5 persons get no CI; the table shows their persons' values instead.
+By platform, the accuracy is \R{final/brk_android_acc}~[\Rb{final/brk_android_lo}, \Rb{final/brk_android_hi}] on Android (\R{final/brk_android_n} trials) and \R{final/brk_ios_acc}~[\Rb{final/brk_ios_lo}, \Rb{final/brk_ios_hi}] on iOS (\R{final/brk_ios_n} trials).
+The weakest grip-by-speed cell with at least 5 persons is top right at natural speed: \R{final/brk_worst_cell}~[\Rb{final/brk_worst_cell_lo}, \Rb{final/brk_worst_cell_hi}] (\R{final/brk_worst_cell_n} trials).
+The weakest movement variant with at least 5 persons is the twist: \R{final/brk_worst_variant}~[\Rb{final/brk_worst_variant_lo}, \Rb{final/brk_worst_variant_hi}] (\R{final/brk_worst_variant_n} trials of \R{final/brk_worst_variant_p} persons).
+The \R{final/n_left_handed} left-handed persons are shown individually: P11 reaches \R{final/brk_left_p11} and P17 \R{final/brk_left_p17}.
+
+\textbf{Persons and confident errors.}
+The lowest person accuracy is \R{final/brk_low_person} (P09), and \R{final/brk_below80} persons fall below \R{final/person_threshold}.
+Of the \R{final/brk_err} errors, \R{final/brk_conf_err} are confident: the probability given to the true hand is below 0.2.
+P09 holds \R{final/brk_conf_p09} of them, P20 \R{final/brk_conf_p20} and P05 \R{final/brk_conf_p05}.
+By grip, \R{final/brk_conf_grip_upright_toward} confident errors occur upright, \R{final/brk_conf_grip_top_right_toward} top right and \R{final/brk_conf_grip_top_left_toward} top left; by speed, \R{final/brk_conf_speed_natural} occur at natural speed and \R{final/brk_conf_speed_fast} at fast speed.
+These counts follow the number of trials per condition (most trials are upright at natural speed); they locate the errors and do not test a difference.
+A person whom the model misreads consistently is not rescued by more attempts (Table~\ref{tab:final_model_card}).
+
+\textbf{Learning curve.}
+The learning curve asks whether more participants would help.
+Inside every outer fold, the lane drew 3, 6, 9, 12 or 15 training persons at random, \R{final/lc_m3_deep_reps} times each (Table~\ref{tab:final_learning}; Figure~\ref{fig:FINAL_12_learning_curve} in Section~\ref{sec:results}).
+The CNN rises from \R{final/lc_m3_deep_acc0} with \R{final/lc_m3_deep_n0} training persons to \R{final/lc_m3_deep_accall} with all \R{final/lc_m3_deep_nall}; the reference rises from \R{final/lc_ref_acc0} to \R{final/lc_ref_accall}.
+An inverse power law fitted to these points extrapolates the CNN to \Rci{final/lc_m3_deep_at40} at 40 training persons (asymptote \R{final/lc_m3_deep_asym}), a gain of \Rcib{final/lc_m3_deep_gain40}~points; for the reference, the extrapolation is \Rci{final/lc_ref_at40}, a gain of \Rcib{final/lc_ref_gain40}~points.
+These intervals resample the repetitions at fixed persons, not the persons, so they understate the uncertainty; the fit also uses few sizes.
+The curve is an extrapolation, not a forecast.
+For the average accuracy, more participants look marginally worthwhile.
+They would still narrow every interval of this report and widen the coverage of movement styles, grips and natural use, where the robustness checks found the open risks.
+
+\gentab{final/final_breakdown}
+\gentab{final/final_learning}
+
+% -------------------------------------------------------------------------------------------------
+\subsection{Tolerance to segmentation errors and a causal filter}\label{app:final:segmentation}
+
+\textbf{Why.}
+The CNN was trained and tested on oracle windows, the approach bounds the app stored.
+In production, a cue-free detector cuts the windows (Appendix~\ref{app:prod}), and an online pipeline cannot use a zero-phase filter.
+The bound errors the model tolerates are therefore a requirement for the detector.
+
+\textbf{Test.}
+The CNN, trained on oracle bounds, was tested on windows cut with errors.
+The windows come from lane p1's variant arrays, through the same canonical code path (Appendix~\ref{app:prep}).
+The variants are: both bounds jittered uniformly within $\pm 50$, $\pm 100$ or $\pm 200$~ms; the onset 100~ms late; and a causal 15-Hz low-pass filter instead of the zero-phase one.
+
+\textbf{Evidence.}
+No variant changes the accuracy detectably (Figure~\ref{fig:FINAL_13_segmentation}, Table~\ref{tab:final_variants}; Holm over the five variants).
+The changes are \Rcib{final/var_bjit50_d}~points for $\pm 50$~ms (Holm $p = {}$\R{final/var_bjit50_holm}), \Rcib{final/var_bjit100_d}~points for $\pm 100$~ms (Holm $p = {}$\R{final/var_bjit100_holm}), \Rcib{final/var_bjit200_d}~points for $\pm 200$~ms (Holm $p = {}$\R{final/var_bjit200_holm}), \Rcib{final/var_onset_late100_d}~points for the late onset (Holm $p = {}$\R{final/var_onset_late100_holm}) and \Rcib{final/var_lp_causal_d}~points for the causal filter (Holm $p = {}$\R{final/var_lp_causal_holm}).
+The log loss rises slightly with the larger bound errors and the late onset (Table~\ref{tab:final_variants}).
+
+\textbf{Requirement.}
+Within the tested range, both bounds within $\pm 200$~ms of the oracle bounds and an onset at most 100~ms late, the model loses no detectable accuracy.
+The causal filter that an online pipeline needs costs nothing detectable.
+Larger errors were not tested.
+
+\begin{figure}[htbp]
+  \centering
+  \genfig{final/FINAL_13_segmentation}
+  \caption{The final model, trained on oracle bounds, tested on windows with segmentation errors or a causal filter (lane p1's variant arrays): paired accuracy change with 95~\% CIs.
+    No variant is significant after Holm over the five; the tested range is the bound accuracy the production detector must reach.}
+  \label{fig:FINAL_13_segmentation}\label{fig:app:final-segmentation}
+\end{figure}
+
+\gentab{final/final_variants}
+
+% -------------------------------------------------------------------------------------------------
+\subsection{The screen held away}\label{app:final:screen}
+
+\textbf{Detection.}
+No trial was recorded with the screen facing away from the face.
+The lane synthesised a screen-away twin of every recorded trial with the canonical flip of the channels (\code{standardize.screen_flip_channels}).
+On the twins, the CNN's accuracy falls to \R{final/final_flip_raw} (paired change \Rcib{final/final_flip_raw_d}~points).
+The body-frame roll and lateral channels change sign when the screen faces away, so the model answers the other hand, and with confidence.
+The failure is general: \R{final/concl_flip_fail} of the \R{final/concl_flip_tested} candidates whose inputs change under the flip lose accuracy after Holm over the candidates, and \R{final/n_flip_below_chance} fall below chance (Table~\ref{tab:final_robustness}).
+The inputs of the other candidates do not change under the flip.
+
+\textbf{Options.}
+Three remedies were compared (Table~\ref{tab:final_screen}).
+\begin{enumerate}[nosep]
+  \item \emph{Check, then un-flip.} Lane m4's model-free rest-pose check flags the screen as away when the up component of the screen normal at rest is below its threshold (Appendix~\ref{app:prod}); the flagged window is un-flipped before the model reads it.
+  \item \emph{Check, then prompt.} The same check, followed by a prompt to turn the phone; the flagged attempt is an abstention.
+  \item \emph{Augmentation.} Every training trial also enters as its screen-away twin with the same label; no check runs.
+\end{enumerate}
+
+\textbf{Evidence.}
+The check flags \R{final/final_check_fires_flip} of the twins and \R{final/final_check_fires_rec} of the recorded trials.
+With the check and un-flipping, the CNN reaches \R{final/final_flip_fixed} on the twins (gain \Rcib{final/final_flip_gain}~points).
+Its cost on the recorded trials is \Rcib{final/final_flip_cost}~points, and it comes only from the recorded trials it flags (the screen tilted down at rest).
+With the prompt, the flagged attempts are abstentions; scoring each with half credit gives \R{final/final_flip_abstain} on the twins and \R{final/scr_abs_rec_acc} on the recorded trials.
+Its coverage is the share of unflagged attempts, the complement of the flag rates above.
+Forced to answer the flagged attempts, it would score as option~1 if it un-flips them, or as the model as trained if it does not (\R{final/scr_twin_acc} on the twins, \R{final/scr_rec_acc} on the recorded trials); its accuracy on the answered attempts alone is not among the saved results.
+Augmentation reaches \R{final/flipaug_twins_acc} on the twins, against \R{final/flipaug_twins_base} for the model as trained (\Rcib{final/flipaug_twins_d}~points, Holm $p < 0.001$).
+On the recorded trials it reaches \R{final/flipaug_rec_acc} against \R{final/flipaug_rec_base} (\Rcib{final/flipaug_rec_d}~points, Holm $p = {}$\R{final/flipaug_rec_holm}; log loss \R{final/flipaug_rec_dll}).
+This Holm family holds the four paired accuracy comparisons of the final model: these two and the two platform comparisons of Appendix~\ref{app:final:robustness}.
+
+\textbf{Decision.}
+The two working remedies give nearly the same numbers: \R{final/scr_chk_twin_acc} (check) against \R{final/scr_aug_twin_acc} (augmentation) on the twins, and a log loss of \R{final/scr_chk_rec_ll} against \R{final/scr_aug_rec_ll} on the recorded trials; they were not tested against each other.
+Production keeps the model as trained and exports the model-free check with it.
+The check leaves the model unchanged, its cost on the recorded trials comes only from the trials it flags, and on a flag the page can ask the user to turn the phone instead of un-flipping.
+
+\textbf{Caveats.}
+The screen-away twins are synthesised, never recorded.
+The check reads gravity only and assumes a still phone before the movement.
+Unrecorded grips, such as landscape or the phone tilted forward, are untested.
+
+\gentab{final/final_screen}
+
+% -------------------------------------------------------------------------------------------------
+\subsection{The fallback model: the PHYS6 logistic}\label{app:final:fallback}
+
+The simplest robust candidate is the m1 PHYS6 logistic (portability rank \R{final/simple_port_rank}).
+It is an antisymmetric logistic regression on six physics features: the yaw, the roll and the lateral velocity at 50 and 100~\% of the approach (Appendix~\ref{app:m1}).
+
+\textbf{Evidence.}
+In its production form, it is detectably worse than the CNN: \Rb{final/simple_vs_best_acc}~points of accuracy (Holm $p = {}$\R{final/simple_vs_best_holm_acc}) and \R{final/simple_vs_best_ll} in log loss (Holm $p = {}$\R{final/simple_vs_best_holm_ll}; Holm over the comparisons against the best).
+On a grip absent from training the gap closes.
+With upright-only training, the PHYS6 logistic reaches \R{final/simple_grip_acc} on the sideways trials (change \Rb{final/simple_grip_d}~points) and the CNN \R{final/final_grip_acc}.
+The two models were not tested against each other on these trials.
+The CNN's own change there is \Rcib{final/final_grip_d}~points (unadjusted $p = {}$\R{final/final_grip_p}; log loss \R{final/final_grip_dll}, unadjusted $p = {}$\R{final/final_grip_p_ll}), which is not significant after Holm over the candidates ($p = {}$\R{final/rob_m3_deep_grip_holm}).
+The PHYS6 logistic also needs the rest-pose check: it reaches \R{final/rob_m1_phys6_flip} on the screen-away twins without it and \R{final/rob_m1_phys6_flip_fix} with it.
+On natural use it answers \R{final/nat_m1_phys6_obs} of \R{final/nat_m1_phys6_n} free-choice trials correctly against \R{final/nat_m1_phys6_exp} expected (right-hand recall on the free-choice trials; all right-hand so far, so a constant right answer would score 100~\%).
+
+\textbf{Decision.}
+The CNN is the better choice when the PI uses the recorded grips, which the training data cover.
+The PHYS6 logistic is the fallback if a grip unlike any recorded one matters more than the accuracy on the recorded grips.
+It reads six features and is the easiest candidate to port.
+
+% -------------------------------------------------------------------------------------------------
+\subsection{Export and model card}\label{app:final:export}
+
+\textbf{Fit.}
+The exported model was fitted on all \R{final/final_n_persons} persons with the procedure of the outer folds.
+It uses the same per-person cap on training trials (Appendix~\ref{app:data}) and the inner person splits for the model's in-fold Platt calibrator.
+The scale \tauk{} and the (empty) remedy were fitted on the persons' cross-fitted predictions.
+
+\textbf{Format.}
+The model is a plain JSON file, \code{final_model.json} (\R{final/export_kb}~kB, \R{final/export_params} fitted numbers), in the export folder \code{analysis/reports/stage2/export/}.
+It holds the channel table and the preprocessing parameters, the body-frame definition, the weights, the calibrator, \tauk, the rest-pose screen check (its threshold and flip signs), the prior (0.5), the decision threshold and the identity of the cached data it was fitted on.
+A numpy-only reference implementation (\code{analysis/stage2/lanes/final_infer.py}) is the specification for the Stage~3 JavaScript port.
+
+\textbf{Checks.}
+The reference implementation reproduces the fitted pipeline on all \R{final/export_rows} primary and free-choice trials; the largest difference in \pright{} is \R{final/export_maxdp}.
+The test \code{test_final_export.py} requires $10^{-9}$.
+A float32 run is also compared with the fitted pipeline; the export folder keeps both comparisons in \code{final_model_check.json}.
+One prediction takes \R{final/export_ms}~ms in numpy.
+The lane's finalists file (\code{results/finalists_final.json}) rebuilds the shipped result by the same convention as the other lanes, with a largest difference of \R{final/finalist_rebuild_dp}.
+
+\textbf{Model card.}
+Table~\ref{tab:final_model_card} summarises the intended use, the inputs, the numbers above and the known failure modes.
+The failure modes are persons whom the model misreads consistently, unusual movements, a grip absent from training, a screen held away without the check, weaker lateral evidence on uninstructed movements, and windows from a detector that misses the bounds.
+The card's LOSO numbers are the exploratory ones of the shipped model; the selection-aware estimate is in Appendix~\ref{app:final:decision}.
+
+\gentab{final/final_model_card}
+
+% -------------------------------------------------------------------------------------------------
+\subsection{Left out for time and open issues}\label{app:final:open}
+
+\textbf{Not run.}
+The lane left out \R{final/n_not_run} planned experiments for the compute budget: the platform and label-noise tests of the m2 stack and of the m3 2D CNN on short-time Fourier transform planes (\code{final_plat_m2_stack}, \code{final_noisy_m2_stack}, \code{final_plat_m3_tf} and \code{final_noisy_m3_tf}; the dashes in Table~\ref{tab:final_robustness}).
+All four are diagnostics of candidates that the decision already excludes.
+The command \code{python -m stage2.pipeline compute --lanes final} runs them.
+
+\textbf{A contradictory configuration count.}
+For the m2 logistic on \R{final/m2_n_features} features, lane m2's finalists file records \R{final/nconf_file_m2_lr} configurations compared on the outer folds, but its saved result records \R{final/nconf_result_m2_lr}.
+This lane uses the count of the finalists file, the role in which the model became a candidate, so its numbers count as exploratory.
+The contradiction does not change the decision, because the model fails the grip test, but lane m2's records should be reconciled.
+
+\textbf{Open issues.}
+\begin{itemize}[nosep]
+  \item Every number here uses oracle windows. The final model has not yet run inside the cue-free production simulation; the production numbers of Appendix~\ref{app:prod} use lane m4's own reference classifier, not the final model.
+  \item The natural-use set holds one free-choice trial per person, all right-hand.
+  \item The screen-away twins are synthesised.
+  \item The nested estimate does not remove the optimism of the lanes' own design choices.
+\end{itemize}

@@ -1,0 +1,86 @@
+% sections/02_data.tex: the app, the protocol, participants and recruitment, the photo, curation, the dataset in
+% numbers. Static content: tab:protocol (street protocol 2.0.0) and the photo fig:photo (hand-placed in
+% figures/photo/, git-ignored; never use the blurred spare). Details of every data decision: Appendix A.
+\section{Data}\label{sec:data}
+
+\paragraph{The app.} The data were recorded with NoseTouch, a web app that runs in the phone's browser on iOS and
+Android with nothing to install. It guides the participant hands-free with spoken and visual prompts (which hand,
+which grip, which speed), records the motion streams, segments each attempt online and uploads every attempt at
+once. Appendix~\ref{app:data:app} lists what is recorded and which streams feed the models.
+
+\paragraph{The protocol.} A visit follows the street protocol of Table~\ref{tab:protocol}. Tier~0 is one
+free-choice trial: the participant chooses the hand, moves naturally and reports the hand afterwards. These
+free-choice trials form the natural-use set, which is scored but never used for training. Tiers~1--4 are instructed:
+the app prompts the hand, the grip (upright, top left or top right) and the speed (natural, fast or slow) or a
+movement variant, in blocks of one hand. A visit was planned to take about 5~minutes; the median completed visit
+took \R{describe/visit_minutes_median}~min.
+
+\begin{table}[htbp]
+\centering
+\caption{The street protocol (protocol 2.0.0). $A$ is the first hand, $B$ the other; within a block the order
+of trials is random. 29 planned trials, 39 with the optional bonus; the app estimates 4.5 minutes without the
+bonus.}\label{tab:protocol}
+\footnotesize
+\begin{tabularx}{\linewidth}{@{}l l l >{\raggedright\arraybackslash}X@{}}
+\toprule
+Tier & Blocks & Grip (facing the person) & Trials \\
+\midrule
+0 choice & one & free & 1 natural; the participant picks the hand and reports it afterwards \\
+1 basics & $A$, $B$ & upright & 4 per hand: natural, natural, fast, slow \\
+2 sideways & $B$, $A$; $A$, $B$ & top left, top right & 3 per block: natural, natural, fast \\
+3 variety & $B$, $A$ & upright & 4 per hand: tilted touch + 3 drawn from start shoulder or centre,
+  curved, pause, twist, elbow high, bent start, lean in, jerky \\
+4 bonus & $A$, $B$, $B$, $A$ & upright & optional: natural, fast, natural per hand + 2 more variety cells \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\paragraph{Participants.} The participants were recruited among Bar-Ilan University students, most of them
+master's students, and each was offered candy, chocolates and gummies for their time. Figure~\ref{fig:photo} shows
+a data-collection session\footnote{\raggedright A video of a data-collection session:
+\url{https://drive.google.com/file/d/1V9PF623HkJ8MjR6loJhUHnDkCx60W-Jl/view?usp=sharing}.}. One additional
+participant, PD01, is analysed separately as an exploratory case study and never enters the modelling
+(Appendix~\ref{app:pd01}).
+
+\begin{figure}[htbp]
+\centering
+\repoimage[0.8\linewidth]{photo}{figures/photo/data_collection.jpg}
+\caption{A data-collection session (cropped so that no face is visible). Participants follow the app's prompts,
+here \handL{} at normal speed, with the phone at arm's length; the candy on the table was the compensation.}
+\label{fig:photo}
+\end{figure}
+
+\paragraph{Curation.} The data snapshot holds \R{describe/attempts_total} attempts. A pre-specified exclusion
+cascade, applied in order, keeps \R{describe/primary_trials} primary trials and \R{describe/natural_use_n}
+natural-use trials (Figure~\ref{fig:S2_02_exclusion_flow}). The largest rule, E1, removes the
+\R{describe/excl_e1_removed} attempts the app itself did not accept; rule E4d removes \R{describe/excl_e4d_removed}
+trials with a sampling gap near the movement. Quality flags (for example possible clipping or a rotated screen) and
+the predictor's input gates are not exclusions: they are kept and scored apart, so every model sees the data
+production will see. Labels are never changed, although \R{describe/swap_signature_blocks} blocks of one person
+show the signature of a swapped hand (Appendix~\ref{app:data:labels}). Appendix~\ref{app:data:curation} gives every rule and its count.
+
+\begin{figure}[htbp]
+\centering
+\genfig{core/S2_02_exclusion_flow}
+\caption{The exclusion cascade, applied in order; an attempt is charged to the first rule it fails. Rule E3 moves
+the free-choice trials, whose hand is self-reported, to the natural-use set, which then passes the same quality
+rules; N1 keeps one free-choice trial per person (the earliest). The result is the primary set used for training
+and evaluation, and the natural-use set used for scoring only.}
+\label{fig:S2_02_exclusion_flow}
+\end{figure}
+
+\paragraph{The dataset in numbers.} Table~\ref{tab:describe_participants} describes the \R{describe/n_persons}
+persons of the analysis: \R{describe/n_female} women and \R{describe/n_male} men, aged \R{describe/age_min} to
+\R{describe/age_max} years (mean \R{describe/age_mean}); \R{describe/n_right_handed} are right-handed and
+\R{describe/n_left_handed} left-handed. Of these persons, \R{describe/persons_android} recorded on Android and
+\R{describe/persons_ios} on iOS. The primary set has \R{describe/primary_left} left-hand and
+\R{describe/primary_right} right-hand trials, a median of \R{describe/primary_per_person_median} per person (range
+\R{describe/primary_per_person_min} to \R{describe/primary_per_person_max}). The natural-use set has one
+free-choice trial per person, and all \R{describe/natural_use_right} of them are right-hand trials.
+
+\gentab{describe/describe_participants}
+
+\paragraph{Gaps.} Three gaps limit what these data can show. Only \R{describe/n_left_handed} persons are
+left-handed, so no effect of handedness can be estimated. Only \R{describe/persons_ios} persons used an iPhone, so
+platform comparisons have little power. All free-choice trials are right-hand trials, so natural use measures
+right-hand recall only: a constant right answer would score 100\,\%.

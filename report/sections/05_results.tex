@@ -1,0 +1,186 @@
+% sections/05_results.tex: model comparison, the final model and its selection-aware estimate, robustness,
+% calibration, several attempts, failures, natural use, learning curve. Details: Appendix F (app:final).
+\section{Results}\label{sec:results}
+
+\subsection{Model comparison}\label{sec:results:comparison}
+Figure~\ref{fig:FINAL_01_master_forest} shows the \R{final/n_candidates} candidates as their lanes deliver them.
+Most of them beat the reference floor, yaw8 (\Rci{reference/accuracy}): \R{final/paired_ref_better} of
+\R{final/paired_ref_m} candidates are more accurate after Holm adjustment. The differences among the best
+candidates are small: the candidate with the lowest log loss and the others that paired comparisons cannot separate
+from it form \R{final/concl_n_leaders} leaders (\R{final/paired_best_sep} of the \R{final/paired_best_m} other
+candidates are separated from it, Holm over these \R{final/paired_best_m} comparisons). Of the candidates, \R{final/n_exploratory_candidates} were
+chosen on the outer folds in their own lane, so the forest is exploratory. Appendices~\ref{app:m1}
+to~\ref{app:m3} give each family's own results and decisions.
+
+\begin{figure}[htbp]
+\centering
+\genfig{final/FINAL_01_master_forest}
+\caption{The \R{final/n_candidates} candidates of the cross-lane selection as their lanes deliver them (LOSO
+accuracy and log loss), coloured by lane. Open markers: chosen on the outer folds in their lane (exploratory);
+diamonds: log loss after the calibration remedy chosen inside each fold; dashed: the reference floor. The forest is
+exploratory; the nested estimate (Table~\ref{tab:final_nested}) is the honest number.}
+\label{fig:FINAL_01_master_forest}
+\end{figure}
+
+\subsection{The final model and its selection-aware estimate}\label{sec:results:final}
+The final model is the body-frame 1D CNN: a one-dimensional convolutional network on 12 channels in the gravity
+frame and the body frame (Appendix~\ref{app:m3}). It has the lowest log loss in production form. The headline is the
+nested, selection-aware estimate of the cross-lane selection, which reruns the rule inside every outer fold and
+treats the \R{final/n_candidates} candidates as fixed (Table~\ref{tab:final_nested},
+Figure~\ref{fig:FINAL_03_nested_selection}): accuracy \Rci{final/nested_accuracy}, AUC \Rcib{final/nested_auc} and
+log loss \Rcib{final/nested_log_loss}. Inside the outer folds the selection chose the CNN in \R{final/sel_m3_deep}
+of \R{final/sel_folds} folds. It does not repeat the lanes' own outer-fold choices: lane m3's own nested estimates,
+which repeat its configuration choice in every fold, are \R{m3/nested_deep_nested_inv_vs_cnn_acc} among its
+grip-invariant configurations and \R{m3/nested_deep_nested_all_vs_cnn_acc} among all of them (both post hoc;
+Appendix~\ref{app:m3:selection}).
+
+The shipped model's own LOSO numbers are exploratory: it was the best of \R{final/final_configs} configurations in
+its lane, then chosen among \R{final/n_candidates} candidates. They are accuracy \Rci{final/final_accuracy}, AUC
+\Rcib{final/final_auc} and log loss \Rcib{final/final_log_loss}, an optimism of \Rcib{final/optimism_accuracy}
+points of accuracy over the nested estimate. Its body-frame input was also designed after outer-fold results had
+been seen, an optimism that no nested estimate removes (Appendix~\ref{app:m3:selection}). The rest of this section
+describes the shipped model, and its numbers share this exploratory status. The CNN is
+\Rcib{final/final_vs_ref_acc}~points more accurate than the reference floor (Holm $p$~\R{final/final_vs_ref_holm_acc} over the
+\R{final/paired_ref_m} comparisons with the reference).
+
+\gentab{final/final_nested}
+
+\begin{figure}[htbp]
+\centering
+\genfig{final/FINAL_03_nested_selection}
+\caption{Nested cross-lane selection. Left: how often each candidate was chosen, by the lowest inner log loss on
+the training persons, over the 20 outer folds. Right: the selection-aware estimate against the best candidate
+picked on the outer folds. The naive pick is optimistic by \Rcib{final/optimism_accuracy}~points of accuracy.}
+\label{fig:FINAL_03_nested_selection}
+\end{figure}
+
+The input and the model class were compared separately. On the same body-frame channels, the CNN is
+\Rcib{final/ic_cnn_vs_m2_same12_acc}~points more accurate than lane m2's engineered features with logistic
+regression (Holm $p$ = \R{final/ic_cnn_vs_m2_same12_holm_acc} over six input-against-class comparisons), and on the gravity frame alone it does not beat
+lane m1's linear models (Appendices~\ref{app:final:input} and~\ref{app:m3:engineered}). With all 21 channels, lane
+m2's logistic regression is not detectably less accurate than the CNN (\Rcib{final/ic_m2_all21_vs_cnn_acc}~points,
+Holm $p$ = \R{final/ic_m2_all21_vs_cnn_holm_acc}) but has a higher log loss (\Rcib{final/ic_m2_all21_vs_cnn_ll},
+Holm $p$ = \R{final/ic_m2_all21_vs_cnn_holm_ll}).
+
+\subsection{Robustness to an unseen grip}\label{sec:results:robustness}
+The robustness tests decided among the leaders (Figure~\ref{fig:FINAL_06_robustness}). Trained on upright grips
+only and tested on the sideways grips, the leaders that read device-frame channels collapse: lane m2's logistic
+regression changes by \Rb{final/rob_m2_lr_grip_d}~points, its stack by \Rb{final/rob_m2_stack_grip_d}, the
+preprocessing panel's gradient-boosted trees by \Rb{final/rob_p1_gbm_grip_d} and lane m2's LightGBM by
+\Rb{final/rob_m2_lgbm_grip_d} (each Holm $p \le$ \R{final/rob_m2_lgbm_grip_holm} over the \R{final/fig_grip_tested}
+grip tests). The body-frame CNN changes by \Rcib{final/final_grip_d}~points (unadjusted $p$ =
+\R{final/final_grip_p}; Holm $p$ = \R{final/rob_m3_deep_grip_holm} over the \R{final/fig_grip_tested} grip tests)
+and reaches \R{final/rob_m3_deep_grip} on the unseen grips. It is one of the two leaders without a Holm-significant
+drop; the other, an ensemble, changes by \Rb{final/rob_ens_mean3_grip_d}~points (Holm $p$ =
+\R{final/rob_ens_mean3_grip_holm}). Of these two, the rule took the more portable CNN. The documented fallback is
+lane m1's PHYS6 logistic: \Rb{final/simple_vs_best_acc}~points less accurate (Holm $p$ =
+\R{final/simple_vs_best_holm_acc} over the comparisons with the best candidate), but it changes by only
+\Rb{final/simple_grip_d}~points on the unseen grips (\R{final/simple_grip_acc}; Appendix~\ref{app:final:fallback}).
+
+A phone held with the screen facing away defeats every model that reads the screen-relative frame: on synthesised
+screen-away twins of the recorded trials the CNN falls to \R{final/final_flip_raw}. A model-free check of the rest
+pose before the movement, exported with the model, detects \R{final/final_check_fires_flip} of the twins; with the
+check and an un-flip the CNN recovers \R{final/final_flip_fixed}. The check also fires on
+\R{final/final_check_fires_rec} of the recorded trials, which costs \Rcib{final/final_flip_cost}~points of accuracy
+on them (Appendix~\ref{app:final:screen}).
+
+\begin{figure}[htbp]
+\centering
+\genfig{final/FINAL_06_robustness}
+\caption{Robustness of every candidate (bold: the final model). Left: accuracy on the sideways grips when trained
+on every grip (dot) or on upright grips only (square). Middle: accuracy as recorded and on synthesised screen-away
+twins, without and with the rest-pose check. Right: accuracy change when trained on the other platform only and
+without suspect label blocks. Device-frame models fail an unseen grip, which removes them from the selection.}
+\label{fig:FINAL_06_robustness}
+\end{figure}
+
+\subsection{Calibration}\label{sec:results:calibration}
+The final model ends with a Platt calibrator fitted inside each fold (lane m3's choice, Appendix~\ref{app:m3}). With
+it, its probabilities are consistent with calibration (Figure~\ref{fig:FINAL_08_calibration}): ECE
+\R{final/final_cal_ece}, inside its perfect-calibration null band (up to \R{final/final_cal_ece_null_hi}); slope
+\Rcib{final/final_cal_slope}; intercept \Rcib{final/final_cal_intercept}. Four further remedies fitted inside the
+folds on top of it (Platt, temperature, isotonic and beta calibration) each raise the log loss slightly, none
+detectably (Holm $p$ = \R{final/cal_platt_holm} for each, over the four remedies), so none is added. No difference between the platforms is detectable
+(slope difference $p$ = \R{final/cal_platdiff_slope_p}, calibration in the large $p$ = \R{final/cal_platdiff_citl_p},
+unadjusted), but with \R{final/cal_ios_persons} iOS persons this comparison has little power, and per-platform
+intercepts were not saved (Appendix~\ref{app:final:calibration}).
+
+\begin{figure}[htbp]
+\centering
+\genfig{final/FINAL_08_calibration}
+\caption{Reliability of the final model, overall and per platform (equal-mass bins, person-bootstrap 95\,\% bands;
+its in-fold Platt calibrator, no further remedy). ECE \R{final/final_cal_ece} (null band up to \R{final/final_cal_ece_null_hi}), slope
+\Rcib{final/final_cal_slope}, intercept \Rcib{final/final_cal_intercept}: the percentage shown is consistent with
+calibration.}
+\label{fig:FINAL_08_calibration}
+\end{figure}
+
+\subsection{Several attempts}\label{sec:results:attempts}
+Combining attempts helps (Figure~\ref{fig:FINAL_10_attempts}). With $k = 3$ attempts of one person and hand, the
+mean \pright{} of the evaluation harness's $k$-curve reaches \Rci{final/final_kthree}. The aggregates of
+Figure~\ref{fig:FINAL_10_attempts} give nearly the same answers (each is right in \R{final/agg_k3_sum_tau_acc}) and
+differ in the percentage they show. The displayed aggregate of equation~\eqref{eq:aggregate}, with $\tau_3$ fitted
+in-fold (median \R{final/agg_tau3}), is neither over- nor under-confident on average: its mean confidence minus its
+accuracy is \Rcib{final/final_kthree_over}. This is calibration in the large only; its ECE with a null band, slope
+and intercept were not computed. The mean \pright{} is under-confident (\Rcib{final/agg_k3_mean_p_over}) and has a
+higher log loss (difference \R{final/agg_dll_k3} in favour of the scaled sum, Holm $p$ =
+\R{final/agg_dll_k3_holm} over the paired comparisons of the aggregates; Appendix~\ref{app:final:attempts}).
+
+\begin{figure}[htbp]
+\centering
+\genfig{final/FINAL_10_attempts}
+\caption{Several attempts of one person and hand (\R{final/agg_persons} persons with at least 5 trials of each
+hand). Left: over-confidence (mean confidence minus accuracy) of four aggregates (above 0: over-confident); right:
+their log loss. The scaled sum of logits is neither over- nor under-confident on average; the mean \pright{} is
+under-confident and is not shown to the user.}
+\label{fig:FINAL_10_attempts}
+\end{figure}
+
+\subsection{Who and where it fails}\label{sec:results:failures}
+Figure~\ref{fig:FINAL_11_persons} breaks the accuracy down. It is \R{final/brk_android_acc}
+[\Rb{final/brk_android_lo}, \Rb{final/brk_android_hi}] on Android and \R{final/brk_ios_acc}
+[\Rb{final/brk_ios_lo}, \Rb{final/brk_ios_hi}] on iOS; the platforms were not compared by a test. The accuracy is
+below \R{final/person_threshold} for \R{final/brk_below80} persons, the lowest being \R{final/brk_low_person}; the
+two left-handed persons score \R{final/brk_left_p11} and \R{final/brk_left_p17} (two persons: no CI). The weakest
+grip-by-speed cell still reaches \Rci{final/brk_worst_cell}; the weakest movement variant reaches
+\R{final/brk_worst_variant} [\Rb{final/brk_worst_variant_lo}, \Rb{final/brk_worst_variant_hi}] on
+\R{final/brk_worst_variant_n} trials of \R{final/brk_worst_variant_p} persons. Of the \R{final/brk_err} errors,
+\R{final/brk_conf_err} are confident errors (a probability below 0.2 for the true hand), and they cluster in a few
+persons (\R{final/brk_conf_p09} in P09, \R{final/brk_conf_p20} in P20; Appendix~\ref{app:final:strata}).
+
+\begin{figure}[htbp]
+\centering
+\genfig{final/FINAL_11_persons}
+\caption{The final model by person (left; sorted; colour: platform; L: the two left-handed persons) and by grip
+$\times$ speed cell (right; CI only for cells with at least 5 persons, open markers otherwise).}
+\label{fig:FINAL_11_persons}
+\end{figure}
+
+\subsection{Natural use}\label{sec:results:natural}
+On the free-choice trials the final model's right-hand recall is \R{final/final_nat_recall}
+(\R{final/final_nat_credit} of \R{final/final_nat_n}), against \R{final/nat_m3_deep_exp} correct trials expected
+from the same persons' instructed trials: no detectable shortfall (Holm $p$ = \R{final/nat_m3_deep_holm} over the
+\R{final/n_candidates} candidates). All free-choice
+trials are right-hand trials so far, so a constant right answer would score 100\,\% and this recall says nothing
+about the left hand. The mean probability of the reported hand is lower on free choice than on the same
+persons' instructed right-hand trials (\R{final/cal_nat_meanp} against \R{final/cal_nat_primary}), but the
+difference is not detectable ($p$ = \R{final/cal_nat_p}, unadjusted; Appendix~\ref{app:final:natural}).
+
+\subsection{More persons?}\label{sec:results:learning}
+The learning curve flattens (Figure~\ref{fig:FINAL_12_learning_curve}). With \R{final/lc_m3_deep_nall} training
+persons the CNN reaches \R{final/lc_m3_deep_accall}. An inverse power law fitted to random subsets of training
+persons extrapolates to \Rci{final/lc_m3_deep_at40} at 40 persons, a gain along the fitted curve of
+\Rcib{final/lc_m3_deep_gain40}~points from \R{final/lc_m3_deep_nall} persons. The band resamples the repetitions at
+fixed persons, so it understates the uncertainty, and the curve is fitted to few sizes. The extrapolation suggests
+that more persons of the same kind would add little average accuracy; new persons are needed above all for the
+groups the data lack: left-handers and left-hand free choice.
+
+\begin{figure}[htbp]
+\centering
+\genfig{final/FINAL_12_learning_curve}
+\caption{Learning curves: training persons drawn at random inside every outer fold (dots: repetitions; line: their
+mean; dashed: an inverse power law with a 95\,\% bootstrap band over the repetitions, which understates the
+uncertainty). The extrapolation to 40 persons gives \R{final/lc_m3_deep_at40} for the CNN; by this extrapolation,
+more persons of the same kind would add little average accuracy.}
+\label{fig:FINAL_12_learning_curve}
+\end{figure}

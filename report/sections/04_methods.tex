@@ -1,0 +1,83 @@
+% sections/04_methods.tex: standardisation, the evaluation design, metrics, model families, the cross-lane selection.
+% Text only; every choice points to its appendix. The person-cluster bootstrap is stated here once for the main text.
+\section{Methods}\label{sec:methods}
+
+\subsection{Standardisation}\label{sec:methods:standardisation}
+Every trial passes through the same standardisation, on oracle bounds in training and on detected bounds in
+production (Appendices~\ref{app:data:conventions} and~\ref{app:data:sampling}). The streams are resampled linearly
+onto a uniform 60~Hz grid; gaps up to 100~ms are interpolated. The accelerometer sign of iOS is normalised to the
+W3C device frame, whose $x$ axis points to the right edge, $y$ to the top edge and $z$ out of the screen. A gravity
+frame is built without the magnetometer: the gravity direction at rest before and after the movement is propagated
+through the movement with the gyroscope, which gives the unit up vector $\ghat$ at every sample, the vertical and
+horizontal parts of $\va$ and $\vomega$, the yaw rate $\vomega\cdot\ghat$ and its integral. A body frame follows the
+phone's heading: its axes are the horizontal part of the screen normal and the horizontal direction perpendicular
+to it (Appendix~\ref{app:m3:models}, equation~\eqref{eq:m3-body}). A rotation of the phone in the hand leaves the
+body-frame channels unchanged, so they do not depend on the grip. All channels pass a zero-phase, fourth-order
+Butterworth low-pass filter at 15~Hz. The primary analysis uses the oracle window: the approach bounds that the app
+stored online (Appendix~\ref{app:data:segmentation}). A fixed panel of three pre-specified models judged each of
+these choices against its alternatives, and all \R{p1/n_choices} defaults were kept (Appendix~\ref{app:prep}).
+
+\subsection{Evaluation design}\label{sec:methods:evaluation}
+Every evaluation is leave-one-person-out (LOSO): a model is trained on all other persons and tested on the
+held-out person, once for each of the \R{describe/n_persons} persons. There is no separate test set. Results pool the
+held-out predictions of all folds. Hyperparameters, calibrators and aggregation scales are fitted on the training
+persons only, with inner person-wise splits (nested tuning). In every fold, a leak check re-runs the fold on a
+random half of the test trials in a new order and requires identical predictions. A training person contributes at
+most 40 trials, so that no person dominates a model.
+
+All 95\,\% confidence intervals (CIs) in this report are person-cluster bootstrap intervals: 2000 resamples of
+persons, not of trials~\cite{saravanan2020bootstrap}. Two models are compared on the same trials through their
+per-person differences, with a paired person bootstrap for the CI and an exact sign-flip test for the p-value.
+P-values are adjusted within a named family of comparisons, by Holm's method or, where stated, by the
+Benjamini--Hochberg (BH) method. Overlapping CIs are not taken as a test.
+
+A configuration chosen by its LOSO result among several is exploratory, and its number of configurations tried is
+reported with it. The headline of a selection is the nested estimate: the whole selection is repeated inside each
+outer fold, on the training persons only, so the held-out person never influences the choice.
+
+A pipeline may abstain by returning \pright{} = 0.5 exactly. An abstention is never a right-hand answer: it earns half
+credit, and wherever a pipeline can abstain the report gives its coverage (the share answered), its accuracy on the
+answered trials and its forced-choice accuracy. Natural use is scored as right-hand recall on the free-choice
+trials; all of them are right-hand trials so far, so a constant right answer would score 100\,\%.
+
+\subsection{Metrics}\label{sec:methods:metrics}
+Accuracy (\pright{} above 0.5 read as right), AUC, the log loss and the Brier score~\cite{brier1950verification}
+measure discrimination and the quality of the probabilities. Calibration is judged by three numbers together: the
+expected calibration error (ECE; ten equal-mass bins) against its perfect-calibration null band, that is, the range
+of ECE values that a perfectly calibrated model with the same predicted probabilities shows by chance; and the
+slope and intercept of a logistic recalibration of the outcome on the logit, each with its CI. A calibrated model
+has a slope near 1 and an intercept near 0. Several attempts $i = 1, \dots, k$ of one person and hand are combined
+as
+\begin{equation}
+  \pright_k = \sigma\!\left(\frac{1}{\tauk}\sum_{i=1}^{k} z_i\right),
+  \label{eq:aggregate}
+\end{equation}
+where $z_i$ is the logit of attempt $i$, $\sigma$ the logistic function and \tauk{} a scale fitted inside each fold
+(Appendix~\ref{app:final:attempts}). The $k$-attempt curves use the \R{final/agg_persons} persons with at least 5
+trials of each hand.
+
+\subsection{Model families}\label{sec:methods:families}
+Four families of models were developed in parallel, each with its own appendix.
+\begin{itemize}[nosep,leftmargin=1.5em]
+  \item Rules and interpretable models: the sign of the first-half yaw; antisymmetric logistic models on six
+    physics features (PHYS6); a temporal filter; a shallow tree; a generalised additive model
+    (Appendix~\ref{app:m1}).
+  \item Classical machine learning on \R{m2/lr_full_n_features} engineered features: logistic regression (LR),
+    support vector machines, LightGBM gradient-boosted trees and stacked ensembles (Appendix~\ref{app:m2}).
+  \item Time-frequency and deep sequence models: MiniRocket~\cite{dempster2021minirocket}, logistic models on
+    time-frequency planes and one-dimensional convolutional networks (1D CNN) (Appendix~\ref{app:m3}).
+  \item The reference floor, yaw8: a mirror-augmented logistic regression on the cumulative yaw at 8 instants, fixed
+    before any model was built (Appendix~\ref{app:data:reference}).
+\end{itemize}
+
+\subsection{The cross-lane selection}\label{sec:methods:selection}
+Lanes m1, m2, m3 and p1 delivered their finalists. With the reference floor, body-frame variants of engineered
+models and a pre-specified cross-lane ensemble, \R{final/n_candidates} candidates entered the selection. A rule fixed
+before the comparison chose the final model
+(Appendix~\ref{app:final:rule}): (1) score every candidate in its production form, with the calibration it would
+ship; (2) find the lowest log loss and the leaders that paired comparisons cannot separate from it (Holm); (3) drop
+the leaders with a Holm-significant accuracy drop on a grip absent from training, a natural-use shortfall or a
+screen-away failure the rest-pose check cannot repair; (4) among the remaining leaders, take the most
+portable. The same rule, rerun inside every outer fold on the training persons' inner predictions, gives the
+nested, selection-aware estimate. It treats the candidates as fixed: it does not repeat the lanes' own choices made
+on the outer folds.

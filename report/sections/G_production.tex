@@ -1,0 +1,523 @@
+% sections/G_production.tex: Lane m4 (the cue-free production pipeline).
+% Numbers only through \R / \Rci; figures through \genfig, tables through \gentab (report/README.md).
+% One \subsection per decision group, so that each can be trimmed on its own.
+\section{The cue-free production pipeline}\label{app:prod}
+
+In production (the Stage~3 inference link) no GO cue marks the movement.
+The person holds the phone at arm's length and brings it to the nose once or a few times.
+The pipeline must find each approach in the continuous sensor stream, ignore the return and every other movement, decide when to stop, and output a calibrated \pright{}.
+Lane m4 built this pipeline and simulated it on the recordings; this appendix states each of its decisions with the options, the evidence and the rationale.
+
+\textbf{Which hand classifier.}
+Every production number in this appendix uses lane m4's own reference hand classifier, yaw8: a mirror-augmented logistic regression on the cumulative yaw about gravity ($\vomega\cdot\ghat$) at 8 instants of the approach window.
+It does not use the final model, the body-frame 1D CNN of Appendix~\ref{app:final}.
+The hand classifier is a plug-in: the detector, the calibration and the stopping rule take any model that reads a window, and the final model inside this simulation is the first next step (Appendix~\ref{app:prod:caveats}).
+
+\textbf{Unit, evaluation and scoring.}
+The unit is one full recording of a primary trial: rest, approach, hold and return, without the app's stored event times.
+There are \R{m4/n_recordings} recordings of \R{m4/n_persons} persons, evaluated leave-one-person-out; every fitted part (segmentation setting, segment classifier, hand model, calibrator, aggregation scale) is fitted on the training persons only.
+An abstention (no approach accepted, or a calibrated \pright{} of exactly 0.5) is never a right-hand answer: it scores half a correct answer.
+Next to this half-credit accuracy, each result gives the coverage (the share answered), the accuracy on the answered recordings and the forced-choice accuracy (the best candidate always scored).
+In the tables of this appendix, `answered' means that an approach was accepted; it still counts the calibrated outputs of exactly 0.5 (Appendix~\ref{app:prod:calibration}), which are abstentions and score half.
+For the production pipeline, the share of recordings with a hand shown is therefore \R{derived/m4_prod_shown_coverage} (\R{derived/m4_prod_n_shown} of \R{m4/n_recordings}), right on \R{derived/m4_prod_shown_acc} of those; these two numbers are exact arithmetic on the saved counts, done by the report's asset step.
+Natural use is right-hand recall on the free-choice trials (all right-hand so far; a constant right answer would score 100~\%).
+
+\textbf{Tests.}
+Paired differences are means over persons with a person-bootstrap CI and an exact sign-flip test over persons.
+Holm's adjustment runs within named families: \emph{trial} (the \R{m4/paired_family_n} comparisons of Table~\ref{tab:m4_paired}), \emph{stress} (\R{m4/stress_family_n} comparisons of the stress test), \emph{sessions} (\R{m4/sess_family_n} session comparisons), \emph{calibrators} (each calibrator against none) and \emph{grip} (\R{m4/grip_family_n} comparisons of the grip check).
+The production pipeline was compared with \R{m4/n_configs_final} cue-free pipelines on the outer folds, so its own LOSO numbers are exploratory; the segmentation setting and the calibrator are chosen inside each fold.
+
+\textbf{Headline.}
+With one touch, the production pipeline reaches a half-credit accuracy of \Rci{m4/prod_acc}. It accepts an approach in \R{m4/prod_coverage} of the recordings (accuracy \R{m4/prod_acc_answered} on those, a 0.5 output scoring half) and shows a hand for \R{derived/m4_prod_shown_coverage}, right on \R{derived/m4_prod_shown_acc} of those; its forced-choice accuracy is \R{m4/prod_acc_forced}; its AUC is \Rci{m4/prod_auc}.
+With the stopping rule on synthetic multi-touch sessions it reaches \Rci{m4/stop_1_acc} after \R{m4/stop_1_attempts} accepted attempts on average (exploratory; Appendix~\ref{app:prod:stopping}).
+
+% -------------------------------------------------------------------------------------------------
+\subsection{The baseline detector v0 and the evaluation contract}\label{app:prod:v0}
+
+\textbf{Options.}
+A fixed rule built from the app's own thresholds, or a detector learned from labelled segments.
+The fixed rule, v0, comes first: it sets the baseline and the outcome categories that every later detector reports.
+
+\textbf{The rule.}
+v0 takes the first sustained movement (smoothed $|\vomega| > 30$~deg/s for 100~ms) that follows at least 1~s of stillness ($|\vomega| < 20$~deg/s), and ends it at the next 250~ms of stillness.
+It reads the gyroscope only.
+Adding an accelerometer condition ($|\va| < 0.5$~m/s$^2$) leaves \R{describe/still_both_share_1s} of the approaches with at least 1~s of stillness before them (median \R{describe/still_both_median_s}~s), against \R{describe/still_before_onset_share_1s} with the gyroscope alone (median \R{describe/still_before_onset_median_s}~s).
+
+\textbf{Evidence.}
+Figure~\ref{fig:app:prod-v0} and Table~\ref{tab:describe_cuefree_v0} score v0's first detection against the oracle window, the approach bounds the app stored, by their intersection over union (IoU).
+The first detection is the approach (IoU $\ge 0.5$) in \R{describe/cuefree_share_approach} of the primary recordings, part of it in \R{describe/cuefree_share_approach_partial}, an earlier movement in \R{describe/cuefree_share_earlier_movement}, the return in \R{describe/cuefree_share_return} and nothing in \R{describe/cuefree_share_none}.
+The approach is among all of v0's detections in \R{describe/cuefree_share_any_detection} of the recordings.
+When v0 finds the approach, its onset is \R{describe/cuefree_onset_error_median_ms}~ms late (median; 90th percentile of the absolute error \R{describe/cuefree_onset_abs_error_p90_ms}~ms).
+With yaw8 on its first detection, v0 reaches \Rci{m4/vzero_acc} (coverage \R{m4/vzero_coverage}, answered \R{m4/vzero_acc_answered}, forced choice \R{m4/vzero_acc_forced}).
+
+\textbf{Decision and rationale.}
+v0 is the baseline, and its categories (approach, part, earlier movement, return, nothing, rejected) are the contract of every detector in this appendix.
+Its main failure is an earlier movement (the arm settling after the previous trial, a fidget), not the return.
+
+\begin{figure}[htbp]
+  \centering
+  \genfig{core/S2_16_cuefree_v0}
+  \caption{Baseline cue-free detector v0 on the primary recordings, by platform. Left: what v0 finds first (approach: IoU $\ge 0.5$ with the oracle window). Middle: onset error when it finds the approach. Right: stillness before the approach in v0's own signal, which the collection app enforced; the shares are therefore upper bounds for production (Figure~\ref{fig:app:prod-v0-stress}).}
+  \label{fig:S2_16_cuefree_v0}\label{fig:app:prod-v0}
+\end{figure}
+\gentab{describe/describe_cuefree_v0}
+\FloatBarrier
+
+% -------------------------------------------------------------------------------------------------
+\subsection{The stillness stress test: recorded shares are upper bounds}\label{app:prod:stress}
+
+\textbf{Problem.}
+The collection app enforced the stillness before every approach: it waited for 400~ms of stillness, then a 400--900~ms foreperiod, then the reaction time.
+Production has no GO cue and no hold-still gate, so a user may start moving without holding still.
+Every share measured on the recordings as they are is therefore an upper bound.
+
+\textbf{Method.}
+The stress test cuts the still run before each approach to a given length: the samples right after the preceding activity are removed and the rest of the recording moves back.
+Every pipeline then runs again on the shortened recording, fitted without the held-out person.
+
+\textbf{Evidence for v0.}
+Figure~\ref{fig:app:prod-v0-stress} and Table~\ref{tab:describe_cuefree_stress} show that v0 needs its own 1~s rule.
+It finds the approach first in \R{describe/stress_recorded_share_approach} of the recordings as recorded and in \R{describe/stress_keep1000ms_share_approach} with 1~s of stillness, but in \R{describe/stress_keep750ms_share_approach} with 0.75~s and \R{describe/stress_keep0ms_share_approach} with none.
+With a random stillness, uniform between 0 and 1.5~s, it finds the approach first in \R{describe/stress_random_share_approach}.
+
+\textbf{Evidence for the full pipelines.}
+Figure~\ref{fig:app:prod-stress} and Table~\ref{tab:m4_stress} run the production pipeline, v0 and a detector whose stillness feature sees up to \R{m4/seg_still_cap_s}~s (context capped at 3~s) through the same cuts.
+The production pipeline scores \R{m4/stress_production_rec_acc} as recorded, \R{m4/stress_production_1_acc} with 1~s, \R{m4/stress_production_0p9_acc} with 0.9~s, \R{m4/stress_production_0p75_acc} with 0.75~s, \R{m4/stress_production_0p5_acc} with 0.5~s and \R{m4/stress_production_0_acc} with none.
+With no stillness it answers only \R{m4/stress_production_0_cov} of the recordings and scores the return in \R{m4/stress_production_0_ret}; v0 then answers \R{m4/stress_vzero_0_cov}, scores the return in \R{m4/stress_vzero_0_ret} and falls to \R{m4/stress_vzero_0_acc}.
+
+\textbf{Options for the stillness feature.}
+The stillness before a segment is a strong feature of the segment classifier (Appendix~\ref{app:prod:detector}).
+It can see the whole stillness (capped at 3~s) or only up to the instructed 1~s.
+Paired on the same recordings (robust detector minus the context capped at 3~s, both uncalibrated, family \emph{stress}), the difference is \Rb{m4/stresspair_robust_vs_full_rec_d}~[\Rb{m4/stresspair_robust_vs_full_rec_lo}, \Rb{m4/stresspair_robust_vs_full_rec_hi}]~points as recorded (Holm $p = \R{m4/stresspair_robust_vs_full_rec_p_holm}$), \Rb{m4/stresspair_robust_vs_full_1_d}~[\Rb{m4/stresspair_robust_vs_full_1_lo}, \Rb{m4/stresspair_robust_vs_full_1_hi}]~points with 1~s (Holm $p = \R{m4/stresspair_robust_vs_full_1_p_holm}$), \Rb{m4/stresspair_robust_vs_full_0p9_d}~[\Rb{m4/stresspair_robust_vs_full_0p9_lo}, \Rb{m4/stresspair_robust_vs_full_0p9_hi}]~points with 0.9~s (Holm $p = \R{m4/stresspair_robust_vs_full_0p9_p_holm}$) and \Rb{m4/stresspair_robust_vs_full_0_d}~[\Rb{m4/stresspair_robust_vs_full_0_lo}, \Rb{m4/stresspair_robust_vs_full_0_hi}]~points with none (Holm $p = \R{m4/stresspair_robust_vs_full_0_p_holm}$).
+The production detector against v0 at 0.9~s: \Rb{m4/stresspair_production_vs_v0_0p9_d}~[\Rb{m4/stresspair_production_vs_v0_0p9_lo}, \Rb{m4/stresspair_production_vs_v0_0p9_hi}]~points (Holm $p < 0.001$).
+
+\textbf{Decision and rationale.}
+The stillness feature is capped at the instructed 1~s (the robust feature set), and the inference page must ask for at least 1~s of stillness and check it, measured exactly as the feature is (the causal activity below the stillness threshold).
+The capped detector is better where production will operate, at the instructed 1~s; it is not better as recorded, where the long enforced stillness favours the uncapped one.
+Caveat: the advantage appears only at and just below its own cap.
+
+\begin{figure}[htbp]
+  \centering
+  \genfig{core/S2_19_cuefree_stress}
+  \caption{Stress test of v0: the stillness before each approach cut to the given length, then v0 run again (right margin: as recorded). Below its own 1~s rule, v0 can no longer separate the approach from what came before.}
+  \label{fig:S2_19_cuefree_stress}\label{fig:app:prod-v0-stress}
+\end{figure}
+\gentab{describe/describe_cuefree_stress}
+\begin{figure}[htbp]
+  \centering
+  \genfig{m4/M4_03_stress}
+  \caption{Stress test of the full pipelines. Left: half-credit accuracy (band: 95~\% CI). Right: share answered (solid) and share where the scored segment is the return (dotted). The production detector sees at most the instructed 1~s of stillness; with 1~s it scores \R{m4/stress_production_1_acc} against \R{m4/stress_uncapped_1_acc} for the context capped at 3~s. Supports capping the stillness feature at 1~s and asking for that stillness on the page.}
+  \label{fig:M4_03_stress}\label{fig:app:prod-stress}
+\end{figure}
+{\renewcommand{\arraystretch}{0.9}\gentab{m4/m4_stress}}
+\FloatBarrier
+
+% -------------------------------------------------------------------------------------------------
+\subsection{The return: a time-reversed approach}\label{app:prod:return}
+
+\textbf{Problem.}
+After the hold, the arm returns to arm's length.
+The return retraces the approach backwards, so its chiral evidence is reversed.
+
+\textbf{Evidence.}
+Figure~\ref{fig:app:prod-return-yaw} and Table~\ref{tab:describe_return_risk} compare the class-mean yaw rate of the approach and of the return in the same \R{describe/return_trials} trials with a clean return window.
+The sign rule fitted on approaches (right if and only if the first-half yaw is positive) is right on \R{describe/return_rule_acc_approach} of the approaches but on \R{describe/return_rule_acc_return} of the returns (\R{describe/return_rule_acc_return_net} on the net yaw of the return); the AUC of the first-half yaw on the return is \R{describe/return_auc_first_half}.
+A detector that scores the return therefore answers the other hand.
+
+\textbf{Decision.}
+Returns are never pooled with approaches, and the detector must reject them: the segment classifier has a return class (Appendix~\ref{app:prod:detector}).
+
+\textbf{Option: the return as evidence.}
+The return carries the hand too, with the opposite sign.
+Figure~\ref{fig:app:prod-return} tests a separate return head (the same hand model fitted on returns).
+On the stored windows of the trials with a clean return, the approach model scores \Rci{m4/ret_app_acc}, the return head \Rci{m4/ret_head_acc} and the sum of their logits \Rci{m4/ret_sum_acc}; the sum minus the approach is \Rcib{m4/d_ret_sum_vs_app}~points (Holm $p = \R{m4/d_ret_sum_vs_app_p_holm}$, family \emph{trial}).
+Cue-free, adding the return head when the segment after the chosen approach is classified as a return gives \R{m4/prod_return_acc} against \R{m4/robust_acc} (both uncalibrated, coverage unchanged; answered \R{m4/prod_return_acc_answered}, forced choice \R{m4/prod_return_acc_forced}); paired \Rcib{m4/d_return_vs_prod}~points (Holm $p = \R{m4/d_return_vs_prod_p_holm}$).
+The price is time: the return's evidence arrives a median \R{m4/return_wait_ms}~ms after the end of the approach (90th percentile \R{m4/return_wait_p90_ms}~ms).
+
+\textbf{Decision and rationale.}
+The return head is not in production yet.
+No accuracy difference is shown after adjustment, and the summed logits need their own cross-fitted calibration.
+Between two touches the return happens anyway, so in a multi-touch session it would delay only the final answer; it is a next step.
+
+\begin{figure}[htbp]
+  \centering
+  \genfig{core/S2_15_return_vs_approach}
+  \caption{Class-mean yaw rate about gravity in the approach (left) and in the return (right) of the same \R{describe/return_trials} trials, by hand (band: 95~\% CI). The return mirrors the approach in time, so a sign rule fitted on approaches answers the other hand on returns.}
+  \label{fig:S2_15_return_vs_approach}\label{fig:app:prod-return-yaw}
+\end{figure}
+\gentab{describe/describe_return_risk}
+\begin{figure}[htbp]
+  \centering
+  \genfig{m4/M4_10_return}
+  \caption{The return as evidence (half-credit accuracy, 95~\% CI). Top three: stored windows of the \R{m4/ret_app_n} trials with a clean return. Bottom two: the cue-free production detector (uncalibrated) without and with the return head, on all \R{m4/n_recordings} recordings.}
+  \label{fig:M4_10_return}\label{fig:app:prod-return}
+\end{figure}
+\FloatBarrier
+
+% -------------------------------------------------------------------------------------------------
+\subsection{The learned detector: candidate segments and the segment classifier}\label{app:prod:detector}
+
+\textbf{Candidate segments.}
+A causal activity signal follows $|\vomega|$ through a one-pass second-order \R{m4/seg_smooth_hz}~Hz Butterworth low-pass; every bound is moved back by its group delay of \R{m4/causal_delay_ms}~ms.
+Hysteresis cuts the stream into bouts: a bout becomes a movement once the activity exceeds \R{m4/seg_hi_dps}~deg/s for \R{m4/seg_sustain_ms}~ms, and it ends when the activity stays below a lower threshold for a sustain time.
+Unlike v0, no stillness is required before a bout.
+Three settings of the lower threshold and the sustain time are compared inside each fold; 15~deg/s with 250~ms was chosen in \R{m4/prod_seg_cfg_mode_folds} of \R{m4/prod_folds} folds.
+
+\textbf{The segment classifier.}
+A multinomial logistic regression (C = 1) labels every bout as an approach, a return or another movement, from hand-agnostic features scaled by their median and interquartile range and winsorised.
+Its labels come from the app's events of the training persons.
+Every feature is mirror-even (tested), so the segment classifier carries no hand information.
+The candidate with the highest P(approach) is scored; it is rejected (an abstention) when P(approach) is below \R{m4/det_threshold}.
+A segment is confirmed \R{m4/lookahead_s}~s after its end, when its window is complete.
+
+\textbf{Evidence: what separates the approach from the return.}
+Figure~\ref{fig:app:prod-segfeat} shows the four strongest features.
+The displacement along the screen normal separates approaches from returns with an AUC of \R{m4/auc_disp_z0_vs_return} (\R{m4/auc_disp_z0_vs_other} against other movements).
+The change of the up vector's screen-normal component has an AUC of \R{m4/auc_d_up_z_vs_return}, the reverse ordering.
+The vertical displacement reaches \R{m4/auc_disp_vert_vs_return}, and the stillness before the segment, capped at 1~s, reaches \R{m4/auc_still_before_inst_vs_other} against other movements (\R{m4/auc_still_before_inst_vs_return} against returns).
+The screen-normal features are in the device frame, so they change sign when the screen faces away (Appendix~\ref{app:prod:grip}).
+
+\textbf{Options: five feature sets.}
+\emph{physics} (the movement features); \emph{full} (physics plus the stillness before, capped at 3~s, and recording context); \emph{nested} (physics or full chosen inside each fold: full in \R{m4/nested_features_chosen_mode_folds} folds); \emph{robust} (physics plus the stillness before, capped at the instructed 1~s, and the stillness after); and \emph{grip} (robust with the four screen-normal quantities signed by the side of the phone that faces up over the segment).
+Table~\ref{tab:m4_models} gives physics \R{m4/physics_acc}, full \R{m4/full_acc}, robust \R{m4/robust_acc} and grip \R{m4/grip_acc}.
+Paired (family \emph{trial}): robust minus nested \Rcib{m4/d_robust_vs_nested}~points (Holm $p = \R{m4/d_robust_vs_nested_p_holm}$); grip minus robust \Rcib{m4/d_grip_vs_robust}~points (Holm $p = \R{m4/d_grip_vs_robust_p_holm}$).
+The grip set is invariant to the screen-away grip by construction, but the side that faces up is a poor grip estimate on real recordings: its sign is negative for \R{m4/grip_sign_neg_approach} of the approach and \R{m4/grip_sign_neg_return} of the return segments of screen-toward recordings.
+
+\textbf{Decision and rationale.}
+The robust set is the production detector, an exploratory choice among \R{m4/n_configs_detector} feature sets.
+It is the set that does not reward the enforced stillness of the protocol (Appendix~\ref{app:prod:stress}); the screen-away grip is handled by the instructions and the page's grip check instead of the grip set.
+
+\textbf{What the detector scores.}
+Table~\ref{tab:m4_detection} scores each detector's chosen segment against the stored events.
+The production detector scores the approach in \R{m4/prod_share_approach} of the recordings, an earlier movement in \R{m4/prod_share_earlier_movement} and the return in \R{m4/prod_share_return}; it rejects \R{m4/prod_share_rejected} instead of scoring a wrong segment.
+v0 scores the approach in \R{describe/cuefree_share_approach} and an earlier movement in \R{describe/cuefree_share_earlier_movement}.
+When the approach is found, the median bound errors (detected minus stored) are \R{m4/prod_onset_err_ms}~ms at the onset and \R{m4/prod_end_err_ms}~ms at the end.
+
+\begin{figure}[htbp]
+  \centering
+  \genfig{m4/M4_11_segment_features}
+  \caption{Hand-agnostic features of the candidate segments of the recordings, by their label from the app's events (densities; AUC against return and against other movements in the panel titles). They separate the approach from the return without any hand information and are the basis of the segment classifier.}
+  \label{fig:M4_11_segment_features}\label{fig:app:prod-segfeat}
+\end{figure}
+\gentab{m4/m4_detection}
+\FloatBarrier
+
+% -------------------------------------------------------------------------------------------------
+\subsection{Pipelines, references and data-treatment ablations}\label{app:prod:pipelines}
+
+\textbf{The ladder.}
+Table~\ref{tab:m4_models} lists every cue-free pipeline and its references: the same hand model on the oracle window (no detection), v0, the five feature sets, the calibrators, the return head and the ablations.
+Table~\ref{tab:app:prod-scoring} adds, for the main rungs, what an abstention hides: coverage, accuracy on the answered recordings and forced-choice accuracy, on the primary recordings and on natural use.
+
+\begin{table}[htbp]
+  \centering\small
+  \caption{Scoring of the main cue-free pipelines (yaw8 hand model; LOSO, \R{m4/n_recordings} recordings of \R{m4/n_persons} persons). Accuracy: an abstention scores half credit. Answered: coverage. Forced: the best candidate always scored. Natural use: right-hand recall on the \R{m4/prod_nat_n} free-choice trials (all right-hand so far; a constant right answer would score 100~\%), as answered of \R{m4/prod_nat_n}, recall on the answered, forced choice and half credit.}
+  \label{tab:app:prod-scoring}
+  \fitwidth{%
+  \begin{tabular}{lrlrrrrrrr}
+    \toprule
+    & \multicolumn{5}{c}{Primary recordings} & \multicolumn{4}{c}{Natural use (right-hand recall)} \\
+    \cmidrule(lr){2-6}\cmidrule(lr){7-10}
+    Pipeline & Accuracy & 95~\% CI & Answered & Acc.\ answered & Forced & Answered & Answered & Forced & Half credit \\
+    \midrule
+    oracle window & \R{m4/oracle_acc} & [\Rb{m4/oracle_acc_lo}, \Rb{m4/oracle_acc_hi}] & \R{m4/oracle_coverage} & \R{m4/oracle_acc_answered} & \R{m4/oracle_acc_forced} & \R{m4/oracle_nat_answered} & \R{m4/oracle_nat_acc_answered} & \R{m4/oracle_nat_acc_forced} & \R{m4/oracle_nat_acc} \\
+    v0 (first movement) & \R{m4/vzero_acc} & [\Rb{m4/vzero_acc_lo}, \Rb{m4/vzero_acc_hi}] & \R{m4/vzero_coverage} & \R{m4/vzero_acc_answered} & \R{m4/vzero_acc_forced} & \R{m4/vzero_nat_answered} & \R{m4/vzero_nat_acc_answered} & \R{m4/vzero_nat_acc_forced} & \R{m4/vzero_nat_acc} \\
+    learned, physics & \R{m4/physics_acc} & [\Rb{m4/physics_acc_lo}, \Rb{m4/physics_acc_hi}] & \R{m4/physics_coverage} & \R{m4/physics_acc_answered} & \R{m4/physics_acc_forced} & \R{m4/physics_nat_answered} & \R{m4/physics_nat_acc_answered} & \R{m4/physics_nat_acc_forced} & \R{m4/physics_nat_acc} \\
+    learned, full & \R{m4/full_acc} & [\Rb{m4/full_acc_lo}, \Rb{m4/full_acc_hi}] & \R{m4/full_coverage} & \R{m4/full_acc_answered} & \R{m4/full_acc_forced} & \R{m4/full_nat_answered} & \R{m4/full_nat_acc_answered} & \R{m4/full_nat_acc_forced} & \R{m4/full_nat_acc} \\
+    learned, robust (uncal.) & \R{m4/robust_acc} & [\Rb{m4/robust_acc_lo}, \Rb{m4/robust_acc_hi}] & \R{m4/robust_coverage} & \R{m4/robust_acc_answered} & \R{m4/robust_acc_forced} & \R{m4/robust_nat_answered} & \R{m4/robust_nat_acc_answered} & \R{m4/robust_nat_acc_forced} & \R{m4/robust_nat_acc} \\
+    learned, grip & \R{m4/grip_acc} & [\Rb{m4/grip_acc_lo}, \Rb{m4/grip_acc_hi}] & \R{m4/grip_coverage} & \R{m4/grip_acc_answered} & \R{m4/grip_acc_forced} & \R{m4/grip_nat_answered} & \R{m4/grip_nat_acc_answered} & \R{m4/grip_nat_acc_forced} & \R{m4/grip_nat_acc} \\
+    production (calibrated) & \R{m4/prod_acc} & [\Rb{m4/prod_acc_lo}, \Rb{m4/prod_acc_hi}] & \R{m4/prod_coverage} & \R{m4/prod_acc_answered} & \R{m4/prod_acc_forced} & \R{m4/prod_nat_answered} & \R{m4/prod_nat_acc_answered} & \R{m4/prod_nat_acc_forced} & \R{m4/prod_nat_acc} \\
+    \bottomrule
+  \end{tabular}}
+\end{table}
+
+\textbf{Detection loss.}
+Production minus the oracle window is \Rcib{m4/d_prod_vs_oracle}~points (Holm $p = \R{m4/d_prod_vs_oracle_p_holm}$, family \emph{trial}; Table~\ref{tab:m4_paired}): this is the price of finding the movement.
+Production minus v0 is \Rcib{m4/d_prod_vs_v0}~points (Holm $p = \R{m4/d_prod_vs_v0_p_holm}$: no accuracy difference shown) and \Rcib{m4/d_prod_vs_v0_ll} of log loss (Holm $p = \R{m4/d_prod_vs_v0_ll_p_holm}$).
+The learned detector is kept because its probabilities are better and because v0 fails when the stillness is short (Appendix~\ref{app:prod:stress}).
+
+\textbf{Training windows of the hand model.}
+Options: the oracle windows or the detector's windows.
+Detector minus oracle windows: \Rcib{m4/d_detwin_vs_oraclewin}~points (Holm $p = \R{m4/d_detwin_vs_oraclewin_p_holm}$).
+Decision: oracle windows, the cached training arrays, so that any window model plugs in unchanged.
+
+\textbf{Activity filter and stream low-pass.}
+The activity signal runs causal (zero-phase minus causal: \Rcib{m4/d_zp_activity_vs_prod}~points, Holm $p = \R{m4/d_zp_activity_vs_prod_p_holm}$), because it must run online.
+The stream itself is low-passed zero-phase over the buffer received so far, the code path of the training windows; a fully causal low-pass minus this is \Rcib{m4/d_causal_lowpass_vs_prod}~points (Holm $p = \R{m4/d_causal_lowpass_vs_prod_p_holm}$).
+A replay re-standardised each raw record up to each decision time, as the page would: \R{m4/replay_matched} of the segments are found again, decisions change in \R{m4/replay_changed} of the recordings (statuses in \R{m4/replay_status_changed}), and the largest change of \pright{} is \R{m4/replay_max_dp}.
+
+\textbf{Hand model.}
+The second mirror-augmented hand model, chiral16, minus yaw8 is \Rcib{m4/d_chiral16_vs_yaw8}~points cue-free (Holm $p = \R{m4/d_chiral16_vs_yaw8_p_holm}$) and \Rcib{m4/d_oracle_chiral16_vs_yaw8}~points on the oracle window (Holm $p = \R{m4/d_oracle_chiral16_vs_yaw8_p_holm}$).
+Decision: yaw8 stays the pre-specified default; the hand model is pluggable.
+
+\textbf{Ablations.}
+Table~\ref{tab:m4_ablations} varies one data treatment at a time against the uncalibrated production detector: feature scaling (z-score \Rcib{m4/d_abl_scale_z_vs_base}, none \Rcib{m4/d_abl_scale_none_vs_base}~points against median/IQR), the segment classifier's C nested in the folds (\Rcib{m4/d_abl_segc_nested_vs_base}~points) and the look-ahead (0.3~s \Rcib{m4/d_abl_look0p3_vs_base}, 0.8~s \Rcib{m4/d_abl_look0p8_vs_base}~points against 0.5~s).
+None shows an accuracy difference after Holm's adjustment (family \emph{trial}).
+The pre-specified values stay: median/IQR scaling, C = 1, and a 0.5~s look-ahead, which adds directly to the latency.
+
+\textbf{P(approach) threshold.}
+Re-thresholding the saved predictions on the outer folds (exploratory, outside the Holm family) trades coverage for accuracy: 0.30 gives \R{m4/thr_0p30_acc} (answers \R{m4/thr_0p30_coverage}; paired \Rcib{m4/thr_0p30_d}~points), 0.40 \R{m4/thr_0p40_acc} (\R{m4/thr_0p40_coverage}), 0.50 \R{m4/thr_0p50_acc} (\R{m4/thr_0p50_coverage}), 0.60 \R{m4/thr_0p60_acc} (\R{m4/thr_0p60_coverage}) and 0.70 \R{m4/thr_0p70_acc} (\R{m4/thr_0p70_coverage}).
+The pre-specified 0.5 stays; a threshold chosen inside the folds is a candidate for the next version.
+
+\gentab{m4/m4_models}
+\gentab{m4/m4_paired}
+\gentab{m4/m4_ablations}
+\FloatBarrier
+
+% -------------------------------------------------------------------------------------------------
+\subsection{Calibration of one touch}\label{app:prod:calibration}
+
+\textbf{Problem and detection.}
+The product is the percentage shown to the user, so it must be calibrated.
+Uncalibrated, the pipeline's expected calibration error is \R{m4/cal_none_ece}, above the range a perfectly calibrated \pright{} with the same values would show (null band \R{m4/cal_none_ece_null_lo}--\R{m4/cal_none_ece_null_hi}, $p = \R{m4/cal_none_ece_p_null}$); its calibration slope is \Rci{m4/cal_none_slope} and its intercept \Rci{m4/cal_none_intercept} (Figure~\ref{fig:app:prod-cal}, left).
+
+\textbf{Options.}
+Every calibrator is fitted on cross-fitted predictions of the training persons (person-grouped inner folds) and applied to the held-out person: none, temperature scaling \cite{guo2017calibration}, Platt scaling \cite{platt1999probabilistic}, isotonic regression, beta calibration and a symmetrised isotonic regression.
+The hand model is mirror-augmented, so a mirror-image recording gets exactly $1 - \pright$; a calibrator keeps this only if it is antisymmetric, $P(-z) = 1 - P(z)$ for a logit $z$.
+Platt, plain isotonic and beta are not: their largest deviation $|P(z) + P(-z) - 1|$ is \R{m4/cal_platt_mirror_dev_max}, \R{m4/cal_isotonic_mirror_dev_max} and \R{m4/cal_beta_mirror_dev_max}.
+
+\textbf{Evidence.}
+Table~\ref{tab:m4_calibration} and Figure~\ref{fig:app:prod-cal} (right) give each calibrator's paired log-loss difference to none (family \emph{calibrators}, Holm).
+The log-loss difference to none is \Rcib{m4/cal_isotonic_d_ll} for plain isotonic (Holm $p = \R{m4/cal_isotonic_d_ll_p_holm}$) and \Rcib{m4/cal_isotonic_sym_d_ll} for the symmetrised isotonic (Holm $p = \R{m4/cal_isotonic_sym_d_ll_p_holm}$); temperature and Platt change little.
+No calibrator shows a log-loss difference after adjustment; the choice rests on the calibration diagnostics below.
+
+\textbf{Decision and rationale.}
+The calibrator is chosen inside each fold among the antisymmetric ones (none, temperature, symmetrised isotonic) by person-grouped cross-validation of the cross-fitted logits; the symmetrised isotonic won in \R{m4/prod_calibrator_isotonic_sym_folds} of \R{m4/prod_folds} folds.
+The production pipeline's ECE is \R{m4/cal_nested_ece} (null band \R{m4/cal_nested_ece_null_lo}--\R{m4/cal_nested_ece_null_hi}), its slope \Rci{m4/cal_nested_slope} and its intercept \Rci{m4/cal_nested_intercept}: consistent with calibration.
+Against the uncalibrated pipeline its log loss changes by \Rcib{m4/cal_nested_d_ll} (Holm $p = \R{m4/cal_nested_d_ll_p_holm}$), its Brier score \cite{brier1950verification} by \Rcib{m4/cal_nested_d_brier} and its accuracy by \Rcib{m4/cal_nested_d_acc}~points.
+The flat centre of the symmetrised isotonic map returns exactly 0.5 for \R{m4/prod_n_answered_tie} of the \R{m4/prod_n_answered} answered recordings: these show no hand and score half credit.
+Per platform, Android has ECE \R{m4/cal_nested_android_ece} (null band \R{m4/cal_nested_android_ece_null_lo}--\R{m4/cal_nested_android_ece_null_hi}) and slope \Rci{m4/cal_nested_android_slope}; iOS has ECE \R{m4/cal_nested_ios_ece} (null band \R{m4/cal_nested_ios_ece_null_lo}--\R{m4/cal_nested_ios_ece_null_hi}) and slope \Rci{m4/cal_nested_ios_slope} (per-platform intercepts were not saved).
+
+\begin{figure}[htbp]
+  \centering
+  \genfig{m4/M4_05_calibration}
+  \caption{Calibration of one touch (10 equal-mass bins; band: 95~\% CI of the observed share; text: ECE with its perfect-calibration null band, slope with its CI). Left: uncalibrated, not consistent with calibration. Middle: production, the calibrator chosen inside each fold (symmetrised isotonic in \R{m4/prod_calibrator_isotonic_sym_folds} of \R{m4/prod_folds} folds), consistent. Right: paired log-loss difference of each calibrator to none (blue: antisymmetric).}
+  \label{fig:M4_05_calibration}\label{fig:app:prod-cal}
+\end{figure}
+\gentab{m4/m4_calibration}
+\FloatBarrier
+
+% -------------------------------------------------------------------------------------------------
+\subsection{The single-touch abstain rule and the decision latency}\label{app:prod:abstain}
+
+\textbf{Abstain rule.}
+A single-touch page can ask the user to repeat instead of answering.
+Two rules were compared (Figure~\ref{fig:app:prod-coverage}): answer only when $\max(\pright, 1-\pright) \ge c$, or only when the best candidate's P(approach) reaches a threshold.
+The confidence rule buys accuracy; the P(approach) rule barely does.
+With $c = \R{m4/abstain_tau}$ the pipeline answers \R{m4/abstain_coverage} of the recordings and is right on \R{m4/abstain_acc} of those; its forced-choice accuracy stays \R{m4/prod_acc_forced}.
+The same rule on the oracle windows lies above the cue-free curve at every coverage: part of the gap is detection.
+The threshold is a product choice read off this curve, not tuned inside the folds; multi-touch sessions use the stopping rule instead (Appendix~\ref{app:prod:stopping}).
+
+\textbf{Decision latency.}
+The end of an approach is decided at the first stillness of the sustain time at the face (the deceleration to rest; the contact transient is not needed), plus the \R{m4/lookahead_s}~s look-ahead.
+Figure~\ref{fig:app:prod-latency} shows the result: the decision comes a median \R{m4/lat_end_ms}~ms after the stored end of the approach (90th percentile \R{m4/lat_end_p90_ms}~ms) and \R{m4/lat_touch_ms}~ms after the first touch of the screen on the nose (90th percentile \R{m4/lat_touch_p90_ms}~ms).
+A shorter look-ahead would cut the latency without an accuracy difference shown (Appendix~\ref{app:prod:pipelines}).
+
+\begin{figure}[htbp]
+  \centering
+  \begin{subfigure}[t]{0.49\linewidth}
+    \centering
+    \genfig{m4/M4_07_coverage}
+    \caption{Accuracy on the answered recordings against coverage, for a confidence threshold (blue), a P(approach) threshold (orange) and the confidence threshold on the oracle windows (grey).}
+    \label{fig:M4_07_coverage}\label{fig:app:prod-coverage}
+  \end{subfigure}\hfill
+  \begin{subfigure}[t]{0.49\linewidth}
+    \centering
+    \genfig{m4/M4_09_latency}
+    \caption{Decision time of the online pipeline after the stored end of the approach (blue) and after the first touch (yellow); recordings whose approach was found; values beyond the axis drawn at its edge.}
+    \label{fig:M4_09_latency}\label{fig:app:prod-latency}
+  \end{subfigure}
+  \caption{The single-touch abstain rule (a) and the latency of the end-of-approach decision (b), production pipeline.}
+  \label{fig:app:prod-coverage-latency}
+\end{figure}
+\FloatBarrier
+
+% -------------------------------------------------------------------------------------------------
+\subsection{Several touches: synthetic sessions and the k curve}\label{app:prod:sessions}
+
+\textbf{Method.}
+The recordings contain one approach each, so multi-touch sessions are simulated.
+Each synthetic session concatenates \R{m4/sess_recordings} recordings of one person and hand, with the stillness at every junction cut to a given length; there are \R{m4/sess_n} sessions per setting.
+Each fold's fitted pipeline runs over the held-out person's sessions online.
+Every bout that the segment classifier accepts as an approach is an attempt, and the attempts' calibrated logits $z_i$ are combined:
+\begin{equation}
+  P_k = \sigma\!\left(s_k\,\bar z_k\right) = \sigma\!\left(\frac{1}{\tauk}\sum_{i=1}^{k} z_i\right), \qquad \tauk = \frac{k}{s_k},
+  \label{eq:prod-aggregate}
+\end{equation}
+where $\sigma$ is the logistic function and $\bar z_k$ the mean of the first $k$ logits.
+
+\textbf{Evidence: the k curve.}
+Figure~\ref{fig:app:prod-attempts} (left) and Table~\ref{tab:m4_sessions_k} give the half-credit accuracy of the sign of the mean logit of up to $k$ accepted attempts.
+With 1~s at each junction it is \Rci{m4/sess_1_k1_acc} for $k = 1$, \R{m4/sess_1_k2_acc} for $k = 2$, \Rci{m4/sess_1_k3_acc} for $k = 3$ and \Rci{m4/sess_1_k5_acc} for $k = 5$; \R{m4/sess_1_k5_avail} of the sessions reach 5 accepted attempts.
+Keeping only the attempts that are true approaches (the attainable curve) gives \R{m4/sesstrue_1_k1_acc}, \Rci{m4/sesstrue_1_k3_acc} and \R{m4/sesstrue_1_k5_acc} for $k = 1$, 3 and 5.
+With no stillness at the junctions the curve stays near chance (\R{m4/sess_0_k3_acc} at $k = 3$); with 0.5~s it reaches \R{m4/sess_0p5_k3_acc} and with 2~s \R{m4/sess_2_k3_acc}.
+
+\textbf{Cause: false attempts.}
+Only \R{m4/sessdet_precision} of the \R{m4/sessdet_attempts} accepted attempts are (part of) an approach.
+The others are the arm settling before the approach (\R{m4/kind_other_before_share} of the attempts, \R{m4/sessdet_false_other_before}), returns (\R{m4/kind_return_share}, \R{m4/sessdet_false_return}) and later movements (\R{m4/kind_other_after_share}, \R{m4/sessdet_false_other_after}).
+One attempt is right \R{m4/kind_approach_acc} of the time when it is the approach, \R{m4/kind_approach_partial_acc} when it is part of it, \R{m4/kind_other_before_acc} when it is the arm settling, \R{m4/kind_return_acc} when it is a return and \R{m4/kind_other_after_acc} for later movements.
+The false attempts cancel the gain of more touches; rejecting them is the first next step.
+
+\textbf{Option: the attempt rule.}
+The pairing rule treats the bout after an accepted approach as its return and skips it; the plain rule (no pairing) takes every accepted bout.
+Paired on the same sessions with the stopping rule (family \emph{sessions}), no pairing minus pairing is \Rcib{m4/sp_rule_no_pairing_vs_pairing_scale_sessions_d_acc}~points (Holm $p = \R{m4/sp_rule_no_pairing_vs_pairing_scale_sessions_p_holm}$, \R{m4/sp_rule_no_pairing_vs_pairing_scale_sessions_discordant} discordant sessions).
+No pairing recalls \R{m4/sessdet_recall} of the true approaches against \R{m4/sessdetalt_recall} with pairing, at the same precision (\R{m4/sessdet_precision} and \R{m4/sessdetalt_precision}).
+Decision: no pairing, because the pairing rule discards a true approach whenever an arm-settling movement before it was accepted.
+For $k = 3$ the pairing rule scores \Rci{m4/sesspair_1_k3_acc}; the attempt rule is one of the exploratory session choices (Appendix~\ref{app:prod:stopping}).
+
+\textbf{Not a cue-free number.}
+The harness's $k = 3$ of the same pipeline, \Rci{m4/prod_acc_k3_indep}, averages three independent recordings of one person and hand, each with its best candidate.
+It is not a cue-free session and is not comparable with the oracle-window $k = 3$ of other lanes.
+
+\begin{figure}[htbp]
+  \centering
+  \genfig{m4/M4_04_attempts}
+  \caption{Synthetic multi-attempt sessions (\R{m4/sess_n} per stillness setting). Left: half-credit accuracy of up to $k$ accepted attempts, by junction stillness (band: 95~\% CI at 1~s; labels: sessions with at least $k$ attempts); dark dashed: true approaches only; grey dotted: the pairing rule. Right: the stopping rule at 1~s, one point per $p_{\mathrm{stop}}$, for three aggregations. The gap between the 1~s curve and the true-approach curve is the cost of false attempts.}
+  \label{fig:M4_04_attempts}\label{fig:app:prod-attempts}
+\end{figure}
+\gentab{m4/m4_sessions_k}
+\FloatBarrier
+
+% -------------------------------------------------------------------------------------------------
+\subsection{The stopping rule and the calibration of several touches}\label{app:prod:stopping}
+
+\textbf{The rule.}
+After each accepted attempt, $P_k$ of Equation~\eqref{eq:prod-aggregate} is updated; the pipeline stops when $P_k$ leaves $[1 - p_{\mathrm{stop}}, p_{\mathrm{stop}}]$ or after \R{m4/k_max} attempts.
+$p_{\mathrm{stop}} = \R{m4/p_stop}$ is a product choice fixed before the sessions were evaluated.
+
+\textbf{Problem: the scale of several touches.}
+Accepted attempts are not independent evidence: some are not approaches, and the attempts of one session share the person's bias.
+Three aggregations were compared (Figure~\ref{fig:app:prod-k3cal}, Table~\ref{tab:m4_stop_calibration}): the mean logit ($s_k = 1$, nothing fitted); $s_k$ fitted on random recordings of the training persons (median $s_3 = \R{m4/scale_recordings_s3}$), which assumes neither problem; and $s_k = s_1 k^b$ fitted on cross-fitted synthetic sessions of the training persons (median $b = \R{m4/scale_sessions_b}$, $s_3 = \R{m4/scale_sessions_s3}$).
+The sum of the logits (as if independent) is shown for $k = 3$ only.
+
+\textbf{Evidence at the stop} (1~s junctions, $p_{\mathrm{stop}} = 0.90$).
+Fitted on recordings: accuracy \R{m4/stopcal_scale_recordings_accuracy_half} with \R{m4/stopcal_scale_recordings_attempts} attempts, ECE \R{m4/stopcal_scale_recordings_ece} (null band \R{m4/stopcal_scale_recordings_ece_null_lo}--\R{m4/stopcal_scale_recordings_ece_null_hi}), slope \Rci{m4/stopcal_scale_recordings_slope}, intercept \R{m4/stopcal_scale_recordings_intercept}: not consistent with calibration.
+Fitted on sessions: accuracy \R{m4/stopcal_scale_sessions_accuracy_half} with \R{m4/stopcal_scale_sessions_attempts} attempts, ECE \R{m4/stopcal_scale_sessions_ece} (null band \R{m4/stopcal_scale_sessions_ece_null_lo}--\R{m4/stopcal_scale_sessions_ece_null_hi}, at its upper edge), slope \Rci{m4/stopcal_scale_sessions_slope}, intercept \R{m4/stopcal_scale_sessions_intercept}: consistent with calibration.
+Mean logit: accuracy \R{m4/stopcal_mean_accuracy_half} with \R{m4/stopcal_mean_attempts} attempts, ECE \R{m4/stopcal_mean_ece} (null band \R{m4/stopcal_mean_ece_null_lo}--\R{m4/stopcal_mean_ece_null_hi}), slope \Rci{m4/stopcal_mean_slope}, intercept \R{m4/stopcal_mean_intercept}: not consistent.
+The intercepts' CIs were not saved.
+Paired on the same sessions (family \emph{sessions}), recording-fitted minus session-fitted is \Rcib{m4/sp_agg_scale_recordings_vs_scale_sessions_d_acc}~points of accuracy and \Rcib{m4/sp_agg_scale_recordings_vs_scale_sessions_d_ll} of log loss (Holm $p = \R{m4/sp_agg_scale_recordings_vs_scale_sessions_ll_p_holm}$); session-fitted minus mean logit is \Rcib{m4/sp_agg_scale_sessions_vs_mean_d_acc}~points and \Rcib{m4/sp_agg_scale_sessions_vs_mean_d_ll} of log loss (Holm $p = \R{m4/sp_agg_scale_sessions_vs_mean_ll_p_holm}$).
+No paired difference is shown.
+
+\textbf{Decision and rationale.}
+A declared rule picks the aggregation: among those consistent with calibration, the one with the fewest fitted parameters.
+It picks $s_k$ fitted on sessions.
+This choice is post hoc and exploratory: the session-fitted scale was added after the held-out sessions had shown the problem, and \R{m4/n_configs_sessions} configurations were compared (attempt rule $\times$ aggregation).
+
+\textbf{Result.}
+With 1~s junctions the stopping rule reaches \Rci{m4/stop_1_acc} with \R{m4/stop_1_attempts} accepted attempts and \R{m4/stop_1_touches} true touches by the decision on average; AUC \R{m4/stopcal_scale_sessions_roc_auc}, log loss \R{m4/stopcal_scale_sessions_log_loss}.
+Every session answers (\R{m4/stop_1_share_no_attempt} without an attempt); \R{m4/stop_1_conf_share} stop on the threshold and are right \Rci{m4/stopcal_scale_sessions_conf_acc} of the time while claiming \R{m4/stopcal_scale_sessions_conf_claimed} on average; the other \R{m4/stop_1_share_k_max} stop at \R{m4/k_max} attempts.
+With 0.5~s junctions it falls to \Rci{m4/stop_0p5_acc} and with none to \Rci{m4/stop_0_acc}.
+Per platform: Android \R{m4/stopcal_android_acc} (ECE \R{m4/stopcal_android_ece}, null band \R{m4/stopcal_android_ece_null_lo}--\R{m4/stopcal_android_ece_null_hi}, slope \R{m4/stopcal_android_slope}; \R{m4/stopcal_android_n} sessions of \R{m4/stopcal_android_persons} persons), iOS \R{m4/stopcal_ios_acc} (ECE \R{m4/stopcal_ios_ece}, null band \R{m4/stopcal_ios_ece_null_lo}--\R{m4/stopcal_ios_ece_null_hi}, slope \R{m4/stopcal_ios_slope}; \R{m4/stopcal_ios_n} sessions of \R{m4/stopcal_ios_persons} persons); the CIs of these slopes and the intercepts were not saved, so these are descriptive.
+
+\textbf{Exploratory readings of the same sessions.}
+Table~\ref{tab:m4_stopping} sets touches against certainty: $p_{\mathrm{stop}} = 0.75$ gives \R{m4/pstop_0p75_acc} with \R{m4/pstop_0p75_attempts} attempts, 0.85 gives \R{m4/pstop_0p85_acc} with \R{m4/pstop_0p85_attempts}, 0.95 gives \R{m4/pstop_0p95_acc} with \R{m4/pstop_0p95_attempts}.
+An abstain rule after \R{m4/k_max} attempts (answer only when $\max(P, 1-P) \ge p_{\mathrm{answer}}$) answers \R{m4/answer_0p60_coverage} of the sessions with \R{m4/answer_0p60_acc} right at $p_{\mathrm{answer}} = 0.6$, \R{m4/answer_0p70_coverage} with \R{m4/answer_0p70_acc} at 0.7 and \R{m4/answer_0p80_coverage} with \R{m4/answer_0p80_acc} at 0.8 (accuracy on the answered sessions).
+
+\begin{figure}[htbp]
+  \centering
+  \genfig{m4/M4_06_k3_calibration}
+  \caption{Calibration of several touches on the synthetic sessions (1~s junctions, production attempt rule; equal-mass bins, 95~\% bands). Top: the first three accepted attempts under four aggregations. Bottom: the answer of the stopping rule ($p_{\mathrm{stop}} = 0.90$), and its ECE against the perfect-calibration null band (right; * production). Only $s_k$ fitted on sessions is consistent with calibration at the stop, at the edge of its band.}
+  \label{fig:M4_06_k3_calibration}\label{fig:app:prod-k3cal}
+\end{figure}
+\gentab{m4/m4_stop_calibration}
+\gentab{m4/m4_stopping}
+\FloatBarrier
+
+% -------------------------------------------------------------------------------------------------
+\subsection{Screen away and the rest-pose grip check}\label{app:prod:grip}
+
+\textbf{Problem and detection.}
+Every held-out recording was also scored as its screen-away twin: the phone turned 180 degrees about its long axis, so the device $x$ and $z$ axes change sign.
+The gravity-frame channels and the yaw8 input do not change, but the strongest segment features are device-frame quantities along the screen normal (Appendix~\ref{app:prod:detector}).
+Screen away, the production pipeline falls to \Rci{m4/stressflip_production_rec_acc}; it scores the return in \R{m4/stressflip_production_rec_ret} of the twins, and its answers are right \R{m4/stressflip_production_rec_acc_answered} of the time (Figure~\ref{fig:app:prod-grip}).
+A confident wrong percentage is the worst outcome for the product.
+
+\textbf{Options.}
+(1) A check of the chosen segment's own start pose; (2) the grip-normalised feature set, invariant by construction; (3) a model-free check of the rest pose on the inference page: while the phone rests at arm's length before the first movement, the screen-normal component of the up vector must be at least \R{m4/grip_gate_upz}; otherwise the page asks to turn the screen towards the face and does not answer (scored as an abstention).
+
+\textbf{Evidence.}
+(1) The segment check stopped \R{m4/stressflip_production_rec_gate_seg} of the twins and left their accuracy at \R{m4/stressflip_production_rec_acc_gated_seg}; the answers it let through were right \R{m4/stressflip_production_rec_acc_answered_gated_seg} of the time.
+When the detector takes the return for the approach, the chosen segment starts at the nose, so its start pose says nothing about the grip.
+(2) The grip set scores \R{m4/stressflip_grip_uncal_rec_acc} screen away and \R{m4/grip_acc} as recorded, but grip minus robust on the recordings is \Rcib{m4/d_grip_vs_robust}~points (Holm $p = \R{m4/d_grip_vs_robust_p_holm}$, family \emph{trial}).
+(3) The rest-pose check stops \R{m4/stressflip_production_rec_gate} of the twins.
+The share answered wrongly falls from \R{m4/gripwrongflip_rec_without} to \R{m4/gripwrongflip_rec_with} (\Rb{m4/gripwrongflip_rec_d}~[\Rb{m4/gripwrongflip_rec_lo}, \Rb{m4/gripwrongflip_rec_hi}]~points, Holm $p < 0.001$, family \emph{grip}); the twins' half-credit accuracy moves to \Rci{m4/stressflip_production_rec_acc_gated}, because a stopped recording scores as an abstention.
+On the screen-toward recordings it stops \R{m4/stress_production_rec_gate}: coverage goes from \R{m4/stress_production_rec_cov} to \R{m4/stress_production_rec_cov_gated}, the share answered wrongly from \R{m4/gripwrong_rec_without} to \R{m4/gripwrong_rec_with}, and the accuracy from \R{m4/stress_production_rec_acc} to \R{m4/stress_production_rec_acc_gated} (paired \Rb{m4/stresspair_grip_check_rec_d}~[\Rb{m4/stresspair_grip_check_rec_lo}, \Rb{m4/stresspair_grip_check_rec_hi}]~points, Holm $p = \R{m4/stresspair_grip_check_rec_p_holm}$, family \emph{stress}).
+
+\textbf{Decision and rationale.}
+Production keeps the robust features behind the rest-pose grip check, and the instructions ask for the screen facing the user, tilted slightly upwards.
+A user asked to turn the phone then gets the screen-toward accuracy.
+The first remedy was replaced; the grip set was rejected for its cost on real grips.
+Caveats: the check reads gravity only, so a phone held near vertical or tilted forward is also asked to adjust; it was evaluated on synthetic twins, not on real screen-away recordings; only the recorded grips (upright, top left and top right, all screen toward) were tested.
+
+\begin{figure}[htbp]
+  \centering
+  \genfig{m4/M4_12_screen_flip}
+  \caption{Every held-out recording scored as recorded (screen toward) and as its screen-away twin, by the pipeline of its fold (half-credit accuracy, 95~\% CI). Hatched: with the rest-pose grip check, which stops \R{m4/stressflip_production_rec_gate} of the twins and \R{m4/stress_production_rec_gate} of the recordings. Supports the grip check over the grip-normalised features.}
+  \label{fig:M4_12_screen_flip}\label{fig:app:prod-grip}
+\end{figure}
+\FloatBarrier
+
+% -------------------------------------------------------------------------------------------------
+\subsection{Platform and condition}\label{app:prod:breakdown}
+
+Table~\ref{tab:m4_breakdown} stratifies the production pipeline by platform and by instructed condition; the conditions stratify only and never enter a model.
+The platforms score alike: Android \Rci{m4/cal_nested_android_acc} on \R{m4/cal_nested_android_n} recordings, iOS \Rci{m4/cal_nested_ios_acc} on \R{m4/cal_nested_ios_n}.
+Fast movements score higher than natural and slow ones, and the sideways grips higher than the upright grip; the slow, tilted-touch, twist and curved variants score lowest, with wide intervals.
+The bent-start variant has fewer than 5 persons and no CI.
+These strata are descriptive: no comparison between them was tested here (lane sec tests speed and grip; Appendix~\ref{app:sec}).
+
+\gentab{m4/m4_breakdown}
+\FloatBarrier
+
+% -------------------------------------------------------------------------------------------------
+\subsection{A failure mode: natural movements are rejected}\label{app:prod:natural}
+
+\textbf{Problem.}
+The first free-choice movement of each person is the most production-like trial in the data: unpractised and chosen freely.
+The production detector rejects \R{m4/nat_rejected} of these \R{m4/nat_n} natural-use recordings (\R{m4/nat_rejection_rate}), against \R{m4/prim_rejection_rate} of the primary recordings.
+From each person's own primary rejection rate, \R{m4/nat_expected_rejections} rejections are expected (Poisson-binomial $p = \R{m4/nat_p_poisson}$; Fisher's exact test, natural against primary, $p = \R{m4/nat_p_fisher}$; post hoc tests, unadjusted).
+
+\textbf{What the pipeline achieves on natural use.}
+It answers \R{m4/prod_nat_answered} of \R{m4/prod_nat_n} (\R{m4/prod_nat_coverage}; \R{m4/prod_nat_answered_tie} of them at exactly 0.5), with a right-hand recall of \R{m4/prod_nat_acc_answered} on the answered trials (\R{derived/m4_prod_nat_shown_acc} on the \R{derived/m4_prod_nat_n_shown} with a hand shown), \R{m4/prod_nat_acc_forced} in forced choice and \Rci{m4/prod_nat_acc} with half credit; the oracle window gives \R{m4/oracle_nat_acc}.
+All free-choice trials are right-hand so far, so this is right-hand recall: a constant right answer would score 100~\%.
+
+\textbf{Cause (post hoc).}
+A candidate segment is the stored approach in \R{m4/nat_approach_found} of the natural recordings (\R{m4/prim_approach_found} primary), and that candidate's P(approach) is below the threshold in \R{m4/nat_approach_p_below} of them (\R{m4/prim_approach_p_below} primary).
+The natural approaches move less along the screen normal: median \R{m4/natfeat_disp_z0_nat}~m against \R{m4/natfeat_disp_z0_prim}~m, with \R{m4/natfeat_disp_z0_below} of them below the primary 25th percentile; their median P(approach) is \R{m4/natfeat_p_approach_nat} against \R{m4/natfeat_p_approach_prim}.
+The grip check fires on \R{m4/nat_grip_gate} of the natural and \R{m4/prim_grip_gate} of the primary recordings, so the grip does not explain the rejections.
+
+\textbf{Consequence.}
+A first, unpractised movement is rejected as ``not an approach'' more often than a practised one.
+In production the page then asks for another touch; whether practised cue-free touches behave like the primary trials needs real cue-free streams.
+
+% -------------------------------------------------------------------------------------------------
+\subsection{Online operation, caveats and next steps}\label{app:prod:caveats}
+
+\textbf{What runs on the phone.}
+(1) Every standardised 60~Hz sample updates the causal activity.
+(2) Before the first touch, the rest-pose grip check runs.
+(3) Bouts are cut by hysteresis; a bout is a movement after \R{m4/seg_sustain_ms}~ms above \R{m4/seg_hi_dps}~deg/s.
+(4) An approach ends at the first stillness at the face and is confirmed \R{m4/lookahead_s}~s later; its window is cut by the same code as the training windows.
+(5) The segment classifier drops returns and other movements; every accepted approach adds its calibrated logit.
+(6) The stopping rule of Appendix~\ref{app:prod:stopping} decides when to answer.
+The same segmentation code runs online and offline; the replay of Appendix~\ref{app:prod:pipelines} checks it on re-standardised raw records.
+The page must also check the instructed 1~s of stillness before it accepts a touch and say ``hold still'' otherwise.
+
+\textbf{Caveats.}
+\begin{itemize}[nosep]
+  \item The production numbers use yaw8, lane m4's reference hand classifier, not the final model.
+  \item The recordings come from a protocol with a GO cue and an enforced stillness; the stress test and the synthetic sessions approximate production but are spliced from those recordings, and the session-fitted scale is learned from such sessions too.
+  \item Exploratory choices on the outer folds: the detector feature set (\R{m4/n_configs_detector} sets), the hand model, the attempt rule and the aggregation (\R{m4/n_configs_sessions} session configurations); the production result records \R{m4/n_configs_final} cue-free pipelines. The segmentation setting and the calibrator are nested.
+  \item Mild in-fold optimism, not leakage of the held-out person: the recording-fitted scale and the calibrator are fitted on the same cross-fitted logits, and the session-fitted scale uses the outer calibrator on the same training persons.
+  \item Untested: iOS sample stalls during an approach; a shorter hold at the nose (the stillness after a segment is a feature); real screen-away and landscape grips.
+  \item Session-level intervals are wide (\R{m4/sess_n} sessions of \R{m4/n_persons} persons); natural use has one right-hand trial per person.
+\end{itemize}
+
+\textbf{Next steps.}
+\begin{itemize}[nosep]
+  \item Run the final model inside the production simulation (the hand model is a plug-in) and report its cue-free and multi-touch numbers.
+  \item Reject the arm settling before an approach and returns, for example with a sequence model over the bouts (rest, approach, hold, return); the true-approach curve of Figure~\ref{fig:app:prod-attempts} is its ceiling.
+  \item Add the return head to the stopping rule, with its own cross-fitted calibration.
+  \item Augment the training streams with short stillness and screen-away grips; choose the P(approach) threshold inside the folds.
+  \item Record a rehearsal session of real cue-free streams, with several touches per person, and re-test the natural-use rejections on it.
+\end{itemize}

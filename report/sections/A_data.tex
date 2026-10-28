@@ -1,0 +1,718 @@
+% sections/A_data.tex: data collection, curation, reproducibility and notation (appendix).
+% Owner: the appendix-A writer. Static content handed over from the skeleton: fig:gesture (docs/img frames),
+% fig:system (TikZ, updated to the Stage 2 data flow), tab:sensors (browser sensors) and tab:notation.
+% Every result number is a generated key (\R...). The thresholds typed here (60 Hz, 0.25 s, 30 deg/s, 50 and
+% 100 ms, 8 s, 15 Hz, ...) are design constants of the analysis (analysis/stage2/config.py), not results.
+% Sources: analysis/stage2/README.md sections 1-5, 8, 11-12; figures S2_* (core); tables describe_*, reference_*.
+\section{Data collection, curation and reproducibility}\label{app:data}
+
+This appendix documents the data decisions behind every analysis: what the app records, how the two phone
+platforms are brought to one convention, which attempts become trials, what is flagged but kept, how the labels
+were screened, the reference floor that every model must beat, and how the report is rebuilt. Each subsection
+states the options, the evidence and the decision. Table~\ref{tab:app:data-decisions} lists the decisions at a
+glance; Table~\ref{tab:notation} gives the notation.
+
+Evaluation is always leave-one-person-out (LOSO): a model is trained on all other persons and tested on the
+held-out person, one fold per person \cite{saeb2017usecase,little2017crossvalidation}. All 95\,\% confidence
+intervals (CIs) of this report are person-cluster bootstrap intervals: 2000 resamples of the persons with
+replacement, each resampled person bringing all of their trials \cite{saravanan2020bootstrap}. Other
+abbreviations: area under the receiver operating characteristic curve (AUC), standard deviation (SD),
+standard error (SE), interquartile range (IQR), root mean square (RMS).
+
+\begin{table}[htbp]
+\centering
+\caption{The data decisions of this appendix at a glance. Each row is argued in the subsection named in the
+last column, with its figure or table.}\label{tab:app:data-decisions}
+\footnotesize
+\begin{tabularx}{\linewidth}{@{}>{\raggedright\arraybackslash}p{2.5cm}>{\raggedright\arraybackslash}X
+  >{\raggedright\arraybackslash}X>{\raggedright\arraybackslash}p{1.9cm}@{}}
+\toprule
+Decision & Options considered & Choice & Where \\
+\midrule
+Model inputs & every recorded stream; motion streams only & motion streams and segmentation bounds; no heading,
+  magnetometer or Euler angles & \ref{app:data:app} \\
+Accelerometer sign & engine; calibration; trial votes & engine sign confirmed by the trial votes & \ref{app:data:conventions} \\
+Gyroscope bias & subtract the pre-GO mean; none & none & \ref{app:data:conventions} \\
+Sampling grid & native timestamps; a finer grid; 60\,Hz & linear resampling to 60\,Hz & \ref{app:data:sampling} \\
+Sampling gaps & interpolate all; drop every attempt with a gap; a threshold & interpolate up to 100\,ms;
+  exclude a longer gap near the movement (E4d) & \ref{app:data:sampling} \\
+Value precision & round iOS to Chrome's grid; native & native on both platforms & \ref{app:data:sampling} \\
+Platforms & a model per platform; platform as a feature; one model & one model; platform is a reporting
+  stratum & \ref{app:data:sampling} \\
+Statistical unit & app code; session; person & the curated person & \ref{app:data:curation} \\
+Exclusions & gates only; exclude every gate failure; exclude segments without a valid representation &
+  E4b--E4d exclude; the gates are scored apart & \ref{app:data:curation}, \ref{app:data:flags} \\
+Partial sessions & drop; keep & keep & \ref{app:data:completion} \\
+Approach window & offline segmentation; stored online segmentation; screen contact & stored online segmentation
+  (the oracle window) & \ref{app:data:segmentation} \\
+Natural-use set & every free-choice trial; the first per person & the first per person (N1) & \ref{app:data:curation} \\
+Suspect labels & correct them; keep them & keep them; sensitivity analyses & \ref{app:data:labels} \\
+Reference floor & none; a pre-specified simple model & mirror-augmented yaw logistic regression &
+  \ref{app:data:reference} \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+% ------------------------------------------------------------------------------------------------------------
+\subsection{The app and what it records}\label{app:data:app}
+
+The collector is a web app opened from a link or a QR code in the participant's own phone browser; nothing is
+installed. On an iPhone it runs in Safari (every iOS browser uses the WebKit engine); on Android in Chrome or
+Samsung Internet (the Chromium engine). The street protocol (Table~\ref{tab:protocol}) is hands-free: spoken
+and on-screen prompts announce the hand, the grip and the speed, the app waits for the phone to be still, gives
+a GO cue, detects the movement while it happens and signals its end. Figure~\ref{fig:gesture} shows the gesture
+as the app's instructions draw it. Recruitment, compensation and a photo of a session (Figure~\ref{fig:photo}) are
+in Section~\ref{sec:data}.
+
+Every attempt is uploaded as one record as soon as it ends (Figure~\ref{fig:system}). A record holds:
+\begin{itemize}[nosep]
+  \item the motion streams of the browser's \code{devicemotion} event at about 60\,Hz, the browser maximum:
+    the linear acceleration $\va$, the specific force $\vf$ (acceleration including gravity) and the rotation
+    rate $\vomega$;
+  \item orientation streams, all best effort and metadata only: Euler angles, relative and absolute
+    (magnetometer-fused) quaternions, the magnetometer where a browser exposes it, and on iOS the compass
+    heading;
+  \item screen touches (time, position, contact size, force) and screen rotations;
+  \item the app's online segmentation and the cue times: GO, onset, end, end cue
+    (Appendix~\ref{app:data:segmentation});
+  \item the return of the arm after the end cue, with its own onset and end (data schema 1.2);
+  \item a short profile (age, sex, dominant hand, usual phone hand, optional height) and device details.
+\end{itemize}
+The app collects no camera, microphone or location data.
+
+\paragraph{Decision: what feeds the models.} The options were to use every stream or the motion streams only.
+Only the motion streams and the segmentation bounds reach a model. The heading streams (compass, absolute
+orientation, magnetometer) are excluded for two reasons. Earth's magnetic field is not mirrored with the
+movement, so a heading cannot be mirrored (Equation~\eqref{eq:mirror}), and a heading partly reveals the place
+where the phone was used. The Euler angles are excluded because they hit gimbal lock at the upright start pose,
+carry an arbitrary heading and, on Chrome, update only when an angle changes by at least $0.1^\circ$. Touches
+serve only to describe the contact (Appendix~\ref{app:data:segmentation}). The return is never pooled with
+approaches: it reverses the approach in time, and its yaw points to the other hand
+(Appendix~\ref{app:data:segmentation}; Appendix~\ref{app:prod}). The profile never enters a model:
+it lives in a person table, apart from the trial table, and only stratifies results.
+
+\begin{figure}[htbp]
+\centering
+\begin{subfigure}[t]{0.32\linewidth}\centering
+  \repoimage{gesture-a}{../docs/img/gesture/right_upright_natural_start.png}\caption{Arm extended, still}
+\end{subfigure}\hfill
+\begin{subfigure}[t]{0.32\linewidth}\centering
+  \repoimage{gesture-b}{../docs/img/gesture/right_upright_natural_halfway.png}\caption{Mid-reach}
+\end{subfigure}\hfill
+\begin{subfigure}[t]{0.32\linewidth}\centering
+  \repoimage{gesture-c}{../docs/img/gesture/right_upright_natural_touch.png}\caption{Nose touch and hold}
+\end{subfigure}
+\caption{The gesture as the app's instructions show it (right hand, upright grip, natural speed).}
+\label{fig:gesture}
+\end{figure}
+
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}[node distance=5mm and 6mm,>={Stealth[length=2mm]},
+  box/.style={draw=black!55,rounded corners=2pt,fill=black!3,align=center,
+              font=\sffamily\scriptsize,minimum height=11mm,text width=24mm}]
+  \node[box] (phone) {phone\\collector web app\\uploads every attempt};
+  \node[box,right=of phone] (heroku) {Heroku app (EU)\\validates records};
+  \node[box,right=of heroku] (pg) {Postgres\\one row per record};
+  \node[box,right=of pg] (snap) {snapshot + curation\\(persons P01--P20)};
+  \node[box,below=of snap] (cache) {Stage 2 cache\\standardised trials};
+  \node[box,left=of cache] (lanes) {analysis lanes\\leave-one-person-out};
+  \node[box,left=of lanes] (out) {figures, tables,\\numbers, model export};
+  \node[box,left=of out,dashed] (pred) {Stage 3 inference page\\(planned)};
+  \draw[->] (phone) -- (heroku);
+  \draw[->] (heroku) -- (pg);
+  \draw[->] (pg) -- (snap);
+  \draw[->] (snap) -- (cache);
+  \draw[->] (cache) -- (lanes);
+  \draw[->] (lanes) -- (out);
+  \draw[->,dashed] (out) -- (pred);
+\end{tikzpicture}
+\caption{Data flow from the phone to this report. Every figure, table and number of the report is regenerated
+from the saved analysis outputs by one command (Appendix~\ref{app:data:repro}).}\label{fig:system}
+\end{figure}
+
+% ------------------------------------------------------------------------------------------------------------
+\subsection{Sensor conventions and platform normalisation}\label{app:data:conventions}
+
+Table~\ref{tab:sensors} summarises how the two browser engines deliver the sensors
+\cite{w3c2025deviceorientation}. Both use the device frame of the World Wide Web Consortium (W3C) specification: $x$ toward the right edge,
+$y$ toward the top edge, $z$ out of the screen. Two differences matter for the analysis. WebKit inverts the
+sign of every accelerometer axis, and Chrome rounds every value to 0.1 unit while WebKit does not.
+Figure~\ref{fig:app:data-conventions} checks the resulting conventions end to end on real movements.
+
+\begin{table}[htbp]
+\centering
+\caption{What a phone browser delivers (condensed from the project's sensor notes and the W3C specification
+\cite{w3c2025deviceorientation}).}\label{tab:sensors}
+\footnotesize
+\begin{tabularx}{\linewidth}{@{}l>{\raggedright\arraybackslash}X>{\raggedright\arraybackslash}X@{}}
+\toprule
+ & iOS: WebKit (every iOS browser) & Android: Chromium (Chrome, Samsung Internet) \\
+\midrule
+Motion rate & $\approx$60\,Hz from a 1/60\,s timer; duplicated or skipped samples & 60\,Hz pump \\
+Value precision & unrounded doubles & rounded to 0.1\,m/s$^2$ and 0.1\,deg/s \\
+Accelerometer sign & all axes inverted (face up: $z \approx -9.81$) & W3C (face up: $z \approx +9.81$) \\
+\code{rotationRate} & deg/s; alpha, beta, gamma about $x, y, z$; not inverted & the same \\
+\code{event.interval} & $\approx$0.0167, in seconds & 16, in ms, constant \\
+Permission & \code{requestPermission()} inside a tap; a Cancel sticks & Chrome 151+ also has it; granted by default \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\paragraph{Decision: one versioned normalisation.} Raw records are never modified. One versioned step
+(\code{norm_v2}) maps every session to the W3C convention before any feature is computed. The accelerometer
+sign could come from the engine (WebKit $-1$, Chromium $+1$), from a calibration, or from the data. Street
+sessions have no guided calibration, so the step takes the engine's expected sign and requires the trial votes
+to confirm it. In each trial with a fixed instructed grip, the rest gravity before the onset votes for the sign
+that makes it point up. Every included session's sign is supported: the street sessions by the engine sign that
+the votes confirm, the pilot session by its guided calibration. Android sessions resolve to $+1$ and iOS
+sessions to $-1$, as the engines predict. The \code{rotationRate} mapping (alpha, beta, gamma about $x, y, z$)
+is chosen by the gravity closure defined below: the W3C mapping closes with a median of
+\R{describe/rr_closure_median_deg}$^\circ$, against \R{describe/rr_runner_up_median_deg}$^\circ$ for the
+runner-up mapping. Sessions too short to settle it keep the W3C default.
+
+\paragraph{Evidence: the 64 sign patterns.} An end-to-end check uses the movements themselves. The mirror of
+Equation~\eqref{eq:mirror} turns a right-hand movement into a left-hand one. In device coordinates it predicts
+the sign pattern $\sigma^* = (-,+,+;\,+,-,-)$ on $(a_x, a_y, a_z;\, \omega_x, \omega_y, \omega_z)$, applied
+together with the mirrored grip. For each of the $2^6 = 64$ sign patterns, Figure~\ref{fig:S2_12_sign_patterns}
+measures the distance between every person's mean left-hand waveform and the sign-flipped mean right-hand
+waveform. The predicted pattern $\sigma^*$ ranks \R{describe/sigma_star_rank_android} of 64 on Android and
+\R{describe/sigma_star_rank_ios} on iOS. A wrong axis, a wrong sign or a failed iOS normalisation would put
+another pattern first.
+
+\paragraph{Decision: gravity frame without a gyroscope-bias correction.} The heading-free channels need the up
+vector $\ghat$ during the movement. The gravity estimate (\code{gravity_v1}) takes the rest gravity before the
+onset and after the end, carries each through the movement with the gyroscope and blends the two. Its closure
+is the angle between the rest gravity carried to the nose and the rest gravity measured there; it tests the axis
+mapping and the propagation together. The options for the gyroscope bias were to subtract the mean rate before
+GO when it is below 3\,deg/s (the analysis plan: the repository's Stage 2/3 plan, docs/09, whose decisions are
+cited as D1, D2, \dots) or to subtract nothing. Nothing is subtracted. Street sessions
+have no still calibration window, production has no GO, and the mean rate of a hand-held phone is tremor rather
+than bias. Without the correction the closure has a median of \R{describe/closure_median_deg}$^\circ$, and
+\R{describe/closure_share_over_3deg} of the primary trials exceed $3^\circ$
+(Figure~\ref{fig:S2_17_gravity_closure}). The median is \R{describe/android_closure_median_deg}$^\circ$ on
+Android and \R{describe/ios_closure_median_deg}$^\circ$ on iOS.
+
+\begin{figure}[htbp]
+\centering
+\begin{subfigure}[t]{0.49\linewidth}\centering
+  \genfig{core/S2_12_sign_patterns}
+  \caption{The 64 sign patterns of the device-frame channels, sorted by the distance between left-hand and
+  sign-flipped right-hand mean waveforms (channels scaled to unit RMS). Circled: the conventions' mirror
+  $\sigma^*$, first on both platforms.}\label{fig:S2_12_sign_patterns}
+\end{subfigure}\hfill
+\begin{subfigure}[t]{0.49\linewidth}\centering
+  \genfig{core/S2_17_gravity_closure}
+  \caption{Gyro--gravity closure of the primary trials: the angle between the rest gravity carried through the
+  movement by the gyroscope and the rest gravity at the nose, with no bias correction. Line: $3^\circ$.}
+  \label{fig:S2_17_gravity_closure}
+\end{subfigure}
+\caption{Two end-to-end checks of the sensor conventions on real movements. They support the sign
+normalisation, the \code{rotationRate} mapping and the gravity frame without a gyroscope-bias correction.}
+\label{fig:app:data-conventions}
+\end{figure}
+
+% ------------------------------------------------------------------------------------------------------------
+\subsection{Sampling, gaps, precision and platforms}\label{app:data:sampling}
+
+\paragraph{Decision: a uniform 60\,Hz grid.} Both platforms deliver 60\,Hz. The median sample interval is
+\R{describe/android_interval_median_ms}\,ms on Android and \R{describe/ios_interval_median_ms}\,ms on iOS, and
+the 99th percentile is \R{describe/android_interval_p99_ms}\,ms and \R{describe/ios_interval_p99_ms}\,ms
+(Figure~\ref{fig:S2_05_sampling_gaps}, left; Table~\ref{tab:describe_sampling}). Isolated duplicated samples
+are dropped (flag T11, Appendix~\ref{app:data:flags}), and the streams are resampled linearly onto a uniform
+60\,Hz grid. A finer grid would add no information, and the inference page sees the same browser rate. The
+low-pass filter and the analysis windows are preprocessing decisions (Appendix~\ref{app:prep}).
+
+\paragraph{Evidence: two kinds of gap.} The intervals have a tail of gaps (Figure~\ref{fig:S2_05_sampling_gaps},
+right). Android gaps longer than 50\,ms are short, with a median of \R{describe/android_gap_median_ms}\,ms. iOS
+gaps are several times longer, with a median of \R{describe/ios_gap_median_ms}\,ms. In the \R{describe/ios_long_gap_attempts}
+iOS attempts with a gap longer than 200\,ms, these gaps last a median of \R{describe/ios_long_gap_median_ms}\,ms and
+start a median of \R{describe/ios_long_gap_start_median_s}\,s after the recording starts; only
+\R{describe/ios_long_gap_share_after_cue} of them follow an audio cue within 0.4\,s. This pattern points
+to a recurring stall of the collection app's main thread, not to the sensor. The inference page must keep its
+main thread free while it records.
+
+\paragraph{Decision: interpolate short gaps, exclude long gaps near the movement.} The options were to
+interpolate every gap, to drop every attempt with a gap, or to set a threshold. Gaps up to 100\,ms (at most
+5 samples) are interpolated linearly. A longer gap stays missing in the stream. When it falls within
+$[\text{onset} - 0.5\,\text{s},\ \text{end} + 0.5\,\text{s}]$ it removes part of the movement, which
+interpolation cannot restore, and the trial is excluded (rule E4d, Appendix~\ref{app:data:curation}). Elsewhere
+in the recording it does no harm and stays missing. The long gaps are an iOS phenomenon, so E4d removes mostly
+iOS trials (Table~\ref{tab:describe_sampling}, attempts with a gap longer than 100\,ms).
+
+\paragraph{Decision: native precision.} Chrome's rounding to a 0.1-unit grid adds noise with an SD of
+\R{describe/quantisation_noise_sd} unit ($0.1/\sqrt{12}$). The noise of a hand-held phone in the still window
+before GO is far larger (Figure~\ref{fig:S2_06_noise_vs_quantisation}; medians over trials): the SD of the
+specific force is \R{describe/android_rest_acc_sd}\,m/s$^2$ on Android and \R{describe/ios_rest_acc_sd}\,m/s$^2$
+on iOS, and the SD of the angular velocity \R{describe/android_rest_gyro_sd}\,deg/s and
+\R{describe/ios_rest_gyro_sd}\,deg/s. The options were to round iOS values to Chrome's grid, so that the
+platforms match, or to keep the native values. Both platforms keep their native precision; rounding iOS is an
+ablation (A3, Appendix~\ref{app:prep}).
+
+\paragraph{Decision: one model for both platforms.} After normalisation the platforms agree where it matters
+(Figure~\ref{fig:S2_14_platforms}; Table~\ref{tab:describe_platforms}). The class-mean yaw rate about gravity,
+$\vomega\cdot\ghat$, separates the hands with the same sign on both. The first-half yaw (the yaw about gravity
+accumulated over the first half of the approach) separates them with a pooled AUC of
+\R{describe/fhy_auc_android} on Android and \R{describe/fhy_auc_ios} on iOS. iOS approaches are shorter (median
+\R{describe/ios_duration_median_s}\,s against \R{describe/android_duration_median_s}\,s) and turn slightly
+faster (peak $|\vomega|$ \R{describe/ios_peak_gyro_median} against \R{describe/android_peak_gyro_median}\,deg/s).
+The options were a model per platform, platform as an input feature, or one model for both. One model serves
+both platforms, and platform is a reporting stratum with a leave-one-platform-out check. Phones differ in their
+sensors \cite{stisen2015heterogeneity}; here the normalisation removes the sign differences, and what remains
+(the iOS stalls, the rounding, the durations) is reported per platform. With \R{describe/persons_ios} iOS
+persons, a per-platform model would also be trained on very few people.
+
+\begin{figure}[htbp]
+\centering
+\genfig{core/S2_05_sampling_gaps}
+\caption{Sampling of the complete attempts. Left: the distribution of sample intervals on each platform (both
+run at 60\,Hz). Right: every interval longer than 50\,ms, by platform and by where it falls relative to the
+movement (``near'': within 0.5\,s of the approach). The line at 100\,ms is the threshold of rule E4d. Supports
+the 60\,Hz grid, the interpolation of short gaps and the exclusion of long gaps near the movement.}
+\label{fig:S2_05_sampling_gaps}
+\end{figure}
+
+\gentab{describe/describe_sampling}
+
+\begin{figure}[htbp]
+\centering
+\genfig{core/S2_06_noise_vs_quantisation}
+\caption{Hand-held noise in the still window before GO, per trial and platform (bar: median), against the
+noise of Chrome's 0.1-unit rounding (SD \R{describe/quantisation_noise_sd}, vertical line). Left: specific
+force; right: angular velocity. The rounding is far below the physiological noise floor, so native precision
+is kept on both platforms.}
+\label{fig:S2_06_noise_vs_quantisation}
+\end{figure}
+
+\begin{figure}[htbp]
+\centering
+\genfig{core/S2_14_platforms}
+\caption{Android and iOS after standardisation: the class-mean yaw rate about gravity over the time-normalised
+approach (band: $\pm 1$ SE across persons) and the first-half yaw per trial (bar: median). The hands separate
+with the same sign on both platforms, which confirms the sign normalisation and supports one model for both.}
+\label{fig:S2_14_platforms}
+\end{figure}
+
+\gentab{describe/describe_platforms}
+
+% ------------------------------------------------------------------------------------------------------------
+\subsection{Curation and the exclusion cascade}\label{app:data:curation}
+
+The analysis reads one frozen snapshot of the upload database: \R{describe/sessions_total} sessions with
+\R{describe/attempts_total} attempts, each validated against the data schema, with no duplicate and no invalid
+record. The researcher's curation file maps every session to a person (P01--P20) and marks
+\R{describe/sessions_included} sessions as included. The file's free-text reasons are replaced by fixed codes,
+and the private file that links persons to names is never opened (Appendix~\ref{app:data:repro}).
+
+\paragraph{Decision: the person is the statistical unit.} The options were the app's participant code, the
+session, or the curated person. The analysis groups by the curated person. One app code held two persons who
+shared a phone, and one person held several codes; grouping by code would put one person on both sides of a
+fold. The evaluation harness refuses any grouping that splits a person. \R{describe/n_persons_multi_session}
+persons contributed several sessions; one of these sessions is the pilot of the earlier protocol (1.0.0). The
+demographics are read from each session's own record, agree across each person's sessions, and are stored in
+the person table only, so they cannot reach a model.
+
+\paragraph{The exclusion cascade.} Rules apply in order, and an attempt is charged to the first rule it fails
+(Table~\ref{tab:describe_exclusion_flow}). Rule E3 diverts rather than removes.
+\begin{itemize}[nosep]
+  \item \textbf{E0} removes the \R{describe/excl_e0_removed} attempts of the sessions the researcher excluded:
+    an incomplete run superseded by the person's later run, and runs that did not work.
+  \item \textbf{E0s} (simulated records) and \textbf{E2} (the screen-away grip, collected only by the pilot
+    protocol) remove nothing. Street visits never collect screen-away trials; the analysis synthesises them by
+    a screen flip of the arrays (Appendix~\ref{app:prep}).
+  \item \textbf{E1} removes the \R{describe/excl_e1_removed} attempts the app did not accept
+    (Table~\ref{tab:describe_e1_reasons}). Most showed no movement within the time limit after GO, or a phone
+    still moving at the limit; the few others were redone, rejected for a wrong grip, aborted, flagged or
+    interrupted. Overall, \R{describe/attempts_per_accepted} attempts were needed per accepted trial.
+  \item \textbf{E3} moves the \R{describe/free_choice_trials} free-choice trials to the natural-use set. Their
+    hand was chosen and reported by the person, not instructed, so they are never trained on and are scored
+    apart.
+  \item \textbf{E4a} (no approach window) removes nothing.
+  \item \textbf{E4b} removes \R{describe/excl_e4b_removed} approaches shorter than 0.25\,s: a reach from arm's
+    length cannot be that short, so a fragment was segmented (Figure~\ref{fig:S2_08_durations_peaks}).
+  \item \textbf{E4c} removes \R{describe/excl_e4c_removed} attempts whose phone did not turn (peak $|\vomega|$
+    below 30\,deg/s, the app's own onset floor): every reach rotates the forearm. The natural-use set also
+    loses a trial here.
+  \item \textbf{E4d} removes \R{describe/excl_e4d_removed} attempts with a gap longer than 100\,ms near the
+    movement (Appendix~\ref{app:data:sampling}).
+  \item \textbf{E4e} (page hidden, rate below 50\,Hz, no gyroscope, unsupported gravity sign) removes nothing.
+  \item \textbf{N1} keeps one natural-use trial per person: the earliest free-choice trial that passed every
+    rule, the person's first unpractised movement with a hand of their choice. The
+    \R{describe/natural_use_repeat_n} free-choice trials of repeat visits are reported apart.
+\end{itemize}
+
+\paragraph{The analysis sets.} The primary set holds \R{describe/primary_trials} trials of
+\R{describe/n_persons} persons in \R{describe/sessions_included} sessions: \R{describe/primary_left} left-hand
+and \R{describe/primary_right} right-hand trials, \R{describe/primary_android} on Android and
+\R{describe/primary_ios} on iOS. Each person contributes both hands, with \R{describe/primary_per_person_min} to
+\R{describe/primary_per_person_max} trials (median \R{describe/primary_per_person_median}). The natural-use set
+holds \R{describe/natural_use_n} trials, one per person, and all are right-hand trials
+(\R{describe/natural_use_right} right, \R{describe/natural_use_left} left). Natural-use accuracy is therefore
+right-hand recall on the free-choice trials (all right-hand so far; a constant right answer would score
+100\,\%). The set supports an accuracy with a CI and nothing that needs both hands, such as an AUC or a
+calibration.
+
+\paragraph{Decision: exclude only what has no valid representation.} The analysis plan (docs/09, D5) foresaw no
+new exclusions: movement checks would act as predictor gates at evaluation. The options were to keep that plan,
+to exclude every gate failure, or to exclude only segments without a valid representation. Rules E4b, E4c and
+E4d exclude, because a fragment, a phone that does not turn and a hole in the movement have no valid
+representation. The remaining gate failures are valid movements and stay in training and in the headline
+(Appendix~\ref{app:data:flags}). The cache keeps the arrays of every excluded complete attempt, so a
+sensitivity analysis that re-admits them needs no rebuild.
+
+\gentab{describe/describe_exclusion_flow}
+
+\gentab{describe/describe_e1_reasons}
+
+% ------------------------------------------------------------------------------------------------------------
+\subsection{Completion, conditions and durations}\label{app:data:completion}
+
+\paragraph{Decision: keep partial sessions.} Of the \R{describe/street_visits} street visits,
+\R{describe/visits_completed} were completed and \R{describe/visits_ended_early} ended early
+(Figure~\ref{fig:S2_03_completion_durations}, left). The optional bonus tier was taken in
+\R{describe/bonus_taken_completed} of the completed visits. The options were to drop partial sessions or to
+keep them. They are kept: the plan balances the hands within every tier, so even a visit that stops early
+contributes both hands. Dropping partial sessions would lose trials, and a whole person whose only visit
+ended early.
+
+\paragraph{Evidence: visits run long.} A completed visit took a median of \R{describe/visit_minutes_median}\,min
+(IQR \Rb{describe/visit_minutes_q1}--\Rb{describe/visit_minutes_q3}\,min), not the planned 5\,min
+(Figure~\ref{fig:S2_03_completion_durations}, right). The tiers took medians of
+\R{describe/tier1_minutes_median}, \R{describe/tier2_minutes_median} and \R{describe/tier3_minutes_median}\,min
+(tiers 1 to 3) and \R{describe/tier4_minutes_median}\,min for the bonus tier. The next collection should plan
+for the measured duration, not the app's estimate.
+
+\paragraph{Evidence: the conditions are balanced between hands.} The primary trials span
+\R{describe/n_conditions} instructed conditions of grip, speed and movement variant
+(Figure~\ref{fig:S2_04_conditions}). Every condition has trials of both hands in similar numbers, so a
+condition cannot stand in for the label. Upright standard reaches at natural speed dominate, and the rare
+variants hold too few trials for a per-condition accuracy; the secondary analyses pool them
+(Appendix~\ref{app:sec}).
+
+\paragraph{Evidence: durations and the thresholds of E4b and E4c.} The oracle approach (defined in
+Appendix~\ref{app:data:segmentation}) lasts a median of \R{describe/duration_median_s}\,s, and
+\R{describe/duration_share_le_2p5s} of approaches last at most 2.5\,s (Figure~\ref{fig:S2_08_durations_peaks};
+Table~\ref{tab:describe_durations}). The instructed speed separates durations only loosely: the medians are
+\R{describe/duration_fast_s}\,s for fast, \R{describe/duration_natural_s}\,s for natural and
+\R{describe/duration_slow_s}\,s for slow movements. Duration is therefore a poor proxy for the instructed speed. The reaction time from GO to the onset has a median of \R{describe/reaction_median_ms}\,ms.
+The fixed analysis window ($-0.5$ to $+2.5$\,s around the onset) and the time normalisation follow from these
+durations (Appendix~\ref{app:prep}).
+
+\begin{figure}[htbp]
+\centering
+\genfig{core/S2_03_completion_durations}
+\caption{Completion. Left: accepted attempts per tier and street session (pseudonymous session labels; \R{describe/visits_ended_early}
+visits ended early). Right: wall-clock durations of the setup, of each tier and of the whole visit, for the
+completed visits (bar: median). Partial sessions still hold both hands in every tier, so they are kept.}
+\label{fig:S2_03_completion_durations}
+\end{figure}
+
+\begin{figure}[htbp]
+\centering
+\genfig{core/S2_04_conditions}
+\caption{Primary trials per instructed condition (grip $\cdot$ speed $\cdot$ movement variant $\cdot$ start
+position), left against right hand, on a log scale. Every condition has both hands in similar numbers, so
+no condition can stand in for the label.}
+\label{fig:S2_04_conditions}
+\end{figure}
+
+\begin{figure}[htbp]
+\centering
+\genfig{core/S2_08_durations_peaks}
+\caption{Left: oracle approach duration by instructed speed and platform (bar: median). Solid line: the
+0.25\,s threshold of E4b (a lower bound of gate G2); dashed line: the 8\,s upper bound of gate G2 (longer
+approaches stay in the primary set and are scored apart). Right: peak angular speed within the approach, with
+the 30\,deg/s threshold of E4c. Supports excluding fragments and phones that do not turn.}
+\label{fig:S2_08_durations_peaks}
+\end{figure}
+
+\gentab{describe/describe_durations}
+
+% ------------------------------------------------------------------------------------------------------------
+\subsection{Segmentation: the oracle window, online and offline}\label{app:data:segmentation}
+
+Two segmentations exist for every recording. The \emph{online} segmentation is computed while the movement
+happens, from the samples seen so far: the app's \code{online_v1} detector drives the end cue and stores its
+bounds with the attempt. Its onset is back-dated to the end of the stillness before the movement, and its end
+to the start of the final stillness at the nose; the end cue follows 250\,ms after the end. The
+\emph{offline} segmentation is computed after the recording, on the whole stream: \code{offline_v1} re-segments
+each recording in the analysis and needs some stillness after the end to find it. The \emph{oracle window} is
+the approach between the stored online bounds. In production nothing marks the movement, and a cue-free
+detector must find it (Appendix~\ref{app:prod}).
+
+\paragraph{Decision: the oracle window is the stored online segmentation.} The options were the offline
+segmentation (the analysis plan, docs/09 D10), the stored online segmentation, or the first screen contact as
+the end of the approach. The evidence is in Figure~\ref{fig:S2_09_segmentation_contact}. The offline
+segmentation finds no end in \R{describe/offline_no_end_share_street} of street attempts, because the arm
+returns soon after the end cue and leaves no long stillness at the nose. Where both exist they agree closely at
+the onset and less closely at the end; \R{describe/flag_seg_disagree_100ms} primary trials have onsets more than
+100\,ms apart (flag T9). The stored online bounds exist for every complete attempt and can be reproduced
+exactly from the record. Screen contact is unreliable as a bound: only \R{describe/touch_share_toward} of the
+screen-toward attempts record a touch, and the first touch falls at a median \R{describe/touch_position_median}
+of the oracle window, \R{describe/touch_before_end_ms}\,ms before its end; the last part of the window is the
+phone settling against the nose. The offline bounds stay in the cache for an ablation (A5); the sensitivity of the models to the window
+bounds is tested by jittering them (Appendix~\ref{app:prep}).
+
+\paragraph{Evidence: what a trial looks like.} Figure~\ref{fig:S2_10_example_traces} shows one left-hand and
+one right-hand trial of the same person, phone, grip and speed, after standardisation. The yaw rate about
+gravity takes opposite signs early in the two approaches. In both trials the return of the arm starts less than a second
+after the end cue and is as large as the approach. A detector that hands the return to an approach model
+gets a reversed movement and a confidently wrong answer; the return is therefore labelled separately and never
+pooled with approaches (Appendix~\ref{app:prod}). A clean return window exists for \R{describe/return_trials}
+of the primary trials.
+
+\begin{figure}[htbp]
+\centering
+\genfig{core/S2_09_segmentation_contact}
+\caption{Left: offline minus stored online segmentation bounds, at the onset and at the end (clipped at
+$\pm$800\,ms; the offline segmentation finds no end in \R{describe/offline_no_end_share_street} of street
+attempts). Right: the first screen touch as a fraction of the oracle window (0: onset, 1: end) in the
+screen-toward attempts. Supports the stored online bounds as the oracle window, with contact not used as a
+bound.}
+\label{fig:S2_09_segmentation_contact}
+\end{figure}
+
+\begin{figure}[htbp]
+\centering
+\genfig{core/S2_10_example_traces}
+\caption{One left-hand and one right-hand trial of P15 (same phone, upright grip, natural speed),
+standardised: device-frame angular velocity and linear acceleration (top rows) and the heading-free
+gravity-frame yaw rate and tilt rate (bottom). Grey band: the oracle approach; beige band: the return of the
+arm. The yaw rate has opposite signs early in the two approaches; the return is a large separate movement that
+must be kept apart.}
+\label{fig:S2_10_example_traces}
+\end{figure}
+
+% ------------------------------------------------------------------------------------------------------------
+\subsection{Flags and predictor gates}\label{app:data:flags}
+
+Two kinds of trial-level column are computed for every trial and never remove one
+(Figure~\ref{fig:S2_18_flags_gates}; Table~\ref{tab:describe_flags_gates}).
+
+\paragraph{Flags} (the trial checks T8--T12 of the data schema, docs/02, and a screen-rotation warning) describe
+the recording and serve only to stratify results:
+\begin{itemize}[nosep]
+  \item T8, grip not as instructed (\R{describe/flag_grip_mismatch} trials): the grip before the onset differs
+    from the instructed one, by the app's check or by the standardised up vector. The hand label is kept,
+    because the hand instruction concerns the hand, not the grip.
+  \item T9, online and offline onsets more than 100\,ms apart (\R{describe/flag_seg_disagree_100ms} trials).
+  \item T10, possible clipping (\R{describe/flag_clip_candidate} trials): $|\vf|$ above 3.5\,g or $|\vomega|$
+    above 950\,deg/s somewhere in the raw recording.
+  \item T11, repeated samples (\R{describe/flag_repeated_samples} trials): isolated duplicated samples were
+    dropped before resampling.
+  \item T12, a false start before GO (\R{describe/flag_false_start} trials): the hold restarted before GO.
+  \item Screen rotated during the movement (\R{describe/flag_screen_rotated} trials).
+\end{itemize}
+
+\paragraph{Predictor gates} are the checks the inference page will apply before it answers (docs/09 D5). Gate
+G1 requires a rate of at least 50\,Hz, no gap longer than 50\,ms within 0.3\,s of the approach, a visible page
+and a gyroscope; \R{describe/gate_g1_failing} primary trials fail it, all on Android, with gaps between 50 and
+100\,ms that were interpolated. Gate G2 requires a duration between 0.25 and 8\,s and a peak $|\vomega|$ of at
+least 30\,deg/s; \R{describe/gate_g2_failing} trials fail it, nearly all instructed slow reaches longer than
+8\,s. In all, \R{describe/gate_pass_failing} primary trials fail G1 or G2.
+
+\paragraph{Decision: gate failures are kept and scored apart.} The plan would not score gate failures. The
+options were to drop them from training and evaluation, or to keep them and report the gated metrics as well.
+They are kept in training and in the headline metrics, and every result also reports its metrics on the trials
+that pass both gates, as the inference page would see them. The headline is then the harder, conservative
+number. For the reference floor (Appendix~\ref{app:data:reference}) the accuracy is
+\R{reference/accuracy} on all primary trials and \R{reference/gated_accuracy} on the trials that pass both
+gates.
+
+\begin{figure}[htbp]
+\centering
+\genfig{core/S2_18_flags_gates}
+\caption{Flags (T8--T12, screen rotation) and predictor gates (G1, G2) in the primary trials, by platform.
+Flags are reported and used for stratification; trials failing a gate stay in training and in the headline,
+and every result also reports the metrics on the trials that pass both gates.}
+\label{fig:S2_18_flags_gates}
+\end{figure}
+
+\gentab{describe/describe_flags_gates}
+
+% ------------------------------------------------------------------------------------------------------------
+\subsection{Label consistency and the swap signature}\label{app:data:labels}
+
+Hands-free collection has a blind spot. An accepted attempt only means ``completed and not redone'', so a
+person who used the wrong hand for a whole block leaves no trace in the record. The screen in
+Figure~\ref{fig:S2_20_label_consistency} checks each of the \R{describe/label_blocks} planned blocks of the
+primary trials: the share of its trials whose first-half yaw sign agrees with the instructed hand.
+
+\paragraph{The swap signature.} A hand swap at a block change produces a specific pattern: two adjacent blocks of
+opposite instructed hands, each of at least 3 trials, in which every trial contradicts its label. A person
+whose hand moves differently produces another pattern, in which one hand disagrees and the other agrees. The
+signature is found from the data, without a typed person or block. It appears in \R{describe/swap_signature_blocks}
+blocks: blocks 1 and 2 of P08, in which no trial agrees with its label. Low agreement confined to one hand
+of a person is not the signature. A post hoc example is P17, a left-hander, whose left-hand blocks mostly
+disagree with the rule while the right-hand blocks agree. Handedness is examined in Appendix~\ref{app:sec}.
+
+\paragraph{Decision: the labels are never changed.} The options were to correct suspected labels or to keep the
+instructed labels and test their influence. The labels stay as instructed, and the ringed blocks are flagged for
+review. Two safeguards follow. A sensitivity analysis drops the ringed blocks from training, or
+from training and test (Appendix~\ref{app:data:reference}). The wrong-hand screen of the analysis plan
+(docs/09 D6) runs inside each training fold: an antisymmetric logistic model on the chiral features, scored by
+inner LOSO over the training persons, flags training trials with $P(\text{label}) < 0.05$ and runs of at least 3
+consecutive trials with $P(\text{label}) < 0.25$. Flagged trials leave training only, never evaluation, so the
+cleaning cannot inflate accuracy. Applied once to the whole primary set, with LOSO scores, these rules flag
+\R{describe/screen_flagged_trials} trials.
+
+\begin{figure}[htbp]
+\centering
+\genfig{core/S2_20_label_consistency}
+\caption{Label consistency of every planned block of every session (dot size: trials; colour: instructed hand;
+fill: share of trials whose first-half yaw sign agrees with the instructed hand; text: agreeing/total). Ringed:
+the swap signature, two adjacent blocks of opposite hands in which every trial contradicts its label. The
+labels are kept; the ringed blocks enter a sensitivity analysis.}
+\label{fig:S2_20_label_consistency}
+\end{figure}
+
+% ------------------------------------------------------------------------------------------------------------
+\subsection{The reference floor and label-noise sensitivity}\label{app:data:reference}
+
+\paragraph{Decision: a pre-specified reference floor.} Every model is compared against one simple,
+pre-specified model, defined with the analysis foundation before any modelling lane ran. It is a logistic regression on the cumulative yaw about gravity
+at 8 instants of the time-normalised approach, trained with mirror augmentation (each training trial is added
+again mirrored, with the opposite label). It is a sanity floor, not a model choice; lane m4 uses the same model,
+under the name yaw8, as the hand classifier of its production simulation (Appendix~\ref{app:prod}). Its LOSO accuracy is
+\Rci{reference/accuracy}, with an AUC of \R{reference/roc_auc} and a log loss of \R{reference/log_loss}
+(Table~\ref{tab:reference_models}). On the natural-use set it scores \R{reference/natural_use_accuracy}: this is
+right-hand recall on the free-choice trials (all right-hand so far; a constant right answer would score
+100\,\%).
+
+\paragraph{Evidence: several attempts help.} When the \pright{} of $k$ attempts of one person and hand are
+averaged, the per-person balanced accuracy rises from \R{reference/acc_k1} at $k = 1$ to \R{reference/acc_k3} at
+$k = 3$ and \R{reference/acc_k5} at $k = 5$ (Figure~\ref{fig:S2_21_reference_sensitivity}, left;
+Table~\ref{tab:reference_k_attempts}). Every $k$ uses the same \R{reference/k_n_persons} persons, those with at
+least 5 trials of each hand. The inference page should therefore ask for several movements.
+
+\paragraph{Evidence: label noise does not move the floor.} Three variants test the labels
+(Figure~\ref{fig:S2_21_reference_sensitivity}, right; Table~\ref{tab:reference_models}). Each is paired against
+the reference on the same trials, with an exact sign-flip test over persons; the family is these three
+comparisons. Without the swap-signature blocks in training the accuracy changes by
+\Rb{reference/swap_blocks_train_only_diff}~points (unadjusted $p = \R{reference/swap_blocks_train_only_p}$).
+Without them in training and test it changes by \Rb{reference/swap_blocks_removed_diff}~points
+($p = \R{reference/swap_blocks_removed_p}$). With the D6 screen in every fold it changes by
+\Rb{reference/d6_screen_diff}~points ($p = \R{reference/d6_screen_p}$). None differs even before the Holm
+adjustment over the three, which can only raise these $p$-values. The labels therefore stay as instructed, and
+the D6 screen stays an optional sensitivity analysis.
+
+\begin{figure}[htbp]
+\centering
+\genfig{core/S2_21_reference_sensitivity}
+\caption{Reference floor. Left: per-person balanced accuracy when the \pright{} of $k$ attempts of one person
+and hand are averaged (the same \R{reference/k_n_persons} persons at every $k$). Right: the label-noise
+variants, paired against the reference on the same trials (95\,\% CI of the paired difference). Supports asking
+for several attempts and keeping the instructed labels.}
+\label{fig:S2_21_reference_sensitivity}
+\end{figure}
+
+\gentab{reference/reference_models}
+
+\gentab{reference/reference_k_attempts}
+
+% ------------------------------------------------------------------------------------------------------------
+\subsection{Demographics}\label{app:data:demographics}
+
+The \R{describe/n_persons} persons are young adults (Figure~\ref{fig:S2_01_demographics}): age
+\R{describe/age_mean}\,$\pm$\,\R{describe/age_sd} years (range \R{describe/age_min} to \R{describe/age_max}),
+\R{describe/n_female} women and \R{describe/n_male} men, and height \R{describe/height_mean}\,$\pm$\,\R{describe/height_sd}\,cm
+(\R{describe/height_n} persons gave it). \R{describe/n_right_handed} are right-handed and
+\R{describe/n_left_handed} left-handed (P11 and P17, self-report). The usual phone hand is the right for
+\R{describe/n_phone_hand_right} persons and both for \R{describe/n_phone_hand_both}. \R{describe/persons_android}
+persons used Android phones (\R{describe/sessions_android} sessions, \R{describe/n_device_models} device models
+across all included sessions) and \R{describe/persons_ios} used iPhones (\R{describe/sessions_ios} sessions).
+
+\paragraph{Consequences.} With \R{describe/n_left_handed} left-handers, every handedness effect is exploratory, and the left-handers
+are shown individually (Appendix~\ref{app:sec}). The narrow age range limits any claim about older users.
+Demographics never enter a model; they only stratify results, and the demographics add-on test is in
+Appendix~\ref{app:sec}.
+
+\begin{figure}[htbp]
+\centering
+\genfig{core/S2_01_demographics}
+\caption{The \R{describe/n_persons} persons of the analysis: age, height by sex (\R{describe/height_n} persons
+gave a height), dominant hand and usual phone hand (self-report). With \R{describe/n_left_handed} left-handers,
+handedness effects can only be exploratory.}
+\label{fig:S2_01_demographics}
+\end{figure}
+
+% ------------------------------------------------------------------------------------------------------------
+\subsection{Reproducibility, provenance and privacy}\label{app:data:repro}
+
+\paragraph{One command rebuilds everything.} One orchestrator regenerates every result, figure, table and
+number of this report from the frozen snapshot (\code{analysis/stage2/pipeline.py}):
+\begin{small}
+\begin{verbatim}
+cd analysis      # python = the frozen environment, .venv/Scripts/python.exe
+python -m stage2.pipeline all --force   # cache, every unit, numbers, report
+python -m stage2.pipeline all           # only what is missing or stale
+python -m stage2.pipeline figures       # redraw every figure (no fitting)
+python -m stage2.pipeline tables        # booktabs tables and CSV files
+python -m stage2.pipeline numbers       # numbers files -> numbers.tex
+python -m stage2.pipeline report        # asset step, then latexmk
+\end{verbatim}
+\end{small}
+Each target takes the options \texttt{-{}-lanes} (units) and \texttt{-{}-only} (names). The Python environment is
+frozen in a requirements file (\code{requirements-stage2.txt}), and every random choice draws from one fixed
+seed.
+
+\paragraph{Compute is separate from presentation.} A compute step runs the experiments and saves everything the
+presentation needs: predictions, per-fold information, curves and the data behind each figure. The figures,
+tables and numbers steps only read those files and never fit a model, so redrawing a figure after a change of
+an axis takes seconds. To change a figure, edit the presentation defaults of its figures module, run
+\texttt{python -m stage2.pipeline figures -{}-lanes <unit> -{}-only <NAME>} and rebuild the report; the asset step
+copies the new file.
+
+\paragraph{Every number is generated.} Each unit writes its numbers to a file of the form
+\texttt{\{key: \{value, format, source, description\}\}}, where \code{source} names the saved file the value was
+read from. The asset step turns them into the \LaTeX{} macros that print every result in this report; no result
+is typed by hand. A missing key prints in red, and a final build stops on it.
+
+\paragraph{Staleness and provenance.} The cache records its data identity: a hash over the snapshot, the
+curation file, the cache parameters and the code that builds the cache. Every result records the data identity
+of the cache it was made from, with the git commit and a fingerprint of the analysis code. A changed snapshot or
+curation makes every result stale, and a plain \code{all} recomputes them; an edit of presentation code makes
+nothing stale. The footer of every page prints the provenance of the build: \provenanceline.
+
+\paragraph{Adding a participant.} Five steps add a person:
+\begin{enumerate}[nosep]
+  \item put the new session in the snapshot, or export a new snapshot and point the configuration at it;
+  \item add its row to the curation file with the next person id (e.g.\ P21) and \code{include: true};
+  \item run \code{python -m stage2.pipeline all}: the data identity has changed, so the cache is rebuilt and
+    every result recomputed;
+  \item check that \texttt{python -m stage2.scripts.expected\_counts -{}-without P21} reproduces the pinned counts
+    exactly, so every change is explained by the new person, then pin the new counts with \texttt{-{}-write};
+  \item run the test suite (\code{python -m pytest tests stage2/tests}).
+\end{enumerate}
+The last person added, P20, passed this check: without P20 every count of the previous snapshot is reproduced
+exactly.
+
+\paragraph{Privacy.} The repository is public, so no name reaches any output. Persons appear only as P01--P20,
+and sessions only as pseudonymous labels such as \code{P14-s3}. The private file that links persons to names is
+never opened, and the curation's free-text reasons are replaced by fixed codes. Report-facing tables refuse app
+codes, backend ids, timestamps, operating-system and browser versions and screen geometry. The tests scan every
+table, JSON file, \LaTeX{} file, caption, figure text, PNG and PDF, the cache tables and every source file for
+the name tokens of the raw records, case-insensitively. Exploratory participants such as PD01 live outside the
+snapshot and the curation; only the case-study lane reads them, no model is trained, tuned or scored on them,
+and a guard test checks that none of their ids reaches the main data (Appendix~\ref{app:pd01}).
+
+\begin{table}[htbp]
+\centering
+\caption{Notation.}\label{tab:notation}
+\footnotesize
+\begin{tabularx}{\linewidth}{@{}l>{\raggedright\arraybackslash}X@{}}
+\toprule
+Symbol & Meaning \\
+\midrule
+$\vf$, $\va$ & specific force (acceleration including gravity) and linear acceleration, device frame, m/s$^2$ \\
+$\vomega$ & angular velocity (\code{rotationRate} as $x, y, z$), deg/s \\
+$\ghat$ & unit vector pointing up (gravity frame), estimated by gyroscope propagation from the rest pose \\
+$\Smat$, $\mathbf{M}$ & $\operatorname{diag}(-1, 1, 1)$ on the device and on the body side \\
+$\Qmat$ & a grip: a constant proper rotation of the device frame \\
+$m(\cdot)$ & the left--right mirror of a trial or of a feature vector \\
+$\vomega\cdot\ghat$ & yaw rate about gravity (chiral, or mirror-odd: it changes sign under the mirror) \\
+$\pright$ & the model's probability that the right hand made the movement \\
+$\tauk$ & the scale of the summed logits $z_i$ of $k$ attempts, $\pright = \sigma(\sum_i z_i / \tauk)$, $\sigma$ the logistic sigmoid \\
+\bottomrule
+\end{tabularx}
+\end{table}

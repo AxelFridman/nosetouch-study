@@ -1,0 +1,430 @@
+% sections/E_deep.tex: Lane m3, time-frequency and deep sequence models (appendix).
+% Numbers only through \R / \Rci; figures through \genfig, tables through \gentab (report/README.md).
+% Sources: analysis/reports/stage2/m3_SUMMARY.md, figures/m3/captions.json, results/m3_numbers.json.
+\section{Time-frequency and deep sequence models}\label{app:m3}
+
+Lane m3 tests whether models that learn their own representation of the motion beat engineered features on new persons, and whether they use the same evidence as the physics of Section~\ref{sec:physics}: the hand-signed yaw about gravity early in the approach.
+The lane trained one-dimensional convolutional neural networks (1D CNN) and four other deep sequence architectures, two-dimensional (2D) CNNs and logistic regressions on time-frequency planes, and MiniRocket~\cite{dempster2021minirocket}.
+All models used the \R{describe/primary_trials} primary trials of the \R{describe/n_persons} persons under leave-one-person-out (LOSO) evaluation (Appendix~\ref{app:data}).
+The first free-choice trial of each person was scored apart as the natural-use set.
+This appendix states every model and every data-treatment choice with its paired evidence, then the calibration, the attribution analysis, the breakdowns and the caveats.
+The network that became the final model comes from this lane; Appendix~\ref{app:final} describes how it was chosen among the candidates of all lanes, calibrated and exported.
+
+% ---------------------------------------------------------------------------------------------------
+\subsection{Models, training and statistics}\label{app:m3:models}
+
+\paragraph{Model families.}
+The lane compared four families (Table~\ref{tab:m3_models}, Figure~\ref{fig:M3_01_model_overview}):
+\begin{itemize}
+  \item deep sequence models on the time-normalised approach: a 1D CNN (the pre-specified default), a residual 1D network (ResNet1D), a reduced InceptionTime (InceptionTime-lite), a temporal convolutional network (TCN) and a gated recurrent unit network (GRU);
+  \item MiniRocket: 84 fixed convolution kernels with dilations on a log grid and 4000 pooled features, followed by an L2-penalised logistic regression whose penalty was chosen on inner person-disjoint folds;
+  \item time-frequency models: the short-time Fourier transform (STFT; Hann window of 16 samples, hop of 4) or the complex-Morlet continuous wavelet transform (CWT; 10 scales from 2 to 32 samples) of each channel, keeping the real and imaginary parts, either pooled into frequency bands and time blocks for a logistic regression or fed to a small 2D CNN;
+  \item magnitude-only time-frequency models, kept only as a physics demonstration (Appendix~\ref{app:m3:tfsign}).
+\end{itemize}
+
+\paragraph{Input channels.}
+The default input is the 8 gravity-frame channels: the magnitudes of $\va$ and $\vomega$, the vertical and horizontal parts of $\va$, the horizontal part of $\vomega$, the yaw rate $\vomega\cdot\ghat$, the cumulative yaw and the tilt from the start pose.
+Only the two yaw channels are chiral.
+Two richer sets were tried.
+``All 17'' adds the 9 device-frame components of $\va$, $\vomega$ and $\ghat$ in phone coordinates, whose values depend on the grip.
+``Gravity + body frame (12)'' adds four channels of a heading-following body frame.
+With $\mathbf{n}$ the unit normal out of the screen, the frame is
+\begin{equation}\label{eq:m3-body}
+  \mathbf{h} = \frac{\mathbf{n} - (\mathbf{n}\cdot\ghat)\,\ghat}{\lVert \mathbf{n} - (\mathbf{n}\cdot\ghat)\,\ghat \rVert},
+  \qquad
+  \mathbf{s} = \ghat \times \mathbf{h}.
+\end{equation}
+It gives the roll rate $\vomega\cdot\mathbf{h}$ and the lateral acceleration $\va\cdot\mathbf{s}$, which are chiral, and the pitch rate $\vomega\cdot\mathbf{s}$ and the forward acceleration $\va\cdot\mathbf{h}$, which are mirror-even.
+A rotation of the phone about its screen normal leaves all four unchanged, so the 12-channel set does not depend on the grip.
+The frame follows lane m1's definition (Appendix~\ref{app:m1}); it is undefined only when the screen faces straight up or down, which did not occur in the recorded trials.
+
+\paragraph{Training.}
+Every model was fitted through the shared LOSO harness with its cap on training trials per person (Appendix~\ref{app:data}).
+Inside each outer fold the training persons were split into 4 person-disjoint parts.
+A deep model is a 4-member ensemble: member $j$ trains on the other three parts and is early-stopped on part $j$ (log loss on real, unaugmented trials; patience 6; 6 to 40 epochs).
+Its logits on part $j$ give every training trial a cross-fitted logit, made by a member that never saw that trial's person.
+The calibrators and the attempt scale $c_k$ (Appendix~\ref{app:m3:attempts}) were fitted on these cross-fitted logits, never on the held-out person.
+The ensemble logit is the mean of the member logits.
+Each member fits its channel normaliser on its training trials and their mirror images, so every chiral channel is centred at exactly zero and normalising commutes with the mirror $m(\cdot)$.
+Training was augmented with the mirror image of every trial with the flipped label (Equation~\ref{eq:mirror}), a smooth monotone time warp of up to 0.3 of the window, magnitude scaling between 0.90 and 1.10, and jitter with a standard deviation of 0.03 \cite{um2017augmentation}.
+The network heads keep coarse time position (8 time bins), because the early yaw reverses later in the approach.
+Every fit ran on one thread with deterministic algorithms, so a refit reproduces the saved predictions bit for bit.
+
+\paragraph{Statistics.}
+Every comparison of two models uses the same trials and one estimand: the mean per-person accuracy difference in percentage points, with a paired person-bootstrap 95\,\% confidence interval (CI) and an exact sign-flip p-value over persons.
+The p-values are Holm-adjusted within a named family of comparisons:
+\code{treatment} (\R{m3/family_treatment_size} comparisons), \code{treatment_body} (\R{m3/family_treatment_body_size}), \code{grip} (\R{m3/family_grip_size}), \code{nested} (\R{m3/family_nested_size}), \code{equal_input} (\R{m3/family_equal_input_size}), \code{engineered} (\R{m3/family_engineered_size}) and \code{physics_demo} (\R{m3/family_physics_demo_size}).
+A difference is called better or worse only when the adjusted p-value is below 0.05 and the CI excludes 0; otherwise it is called not detectable.
+The per-person log-loss difference is tested in the same way.
+Appendix~\ref{app:m3:calibration} gives the calibration statistics.
+
+\begin{figure}[tbp]
+  \centering
+  \genfig{m3/M3_01_model_overview}
+  \caption{Every lane-m3 model under LOSO. Left: accuracy with its 95\,\% CI; dashed line and band: the reference yaw logistic regression (\R{reference/accuracy}). Right: training cost of one LOSO run in CPU-minutes (log scale; for a nested choice, all its candidates). Grey: magnitude-only demonstrations; open markers: grip-dependent device-frame input; diamonds: configurations designed after outer-fold results had been seen.}
+  \label{fig:M3_01_model_overview}\label{fig:app:m3-overview}
+\end{figure}
+
+\gentab{m3/m3_models}
+
+% ---------------------------------------------------------------------------------------------------
+\subsection{Selection: configurations tried and nested estimates}\label{app:m3:selection}
+
+Each role's finalist is the configuration with the highest LOSO accuracy among the configurations of its role.
+The choice was made on the outer folds, so each finalist's own LOSO number is exploratory; Table~\ref{tab:m3_models} gives the number of configurations compared before each one was kept.
+\begin{itemize}
+  \item Deep finalist: the 1D CNN on the gravity and body frames (12 channels), best of \R{m3/deep_ship_n_configs} deep configurations, shipped with Platt calibration. Its body-frame input was designed after the outer-fold results of the device-frame CNN had been seen (post hoc; Appendix~\ref{app:m3:grip}). Accuracy \Rci{m3/deep_ship_accuracy}, area under the receiver operating characteristic curve (AUC) \Rci{m3/deep_ship_roc_auc}, log loss \Rci{m3/deep_ship_log_loss}.
+  \item MiniRocket finalist: per-trial amplitude scaling, best of \R{m3/mr_ship_n_configs}: \Rci{m3/mr_ship_accuracy}.
+  \item Time-frequency finalist: the 2D CNN on the signed STFT planes, best of \R{m3/tf_ship_n_configs}: \Rci{m3/tf_ship_accuracy}.
+\end{itemize}
+A grip rule was declared before the body-frame results existed: a grip-dependent winner is replaced by the most accurate grip-invariant configuration unless their paired difference excludes 0.
+It did not act, because the most accurate deep configuration was already grip-invariant.
+
+Three nested estimates repeat the deep choice inside every outer fold, by inner cross-validated log loss on the training persons only (Table~\ref{tab:m3_models}; family \code{nested} in Table~\ref{tab:m3_treatments}):
+\begin{itemize}
+  \item among the \R{m3/x_deep_nested_inv_n_candidates} grip-invariant configurations, the shipping policy: \Rci{m3/x_deep_nested_inv_accuracy}. It chose the body-frame CNN in \R{m3/x_deep_nested_inv_chose_cnn_body} of \R{describe/n_persons} folds, so its predictions are identical to that network's;
+  \item among all \R{m3/x_deep_nested_all_n_candidates} configurations: \Rci{m3/x_deep_nested_all_accuracy}. It chose a grip-dependent configuration in \R{m3/x_deep_nested_all_grip_dependent_folds} folds; the gap to the grip-invariant estimate comes from admitting device-frame inputs, not from the selection itself;
+  \item among the \R{m3/x_deep_nested_n_candidates} pre-specified gravity-frame configurations (the five architectures and the antisymmetric CNN): \Rci{m3/x_deep_nested_accuracy}, not detectably different from the default CNN (\Rb{m3/nested_deep_nested_vs_cnn_diff}~points [\Rb{m3/nested_deep_nested_vs_cnn_lo}, \Rb{m3/nested_deep_nested_vs_cnn_hi}], Holm-adjusted $p$ = \R{m3/nested_deep_nested_vs_cnn_p_holm}).
+\end{itemize}
+The grip-invariant nested estimate is the lane's selection-aware deep number.
+Neither nested estimate removes the optimism of the post hoc body-frame design, because the body-frame candidate entered the candidate set after outer-fold results were known.
+
+On natural use, the deep finalist's right-hand recall on the first free-choice trial of each person is \R{m3/deep_ship_nat_acc} [\Rb{m3/deep_ship_nat_lo}, \Rb{m3/deep_ship_nat_hi}] (\R{m3/deep_ship_nat_correct} of \R{describe/n_persons}; exact binomial CI~\cite{clopper1934confidence}).
+These trials are all right-hand trials so far, so a constant `right' answer would score 100\,\%.
+The model answered every one of them (coverage \R{m3/deep_ship_nat_coverage}), so the answered and forced-choice recalls coincide.
+
+% ---------------------------------------------------------------------------------------------------
+\subsection{Time-frequency inputs must keep the sign}\label{app:m3:tfsign}
+
+\emph{Options.} A time-frequency model can take the magnitude of each plane (spectrogram, scalogram) or the signed planes (real and imaginary parts).
+
+\emph{Evidence.} Under the mirror (Equation~\ref{eq:mirror}) a chiral channel only changes sign, $x \to -x$.
+Both transforms are linear, so the magnitude is unchanged: $|\mathrm{STFT}(-x)| = |\mathrm{STFT}(x)|$, and likewise for the CWT.
+Over every chiral channel of all primary trials, the largest magnitude difference between a trial and its mirror image is \R{m3/tf_max_mag_diff_stft} for the STFT and \R{m3/tf_max_mag_diff_cwt} for the CWT, while the real parts change sign (Figure~\ref{fig:M3_02_tf_sign}a--d).
+A magnitude-only input therefore sees a trial and its mirror image as one input.
+With mirror augmentation it receives every input twice with opposite labels, and it returns \pright{} = 0.5, an abstention, on every trial.
+Its coverage is therefore zero (natural use: \R{m3/x_tflog_stft_mag_nat_coverage} answered), its AUC is \R{m3/x_tflog_stft_mag_roc_auc}, and its accuracy with each abstention scored as half right, the expected forced-choice accuracy, is \R{m3/x_tflog_stft_mag_accuracy}.
+Without mirror augmentation it can use only what is not mirror-symmetric between the hands, which does not transfer to new persons: AUC \Rci{m3/x_tflog_stft_mag_noaug_roc_auc}.
+The signed STFT logistic regression reaches an AUC of \Rci{m3/x_tflog_stft_roc_auc} and the signed 2D CNN \Rci{m3/x_cnn2d_stft_roc_auc} (Figure~\ref{fig:M3_02_tf_sign}e).
+Against its signed twin, the mirror-augmented magnitude model loses \Rb{m3/physics_demo_tflog_stft_mag_vs_tflog_stft_diff}~points [\Rb{m3/physics_demo_tflog_stft_mag_vs_tflog_stft_lo}, \Rb{m3/physics_demo_tflog_stft_mag_vs_tflog_stft_hi}] of accuracy ($p < 0.001$, Holm over the \code{physics_demo} family); the CWT pairs behave alike (Table~\ref{tab:m3_treatments}).
+
+\emph{Decision and rationale.} Every time-frequency model of the lane keeps the sign. The hand is carried by the sign of the chiral channels, and a magnitude discards it by construction.
+
+\begin{figure}[tbp]
+  \centering
+  \genfig{m3/M3_02_tf_sign}
+  \caption{Why magnitude-only time-frequency inputs cannot see the hand. (a) Yaw rate of the median right-hand approach and its mirror image; (b) their STFT magnitudes are identical; (c, d) the real parts change sign. (e) LOSO AUC with its 95\,\% CI of signed and magnitude-only models: with mirror augmentation a magnitude-only model abstains on every trial, without it the model is at chance; the signed planes keep the hand.}
+  \label{fig:M3_02_tf_sign}\label{fig:app:m3-tfsign}
+\end{figure}
+
+% ---------------------------------------------------------------------------------------------------
+\subsection{Data treatment and model choices}\label{app:m3:treatments}
+
+Each option was paired against its family default on the same trials: the gravity-frame 1D CNN, MiniRocket on z-scored channels, or the signed STFT logistic regression (Figure~\ref{fig:M3_03_treatments}, Table~\ref{tab:m3_treatments}).
+An option replaces its default only when it is better after the Holm adjustment, and it is rejected when it is worse by the same rule; otherwise the default is kept.
+A log loss that is lower after adjustment marks a candidate improvement, not an adopted one.
+The finalists are a separate, exploratory choice (Appendix~\ref{app:m3:selection}), so a finalist can use an option whose comparison with the default is not detectable.
+Upstream preprocessing (the 60\,Hz grid, the low-pass filter, gap bridging and exclusions) was not varied in this lane; Appendix~\ref{app:prep} covers it.
+
+\paragraph{Channels.}
+\emph{Options:} the 8 gravity-frame channels (default), the 2 chiral channels alone, all 17 channels, and gravity + body frame (12).
+\emph{Evidence:} the body frame adds \Rb{m3/treatment_cnn_body_vs_cnn_diff}~points [\Rb{m3/treatment_cnn_body_vs_cnn_lo}, \Rb{m3/treatment_cnn_body_vs_cnn_hi}] ($p < 0.001$, Holm, family \code{treatment}) and changes the per-person log loss by \R{m3/treatment_cnn_body_vs_cnn_ll} [\Rb{m3/treatment_cnn_body_vs_cnn_ll_lo}, \Rb{m3/treatment_cnn_body_vs_cnn_ll_hi}].
+All 17 channels add \Rb{m3/treatment_cnn_all_vs_cnn_diff}~points [\Rb{m3/treatment_cnn_all_vs_cnn_lo}, \Rb{m3/treatment_cnn_all_vs_cnn_hi}], also better after adjustment (Holm-adjusted $p$ = \R{m3/treatment_cnn_all_vs_cnn_p_holm}).
+The 2 chiral channels alone are not detectably different from the 8 (\Rb{m3/treatment_cnn_chiral_vs_cnn_diff}~points [\Rb{m3/treatment_cnn_chiral_vs_cnn_lo}, \Rb{m3/treatment_cnn_chiral_vs_cnn_hi}]), so the even gravity-frame channels add nothing detectable to the yaw.
+\emph{Decision:} gravity + body frame.
+\emph{Rationale:} it is the most accurate set and it does not depend on the grip, whereas the device-frame channels of the 17-channel set carry evidence tied to phone coordinates that collapses on grips absent from training (Appendix~\ref{app:m3:grip}).
+
+\paragraph{Window.}
+\emph{Options:} the time-normalised approach between the stored onset and end (default), or a fixed 3-s window in absolute time with a mask channel (augmented by a shift of up to 8 samples and a speed change of up to 15\,\% about the onset).
+\emph{Evidence:} \Rb{m3/treatment_cnn_fixed_vs_cnn_diff}~points [\Rb{m3/treatment_cnn_fixed_vs_cnn_lo}, \Rb{m3/treatment_cnn_fixed_vs_cnn_hi}] on the gravity frame and \Rb{m3/treatment_body_cnn_body_fixed_vs_cnn_body_diff}~points [\Rb{m3/treatment_body_cnn_body_fixed_vs_cnn_body_lo}, \Rb{m3/treatment_body_cnn_body_fixed_vs_cnn_body_hi}] on the body frame, both not detectable.
+\emph{Decision:} keep the time-normalised approach for model comparison.
+\emph{Rationale:} no detectable difference. The fixed window needs no end bound, which matters when no cue marks the movement (Appendix~\ref{app:prod}); cue-free bounds were not evaluated in this lane.
+
+\paragraph{Normalisation.}
+\emph{Options:} a z-score per channel (default), no scaling, the median and interquartile range (IQR) winsorised at 5, and per-trial root-mean-square (RMS) amplitude.
+\emph{Evidence:} on the gravity frame none differs detectably from the z-score (\Rb{m3/treatment_cnn_norm_none_vs_cnn_diff}, \Rb{m3/treatment_cnn_norm_robust_vs_cnn_diff} and \Rb{m3/treatment_cnn_norm_trial_vs_cnn_diff}~points).
+On the body frame, per-trial RMS gives \Rb{m3/treatment_body_cnn_body_trial_vs_cnn_body_diff}~points [\Rb{m3/treatment_body_cnn_body_trial_vs_cnn_body_lo}, \Rb{m3/treatment_body_cnn_body_trial_vs_cnn_body_hi}] (unadjusted $p$ = \R{m3/treatment_body_cnn_body_trial_vs_cnn_body_p}, Holm-adjusted \R{m3/treatment_body_cnn_body_trial_vs_cnn_body_p_holm}, family \code{treatment_body}), and it changes the per-person log loss by \R{m3/treatment_body_cnn_body_trial_vs_cnn_body_ll} [\Rb{m3/treatment_body_cnn_body_trial_vs_cnn_body_ll_lo}, \Rb{m3/treatment_body_cnn_body_trial_vs_cnn_body_ll_hi}] (Holm-adjusted $p$ = \R{m3/treatment_body_cnn_body_trial_vs_cnn_body_ll_p_holm}), a lower log loss after adjustment.
+This check is the most accurate model of the lane, \Rci{m3/x_cnn_body_trial_accuracy}, but it was run post hoc as a re-check, not as a candidate.
+\emph{Decision:} keep the z-score; per-trial RMS on the body frame is a candidate improvement for a future nested selection.
+\emph{Rationale:} adopting it now would be one more choice made on these outer folds.
+
+\paragraph{Augmentation.}
+\emph{Options:} the full set (mirror, time warp, scaling and jitter; default), mirror only, and none.
+\emph{Evidence:} \Rb{m3/treatment_cnn_aug_none_vs_cnn_diff}~points [\Rb{m3/treatment_cnn_aug_none_vs_cnn_lo}, \Rb{m3/treatment_cnn_aug_none_vs_cnn_hi}] without augmentation and \Rb{m3/treatment_cnn_aug_mirror_vs_cnn_diff}~points [\Rb{m3/treatment_cnn_aug_mirror_vs_cnn_lo}, \Rb{m3/treatment_cnn_aug_mirror_vs_cnn_hi}] with the mirror only, both not detectable.
+\emph{Decision:} keep the full set.
+\emph{Rationale:} it costs no detectable accuracy, and the mirror term keeps the network close to mirror-equivariant, which the attribution analysis uses (Appendix~\ref{app:m3:saliency}).
+
+\paragraph{Network head.}
+\emph{Options:} a head that keeps 8 time bins (default) or global average pooling, which discards time position.
+\emph{Evidence:} global pooling gives \Rb{m3/treatment_cnn_gap_vs_cnn_diff}~points [\Rb{m3/treatment_cnn_gap_vs_cnn_lo}, \Rb{m3/treatment_cnn_gap_vs_cnn_hi}] (unadjusted $p$ = \R{m3/treatment_cnn_gap_vs_cnn_p}, Holm-adjusted \R{m3/treatment_cnn_gap_vs_cnn_p_holm}): not detectable after adjustment.
+\emph{Decision:} keep the time-binned head.
+\emph{Rationale:} the sign of the yaw reverses later in the approach (Section~\ref{sec:physics}), so the position in time carries information; the unadjusted direction agrees.
+
+\paragraph{Symmetry.}
+\emph{Options:} an unconstrained network trained with mirror augmentation (default), or an antisymmetric network with logit $z(x) = g(x) - g(m(x))$, which gives $P(\mathrm{right}\mid m(x)) = 1 - P(\mathrm{right}\mid x)$ exactly and makes mirror augmentation redundant~\cite{cohen2016group,puny2022frame}.
+\emph{Evidence:} \Rb{m3/treatment_cnn_anti_vs_cnn_diff}~points [\Rb{m3/treatment_cnn_anti_vs_cnn_lo}, \Rb{m3/treatment_cnn_anti_vs_cnn_hi}] on the gravity frame; on the body frame \Rb{m3/treatment_body_cnn_body_anti_vs_cnn_body_diff}~points [\Rb{m3/treatment_body_cnn_body_anti_vs_cnn_body_lo}, \Rb{m3/treatment_body_cnn_body_anti_vs_cnn_body_hi}] (Holm-adjusted $p$ = \R{m3/treatment_body_cnn_body_anti_vs_cnn_body_p_holm}), with a per-person log-loss change of \R{m3/treatment_body_cnn_body_anti_vs_cnn_body_ll} [\Rb{m3/treatment_body_cnn_body_anti_vs_cnn_body_ll_lo}, \Rb{m3/treatment_body_cnn_body_anti_vs_cnn_body_ll_hi}] (Holm-adjusted $p$ = \R{m3/treatment_body_cnn_body_anti_vs_cnn_body_ll_p_holm}), a lower log loss after adjustment.
+\emph{Decision:} keep the default; the antisymmetric body-frame network is a second candidate improvement.
+\emph{Rationale:} as for per-trial RMS, adopting it now would be one more outer-fold choice.
+
+\paragraph{MiniRocket.}
+\emph{Options:} z-scored channels (default), per-trial RMS amplitude, the chiral channels only, and antisymmetric features $\phi(x) - \phi(m(x))$.
+\emph{Evidence:} \Rb{m3/treatment_mr_norm_trial_vs_mr_diff}~points [\Rb{m3/treatment_mr_norm_trial_vs_mr_lo}, \Rb{m3/treatment_mr_norm_trial_vs_mr_hi}], \Rb{m3/treatment_mr_chiral_vs_mr_diff}~points [\Rb{m3/treatment_mr_chiral_vs_mr_lo}, \Rb{m3/treatment_mr_chiral_vs_mr_hi}] and \Rb{m3/treatment_mr_anti_vs_mr_diff}~points [\Rb{m3/treatment_mr_anti_vs_mr_lo}, \Rb{m3/treatment_mr_anti_vs_mr_hi}], none detectable.
+\emph{Decision:} the default stays the comparison baseline; the MiniRocket finalist uses per-trial RMS as the most accurate of its configurations (exploratory).
+
+\paragraph{Time-frequency transform and model.}
+\emph{Options:} the STFT or the CWT; a logistic regression on pooled bands or a 2D CNN on the planes.
+\emph{Evidence:} the CWT is worse than the STFT by \Rb{m3/treatment_tflog_cwt_vs_tflog_stft_diff}~points [\Rb{m3/treatment_tflog_cwt_vs_tflog_stft_lo}, \Rb{m3/treatment_tflog_cwt_vs_tflog_stft_hi}] (Holm-adjusted $p$ = \R{m3/treatment_tflog_cwt_vs_tflog_stft_p_holm}); the 2D CNN is not detectably better than the logistic regression (\Rb{m3/treatment_cnn2d_stft_vs_tflog_stft_diff}~points [\Rb{m3/treatment_cnn2d_stft_vs_tflog_stft_lo}, \Rb{m3/treatment_cnn2d_stft_vs_tflog_stft_hi}], Holm-adjusted $p$ = \R{m3/treatment_cnn2d_stft_vs_tflog_stft_p_holm}).
+\emph{Decision:} the STFT; the time-frequency finalist is the 2D CNN as the most accurate of its configurations (exploratory).
+
+\paragraph{Re-checks on the body frame.}
+The window, normalisation and symmetry checks were repeated on the body-frame CNN (family \code{treatment_body}; results above).
+The augmentation and head decisions were not repeated; the body-frame CNN inherits them from the gravity-frame CNN as an assumption.
+
+\begin{figure}[tbp]
+  \centering
+  \genfig{m3/M3_03_treatments}
+  \caption{Data-treatment and model choices, each paired against its family default on the same trials: mean per-person accuracy difference with its paired person-bootstrap 95\,\% CI; right: the option's accuracy and its Holm-adjusted p within the family. Colour: the Holm-adjusted verdict. The off-scale row is the collapse of the device-frame CNN on grips absent from training (Appendix~\ref{app:m3:grip}). The figure supports the decisions of Appendix~\ref{app:m3:treatments}.}
+  \label{fig:M3_03_treatments}\label{fig:app:m3-treatments}
+\end{figure}
+
+\gentab{m3/m3_treatments}
+
+% ---------------------------------------------------------------------------------------------------
+\subsection{Calibration and its remedies}\label{app:m3:calibration}
+
+The app shows \pright{} as a percentage, so calibration on new persons is part of the result.
+
+\emph{Detection.} Reliability diagrams use 10 equal-mass bins with person-bootstrap bands, the bins held fixed.
+The expected calibration error (ECE) is judged against its distribution under perfect calibration (consistency resampling); its 95th percentile is the null band.
+The calibration slope and intercept carry person-bootstrap CIs; the Brier score~\cite{brier1950verification} and the log loss complete the picture, overall and per platform (Figure~\ref{fig:M3_04_calibration}, Tables~\ref{tab:m3_calibration} and~\ref{tab:m3_calibration_platform}).
+
+\emph{Remedies.} Platt scaling~\cite{platt1999probabilistic}, temperature scaling~\cite{guo2017calibration}, isotonic regression, beta calibration, and the calibrator chosen inside each fold.
+Each was fitted inside every outer fold on the training persons' cross-fitted logits and applied to the held-out person.
+The pre-specified remedy is Platt scaling for a model that is not antisymmetric.
+Each remedy was compared with the uncalibrated model by paired per-person log-loss and Brier differences, Holm-adjusted.
+The target of the analysis plan is an ECE of at most 0.05 and no reliability bin off the diagonal.
+
+\emph{Which bins count as off.} A bin whose trials all have the same hand has an observed share of exactly 0 or 1 and a person-bootstrap band of zero width; judged by that band alone, it is flagged for any prediction short of 0 or 1.
+A bin therefore counts as off only when its person-bootstrap band excludes the bin's mean prediction \emph{and} its observed share lies outside the 95\,\% consistency band of a perfectly calibrated model with the same predictions.
+For the shipped deep finalist, the bootstrap band alone flags \R{m3/deep_cal_platt_bins_off_bootstrap_only} bins, of which \R{m3/deep_cal_platt_bins_off_degenerate} are degenerate; the combined criterion flags \R{m3/deep_cal_platt_bins_off}.
+A perfectly calibrated model would show at least one bin off with probability \R{m3/deep_cal_platt_bins_off_null_rate}.
+
+\paragraph{Deep finalist.}
+Uncalibrated, it already meets the target: ECE \R{m3/deep_cal_none_ece} against a null band of \R{m3/deep_cal_none_ece_null_q95}, slope \Rci{m3/deep_cal_none_cal_slope}, intercept \Rci{m3/deep_cal_none_cal_intercept}, and \R{m3/deep_cal_none_bins_off} bins off by the combined criterion.
+With Platt scaling (shipped), the ECE is \R{m3/deep_cal_platt_ece} against a null band of \R{m3/deep_cal_platt_ece_null_q95}, the slope \Rci{m3/deep_cal_platt_cal_slope} and the intercept \Rci{m3/deep_cal_platt_cal_intercept}, with no bin off: the target is met.
+Platt scaling changes the per-person log loss by \R{m3/deep_cal_platt_vs_none_logloss_diff} [\Rb{m3/deep_cal_platt_vs_none_logloss_lo}, \Rb{m3/deep_cal_platt_vs_none_logloss_hi}] (Holm-adjusted $p$ = \R{m3/deep_cal_platt_vs_none_p_holm_logloss}): it is harmless rather than needed.
+The calibrator chosen inside the fold kept the uncalibrated model in \R{m3/deep_cal_nested_chose_none} of \R{describe/n_persons} folds, so its predictions are identical to the base model's.
+
+\paragraph{MiniRocket finalist.}
+Uncalibrated, it misses the target: ECE \R{m3/mr_cal_none_ece} against a null band of \R{m3/mr_cal_none_ece_null_q95}, slope \Rci{m3/mr_cal_none_cal_slope}, intercept \Rci{m3/mr_cal_none_cal_intercept}, and \R{m3/mr_cal_none_bins_off} bins off.
+With Platt scaling (shipped), the ECE is \R{m3/mr_cal_platt_ece} against a null band of \R{m3/mr_cal_platt_ece_null_q95}, the slope \Rci{m3/mr_cal_platt_cal_slope} and the intercept \Rci{m3/mr_cal_platt_cal_intercept}, with \R{m3/mr_cal_platt_bins_off} bins off: the target is met, narrowly.
+
+\paragraph{Time-frequency finalist.}
+Uncalibrated, its ECE of \R{m3/tf_cal_none_ece} lies above its null band of \R{m3/tf_cal_none_ece_null_q95}, with slope \Rci{m3/tf_cal_none_cal_slope}, intercept \Rci{m3/tf_cal_none_cal_intercept} and \R{m3/tf_cal_none_bins_off} bins off.
+With Platt scaling (shipped), the ECE rises to \R{m3/tf_cal_platt_ece} against a null band of \R{m3/tf_cal_platt_ece_null_q95}, the slope is \Rci{m3/tf_cal_platt_cal_slope} and the intercept \Rci{m3/tf_cal_platt_cal_intercept}, with \R{m3/tf_cal_platt_bins_off} bins off: \emph{the target is missed}, and the shipped remedy does not help.
+The slope and intercept are compatible with 1 and 0, so the miscalibration is not a global over- or under-confidence.
+The reliability curve is S-shaped (Figure~\ref{fig:M3_04_calibration}, top right): the predictions are too low at the bottom, too high in the lower middle, too low in the upper middle and too high at the top.
+A two-parameter monotone map such as Platt's cannot correct that shape.
+Isotonic regression lowers the ECE to \R{m3/tf_cal_isotonic_ece}, still above its null band of \R{m3/tf_cal_isotonic_ece_null_q95} (slope \Rci{m3/tf_cal_isotonic_cal_slope}, intercept \Rci{m3/tf_cal_isotonic_cal_intercept}), without a detectable log-loss gain (\R{m3/tf_cal_isotonic_vs_none_logloss_diff} [\Rb{m3/tf_cal_isotonic_vs_none_logloss_lo}, \Rb{m3/tf_cal_isotonic_vs_none_logloss_hi}], Holm-adjusted $p$ = \R{m3/tf_cal_isotonic_vs_none_p_holm_logloss}).
+It was not adopted, because choosing it here would be one more outer-fold selection.
+
+\paragraph{Per platform.}
+Table~\ref{tab:m3_calibration_platform} repeats the statistics for the \R{m3/deep_cal_platt_android_n_persons} Android and the \R{m3/deep_cal_platt_ios_n_persons} iOS persons.
+For the shipped deep finalist the ECE stays inside its null band on both platforms (Android \R{m3/deep_cal_platt_android_ece} against \R{m3/deep_cal_platt_android_ece_null_q95}; iOS \R{m3/deep_cal_platt_ios_ece} against \R{m3/deep_cal_platt_ios_ece_null_q95}).
+The slopes are \R{m3/deep_cal_platt_android_cal_slope} on Android and \R{m3/deep_cal_platt_ios_cal_slope} on iOS; their CIs, in the table, are wide, above all for iOS, and both contain 1.
+The intercept was not computed per platform.
+
+\emph{Decision.} Ship the pre-specified Platt remedy for each role. The deep and MiniRocket finalists meet the target; the time-frequency finalist does not, and it is flagged as miscalibrated.
+
+\begin{figure}[tbp]
+  \centering
+  \genfig{m3/M3_04_calibration}
+  \caption{Calibration of each role's finalist under LOSO. Top: reliability with 10 equal-mass bins and person-bootstrap bands, uncalibrated (grey) and with the shipped Platt remedy; ringed points: bins off the diagonal by both criteria. Bottom: ECE of every remedy (points) against the 95th percentile of its distribution under perfect calibration (grey bars); dashed line: the target of 0.05; LL: log loss; $*$: pre-specified; (s): shipped. The deep and MiniRocket finalists meet the target; the time-frequency finalist misses it.}
+  \label{fig:M3_04_calibration}\label{fig:app:m3-calibration}
+\end{figure}
+
+\gentab{m3/m3_calibration}
+
+\gentab{m3/m3_calibration_platform}
+
+% ---------------------------------------------------------------------------------------------------
+\subsection{What the network uses: integrated gradients}\label{app:m3:saliency}
+
+\emph{Aim.} To test whether the deep finalist relies on the evidence of the engineered features, early hand-signed motion, and to find the channels that carry it.
+
+\emph{Method.} Integrated gradients (IG) attribute each held-out trial's logit to its input samples.
+Each trial was attributed out of fold by its own fold's ensemble, with the normalised zero input as the baseline; that baseline is invariant under the mirror.
+The attributions are complete to a median relative error of \R{m3/ig_completeness_median_rel_err}, and the sign of the summed attribution agrees with the logit in \R{m3/ig_ig_sign_agrees_with_logit} of the trials.
+The calibrators are monotone maps of the logit, so they do not change the attribution.
+
+\emph{Channels.} The four chiral channels that do not depend on the grip (yaw rate, cumulative yaw, roll rate and lateral acceleration) carry \R{m3/ig_share_odd} of all $|\mathrm{IG}|$, against \R{m3/ig_share_odd_uniform} if every channel weighed the same (Figure~\ref{fig:M3_05_saliency}).
+The lateral acceleration is the largest single channel (\R{m3/ig_acc_lat_share}), followed by the yaw rate (\R{m3/ig_yaw_rate_share}), the roll rate (\R{m3/ig_roll_rate_share}) and the forward acceleration (\R{m3/ig_acc_fwd_share}).
+The two yaw channels together carry \R{m3/ig_share_yaw}; the two chiral body-frame channels carry \R{m3/ig_share_body_odd}.
+
+\emph{Timing.} \R{m3/ig_share_first_half_odd} of the chiral channels' $|\mathrm{IG}|$ falls in the first half of the time-normalised window, against \R{m3/ig_share_first_half_even} for the even channels.
+The chiral channels are thus more front-loaded by only \Rb{m3/ig_first_half_odd_minus_even}~points [\Rb{m3/ig_first_half_odd_minus_even_lo}, \Rb{m3/ig_first_half_odd_minus_even_hi}] (person bootstrap): most of the early concentration is the generic time profile of the attribution.
+The roll rate peaks at the start of the window (\R{m3/ig_roll_rate_peak} of its length), the lateral acceleration at \R{m3/ig_acc_lat_peak} and the yaw rate at \R{m3/ig_yaw_rate_peak}.
+The cumulative yaw peaks late (\R{m3/ig_yaw_cum_peak}), as an integral of the yaw rate should.
+
+\emph{Interactions.} In a mirror-equivariant model an even channel can push toward the true hand only through its interaction with the chiral channels.
+The forward acceleration does so: its attribution toward the true hand is \R{m3/ig_acc_fwd_toward} (sum of IG times the hand sign over the sum of $|\mathrm{IG}|$; 1 means always toward it), against \R{m3/ig_yaw_rate_toward} for the yaw rate.
+The network therefore combines channels rather than reading a single hand-carrying one.
+The mirror consistency, the correlation between $\mathrm{IG}(m(x))$ and $-\mathrm{IG}(x)$, is \R{m3/ig_mirror_corr} (1 for an exactly antisymmetric model).
+
+\emph{Conclusion.} The network agrees with the physics in using early, hand-signed motion, but its evidence is not the early yaw alone: it leans more on the body-relative roll and lateral motion.
+
+\begin{figure}[tbp]
+  \centering
+  \genfig{m3/M3_05_saliency}
+  \caption{Integrated gradients of the deep finalist, out of fold. (a, b) Mean attribution per channel and time toward \pright{} for right- and left-hand trials (teal: toward right; red: toward left). (c) Time profile of $|\mathrm{IG}|$ for the chiral, grip-invariant channels (solid) and the even channels (dashed); grey: the first half. The chiral channels carry \R{m3/ig_share_odd} of $|\mathrm{IG}|$ but are only slightly more front-loaded than the even ones.}
+  \label{fig:M3_05_saliency}\label{fig:app:m3-saliency}
+\end{figure}
+
+% ---------------------------------------------------------------------------------------------------
+\subsection{Breakdown by platform and instructed condition}\label{app:m3:breakdown}
+
+Platform and instructed conditions only stratify the results; they are never model inputs (Figure~\ref{fig:M3_06_breakdown}, Table~\ref{tab:m3_breakdown}).
+The shipped deep finalist reaches \R{m3/bd_deep_platform_android_acc} [\Rb{m3/bd_deep_platform_android_lo}, \Rb{m3/bd_deep_platform_android_hi}] on Android (\R{m3/bd_deep_platform_android_persons} persons) and \R{m3/bd_deep_platform_ios_acc} [\Rb{m3/bd_deep_platform_ios_lo}, \Rb{m3/bd_deep_platform_ios_hi}] on iOS (\R{m3/bd_deep_platform_ios_persons} persons).
+Fast approaches score \R{m3/bd_deep_speed_fast_acc} [\Rb{m3/bd_deep_speed_fast_lo}, \Rb{m3/bd_deep_speed_fast_hi}] and natural-speed approaches \R{m3/bd_deep_speed_natural_acc} [\Rb{m3/bd_deep_speed_natural_lo}, \Rb{m3/bd_deep_speed_natural_hi}].
+Among the movement variants, only the twist has a CI entirely below the overall accuracy: \R{m3/bd_deep_variant_twist_acc} [\Rb{m3/bd_deep_variant_twist_lo}, \Rb{m3/bd_deep_variant_twist_hi}] on \R{m3/bd_deep_variant_twist_n} trials of \R{m3/bd_deep_variant_twist_persons} persons.
+The levels were compared without a multiplicity adjustment, so this finding is exploratory.
+The bent-start variant has fewer than 5 persons and carries no CI (\R{m3/bd_deep_variant_bent_start_acc} on \R{m3/bd_deep_variant_bent_start_n} trials of \R{m3/bd_deep_variant_bent_start_persons} persons).
+
+\paragraph{Label-noise sensitivity.}
+Two blocks of one person show the hand-swap signature found from the data (Appendix~\ref{app:data}); their labels were never changed.
+Without these \R{m3/swap_n_trials} trials, the deep finalist scores \Rci{m3/deep_swapfree_acc}, against \R{m3/deep_ship_accuracy} on all trials; on the swap trials themselves it scores \R{m3/deep_swap_acc}.
+
+\begin{figure}[tbp]
+  \centering
+  \genfig{m3/M3_06_breakdown}
+  \caption{The shipped deep finalist by platform and instructed condition (n: trials; p.: persons; dashed line: overall accuracy). Levels with fewer than 5 persons carry no CI (open marker). The conditions only stratify the result, and the levels are compared without a multiplicity adjustment (exploratory).}
+  \label{fig:M3_06_breakdown}\label{fig:app:m3-breakdown}
+\end{figure}
+
+\gentab{m3/m3_breakdown}
+
+% ---------------------------------------------------------------------------------------------------
+\subsection{Several attempts: aggregation}\label{app:m3:attempts}
+
+\emph{Options.} Four ways to combine $k$ attempts of one person and hand: the mean of \pright{} (the harness definition), the mean logit, the sum of logits (attempts treated as independent evidence), and the sum of the raw logits scaled by $c_k$, fitted on the training persons' cross-fitted logits of each fold.
+The scale $c_k$ plays the role of $1/\tauk$ in the production rule (Section~\ref{sec:production}).
+
+\emph{Evidence.} The k-attempt curves use the \R{m3/k_n_persons} persons with at least 5 trials of each hand and report per-person balanced accuracy (Figure~\ref{fig:M3_07_attempts}, Table~\ref{tab:m3_aggregate}).
+At $k = 3$ the deep finalist reaches \Rci{m3/deep_ship_acc_k3} with the mean of \pright{} and \Rci{m3/deep_aggc_sum_logit_calibrated_k3_acc} with the $c_k$-scaled sum of logits.
+The aggregators differ in calibration.
+At $k = 3$ the over-confidence of the deep finalist (mean confidence minus accuracy) is \Rci{m3/deep_aggc_mean_prob_k3_oc} for the mean of \pright{}, \Rci{m3/deep_aggc_mean_logit_k3_oc} for the mean logit, \Rci{m3/deep_aggc_sum_logit_k3_oc} for the sum of logits and \Rci{m3/deep_aggc_sum_logit_calibrated_k3_oc} for the $c_k$-scaled sum.
+Averaging \pright{} is therefore under-confident.
+The median scale falls from \R{m3/deep_aggc_c1} at $k = 1$ to \R{m3/deep_aggc_c3} at $k = 3$ and \R{m3/deep_aggc_c5} at $k = 5$: the attempts of one person are correlated, so their logits add less than independent evidence would.
+
+\emph{Decision.} The $c_k$-scaled sum of logits. It is the aggregator designed for correlated attempts, and its over-confidence CI at $k = 3$ contains 0 for every role.
+It was chosen among the four aggregators on these outer folds, so the choice is exploratory.
+For the time-frequency finalist it gives \Rci{m3/tf_aggc_sum_logit_calibrated_k3_acc} at $k = 3$, against \R{m3/tf_ship_acc_k3} for the mean of \pright{}; the $k = 3$ column of Table~\ref{tab:m3_models} uses the mean of \pright{}.
+
+\begin{figure}[tbp]
+  \centering
+  \genfig{m3/M3_07_attempts}
+  \caption{Combining $k$ attempts of one person and hand (\R{m3/k_n_persons} persons at every $k$). Left: per-person balanced accuracy of the finalists and the reference (solid: mean of \pright{}, with its 95\,\% person-bootstrap band; dashed: the $c_k$-scaled sum of logits). Right: over-confidence of the four aggregators for the deep finalist; the two sums stay calibrated and the two means are under-confident. The aggregator was chosen among four on these outer folds (exploratory).}
+  \label{fig:M3_07_attempts}\label{fig:app:m3-attempts}
+\end{figure}
+
+\gentab{m3/m3_aggregate}
+
+% ---------------------------------------------------------------------------------------------------
+\subsection{Per person}\label{app:m3:perperson}
+
+Figure~\ref{fig:M3_08_per_person} shows the accuracy of each held-out person.
+No person scores lower with the deep finalist than with the reference; two persons score the same.
+The weakest person for the deep finalist, P09, is the second weakest for the reference, which scores the same on that person; the MiniRocket and time-frequency finalists do better there.
+The largest gains of the deep finalist over the reference are on persons for whom the reference is weak (P17, the reference's weakest person, then P03 and P07).
+The persons who are hard for the deep finalist (P09, P05, P20, P19) are also below the median for the reference, so the deep and engineered models fail partly on the same persons.
+These are readings of the figure on one fold per person, without a test.
+
+\begin{figure}[tbp]
+  \centering
+  \genfig{m3/M3_08_per_person}
+  \caption{Accuracy of each of the \R{describe/n_persons} held-out persons for the three calibrated lane-m3 finalists and the reference yaw logistic regression, sorted by the deep finalist. It shows whether the deep and time-frequency models fail on the same persons as the engineered features.}
+  \label{fig:M3_08_per_person}\label{fig:app:m3-perperson}
+\end{figure}
+
+% ---------------------------------------------------------------------------------------------------
+\subsection{Grip transfer: device frame against body frame}\label{app:m3:grip}
+
+\emph{Detected.} The device-frame channels add accuracy to the gravity-frame CNN (Appendix~\ref{app:m3:treatments}), but their values depend on how the phone is held.
+The instructed grips were balanced across hands, so the gain is not a protocol artefact.
+Evidence tied to phone coordinates may still fail on a grip that training never saw, and production grips are free.
+
+\emph{Test.} A configuration was trained only on the trials whose grip, detected from the up vector before the onset, is upright, and it was tested on every grip; the instructed grip only stratifies the result.
+The grip detection is clean: \R{m3/grip_rotated_detected_upright} rotated-grip trials were detected as upright, and \R{m3/grip_upright_detected_other} upright trials were not detected as upright and were left out of that training.
+The statistic is the paired difference on the rotated grips (top left and top right; \R{m3/grip_cnn_all_upright_vs_cnn_all_rotated_n_trials} trials of \R{m3/grip_cnn_all_upright_vs_cnn_all_rotated_n_persons} persons), which upright-only training never saw (family \code{grip}, Holm).
+
+\emph{Evidence} (Figure~\ref{fig:M3_09_grip_transfer}, Table~\ref{tab:m3_grip}):
+\begin{itemize}
+  \item device frame (all 17): trained on upright grips only, the CNN scores \R{m3/grip_cnn_all_upright_vs_cnn_all_rotated_acc} on the rotated grips against \R{m3/grip_cnn_all_upright_vs_cnn_all_rotated_base_acc} with all-grip training, a change of \Rb{m3/grip_cnn_all_upright_vs_cnn_all_rotated_diff}~points [\Rb{m3/grip_cnn_all_upright_vs_cnn_all_rotated_lo}, \Rb{m3/grip_cnn_all_upright_vs_cnn_all_rotated_hi}] ($p < 0.001$): it collapses toward chance;
+  \item body frame (12): \R{m3/grip_cnn_body_upright_vs_cnn_body_rotated_acc} against \R{m3/grip_cnn_body_upright_vs_cnn_body_rotated_base_acc}, a change of \Rb{m3/grip_cnn_body_upright_vs_cnn_body_rotated_diff}~points [\Rb{m3/grip_cnn_body_upright_vs_cnn_body_rotated_lo}, \Rb{m3/grip_cnn_body_upright_vs_cnn_body_rotated_hi}] (unadjusted $p$ = \R{m3/grip_cnn_body_upright_vs_cnn_body_rotated_p}, Holm-adjusted \R{m3/grip_cnn_body_upright_vs_cnn_body_rotated_p_holm}): not detectable after adjustment. Its per-person log loss on those grips changes by \R{m3/grip_cnn_body_upright_vs_cnn_body_rotated_ll} [\Rb{m3/grip_cnn_body_upright_vs_cnn_body_rotated_ll_lo}, \Rb{m3/grip_cnn_body_upright_vs_cnn_body_rotated_ll_hi}] (Holm-adjusted $p$ = \R{m3/grip_cnn_body_upright_vs_cnn_body_rotated_ll_p_holm}), a higher log loss after adjustment;
+  \item on the rotated grips, the body-frame CNN trained on upright grips only is not detectably different from the gravity-frame CNN trained on all grips (\Rb{m3/grip_cnn_body_upright_vs_cnn_rotated_diff}~points [\Rb{m3/grip_cnn_body_upright_vs_cnn_rotated_lo}, \Rb{m3/grip_cnn_body_upright_vs_cnn_rotated_hi}]);
+  \item with all-grip training, the body frame beats the gravity frame on the upright grips (\Rb{m3/grip_cnn_body_vs_cnn_upright_diff}~points [\Rb{m3/grip_cnn_body_vs_cnn_upright_lo}, \Rb{m3/grip_cnn_body_vs_cnn_upright_hi}], $p < 0.001$) but not detectably on the rotated grips (\Rb{m3/grip_cnn_body_vs_cnn_rotated_diff}~points [\Rb{m3/grip_cnn_body_vs_cnn_rotated_lo}, \Rb{m3/grip_cnn_body_vs_cnn_rotated_hi}]).
+\end{itemize}
+
+\emph{Decision and rationale.} Use the body frame. It avoids the collapse of the device frame on unseen grips.
+The frame itself is exactly invariant to a rotation about the screen normal, so the residual penalty on grips absent from training, suggested by the accuracy CI and shown by the log loss, reflects how people move with a rotated grip.
+Training data must therefore cover the grips expected in production.
+The check covers the three recorded grips, all with the screen toward the person; a screen-away grip reverses the facing axis $\mathbf{h}$ of the body frame and was never recorded.
+
+\begin{figure}[tbp]
+  \centering
+  \genfig{m3/M3_09_grip_transfer}
+  \caption{Grip transfer. (a) Accuracy per instructed grip with its 95\,\% CI; orange: grips that upright-only training never saw. (b) Paired per-person accuracy differences on the rotated and upright grips, Holm-adjusted within the grip family (right: the adjusted p and, where significant, the log-loss verdict). The device-frame CNN collapses on unseen grips; the body-frame CNN does not.}
+  \label{fig:M3_09_grip_transfer}\label{fig:app:m3-grip}
+\end{figure}
+
+\gentab{m3/m3_grip}
+
+% ---------------------------------------------------------------------------------------------------
+\subsection{Against engineered features: input or model class}\label{app:m3:engineered}
+
+Two families of paired comparisons answer this question (Figure~\ref{fig:M3_10_vs_engineered}, Table~\ref{tab:m3_vs_engineered}).
+
+\paragraph{Equal input.}
+The family \code{equal_input} compares deep and linear models on matched information (Holm over its \R{m3/family_equal_input_size} comparisons).
+On the gravity frame alone, the CNN is not detectably better than lane m1's logistic regression on two yaw features (\Rb{m3/equal_input_cnn_vs_m1_lr_yaw2_diff}~points [\Rb{m3/equal_input_cnn_vs_m1_lr_yaw2_lo}, \Rb{m3/equal_input_cnn_vs_m1_lr_yaw2_hi}], Holm-adjusted $p$ = \R{m3/equal_input_cnn_vs_m1_lr_yaw2_p_holm}).
+It is also not detectably different from lane m1's six-feature physics logistic regression (PHYS6: the yaw about gravity plus body-frame roll and lateral features; Appendix~\ref{app:m1}), although the CNN has less input (\Rb{m3/equal_input_cnn_vs_m1_lr_phys6_diff}~points [\Rb{m3/equal_input_cnn_vs_m1_lr_phys6_lo}, \Rb{m3/equal_input_cnn_vs_m1_lr_phys6_hi}]).
+With the body-frame channels, the CNN beats PHYS6 by \Rb{m3/equal_input_cnn_body_vs_m1_lr_phys6_diff}~points [\Rb{m3/equal_input_cnn_body_vs_m1_lr_phys6_lo}, \Rb{m3/equal_input_cnn_body_vs_m1_lr_phys6_hi}] (Holm-adjusted $p$ = \R{m3/equal_input_cnn_body_vs_m1_lr_phys6_p_holm}).
+The deep advantage over the engineered linear model therefore needs the body-frame input: it comes from the input and the model class together, not from the model class alone.
+
+\paragraph{Against engineered-feature models.}
+The family \code{engineered} (Holm over its \R{m3/family_engineered_size} comparisons) pairs the shipped finalists and the three nested deep estimates with three models: the reference yaw logistic regression (\R{reference/accuracy}), lane m1's pre-specified physics logistic regression, and lane m2's best engineered-feature stack, itself an exploratory choice (Appendix~\ref{app:m2}).
+\begin{itemize}
+  \item The deep finalist is better than the reference (\Rb{m3/engineered_cal_deep_platt_vs_example_yaw_logreg_diff}~points [\Rb{m3/engineered_cal_deep_platt_vs_example_yaw_logreg_lo}, \Rb{m3/engineered_cal_deep_platt_vs_example_yaw_logreg_hi}], $p < 0.001$) and than lane m1's physics logistic regression (\Rb{m3/engineered_cal_deep_platt_vs_m1_lr_phys6_diff}~points [\Rb{m3/engineered_cal_deep_platt_vs_m1_lr_phys6_lo}, \Rb{m3/engineered_cal_deep_platt_vs_m1_lr_phys6_hi}], Holm-adjusted $p$ = \R{m3/engineered_cal_deep_platt_vs_m1_lr_phys6_p_holm}). It is not detectably different from lane m2's stack (\Rb{m3/engineered_cal_deep_platt_vs_m2_ens_stack_diff}~points [\Rb{m3/engineered_cal_deep_platt_vs_m2_ens_stack_lo}, \Rb{m3/engineered_cal_deep_platt_vs_m2_ens_stack_hi}], Holm-adjusted $p$ = \R{m3/engineered_cal_deep_platt_vs_m2_ens_stack_p_holm}).
+  \item The grip-invariant nested estimate shows the same pattern: \Rb{m3/engineered_deep_nested_inv_vs_example_yaw_logreg_diff}~points against the reference ($p < 0.001$), \Rb{m3/engineered_deep_nested_inv_vs_m1_lr_phys6_diff}~points against lane m1 (Holm-adjusted $p$ = \R{m3/engineered_deep_nested_inv_vs_m1_lr_phys6_p_holm}) and \Rb{m3/engineered_deep_nested_inv_vs_m2_ens_stack_diff}~points [\Rb{m3/engineered_deep_nested_inv_vs_m2_ens_stack_lo}, \Rb{m3/engineered_deep_nested_inv_vs_m2_ens_stack_hi}] against lane m2 (not detectable).
+  \item The nested estimate over all configurations is better than the reference (\Rb{m3/engineered_deep_nested_all_vs_example_yaw_logreg_diff}~points, $p < 0.001$) and not detectably different from lane m1 (\Rb{m3/engineered_deep_nested_all_vs_m1_lr_phys6_diff}~points, Holm-adjusted $p$ = \R{m3/engineered_deep_nested_all_vs_m1_lr_phys6_p_holm}) or lane m2 (\Rb{m3/engineered_deep_nested_all_vs_m2_ens_stack_diff}~points).
+  \item The architecture-only nested estimate on the gravity frame is worse than lane m2's stack (\Rb{m3/engineered_deep_nested_vs_m2_ens_stack_diff}~points [\Rb{m3/engineered_deep_nested_vs_m2_ens_stack_lo}, \Rb{m3/engineered_deep_nested_vs_m2_ens_stack_hi}], $p < 0.001$).
+  \item The MiniRocket and time-frequency finalists are not detectably worse than lane m2's stack after adjustment (\Rb{m3/engineered_cal_mr_platt_vs_m2_ens_stack_diff}~points [\Rb{m3/engineered_cal_mr_platt_vs_m2_ens_stack_lo}, \Rb{m3/engineered_cal_mr_platt_vs_m2_ens_stack_hi}], Holm-adjusted $p$ = \R{m3/engineered_cal_mr_platt_vs_m2_ens_stack_p_holm}; \Rb{m3/engineered_cal_tf_platt_vs_m2_ens_stack_diff}~points [\Rb{m3/engineered_cal_tf_platt_vs_m2_ens_stack_lo}, \Rb{m3/engineered_cal_tf_platt_vs_m2_ens_stack_hi}], Holm-adjusted $p$ = \R{m3/engineered_cal_tf_platt_vs_m2_ens_stack_p_holm}), but their per-person log loss is higher after the same adjustment (MiniRocket: \R{m3/engineered_cal_mr_platt_vs_m2_ens_stack_ll} [\Rb{m3/engineered_cal_mr_platt_vs_m2_ens_stack_ll_lo}, \Rb{m3/engineered_cal_mr_platt_vs_m2_ens_stack_ll_hi}], Holm-adjusted $p$ = \R{m3/engineered_cal_mr_platt_vs_m2_ens_stack_ll_p_holm}; time-frequency: \R{m3/engineered_cal_tf_platt_vs_m2_ens_stack_ll} [\Rb{m3/engineered_cal_tf_platt_vs_m2_ens_stack_ll_lo}, \Rb{m3/engineered_cal_tf_platt_vs_m2_ens_stack_ll_hi}], Holm-adjusted $p$ = \R{m3/engineered_cal_tf_platt_vs_m2_ens_stack_ll_p_holm}). Against the reference, the time-frequency finalist is better (\Rb{m3/engineered_cal_tf_platt_vs_example_yaw_logreg_diff}~points, Holm-adjusted $p$ = \R{m3/engineered_cal_tf_platt_vs_example_yaw_logreg_p_holm}) and MiniRocket is not detectably better (\Rb{m3/engineered_cal_mr_platt_vs_example_yaw_logreg_diff}~points, Holm-adjusted $p$ = \R{m3/engineered_cal_mr_platt_vs_example_yaw_logreg_p_holm}).
+\end{itemize}
+
+\emph{Conclusion.} On these persons, representation learning does not beat the best engineered features: the body-frame CNN matches lane m2's stack and beats the simpler linear models.
+Its advantage over lane m1 rests on the body-frame input.
+It is also costlier: one LOSO run of the deep finalist takes \R{m3/deep_ship_cpu_min} CPU-minutes, and the network needs a port to the browser with parity tests before it can run in the app (Appendix~\ref{app:final}).
+
+\begin{figure}[tbp]
+  \centering
+  \genfig{m3/M3_10_vs_engineered}
+  \caption{Lane-m3 models against linear and engineered-feature models on the same trials: mean per-person accuracy difference with its paired person-bootstrap 95\,\% CI; right: the lane-m3 model's accuracy and the Holm-adjusted p (families \code{equal_input} and \code{engineered}). Colour: the Holm-adjusted verdict. The deep advantage over the linear models needs the body-frame input, and no lane-m3 model is detectably better than lane m2's stack.}
+  \label{fig:M3_10_vs_engineered}\label{fig:app:m3-engineered}
+\end{figure}
+
+\gentab{m3/m3_vs_engineered}
+
+% ---------------------------------------------------------------------------------------------------
+\subsection{Caveats}\label{app:m3:caveats}
+
+\begin{itemize}
+  \item With \R{describe/n_persons} persons, most paired differences between configurations are not detectable after the adjustment, so the ranking of the architectures is not resolved.
+  \item Outer-fold choices: each finalist was kept among its role's configurations; the body-frame input was designed after the grip-transfer result of the device-frame CNN had been seen, which no nested estimate removes; the aggregator recommendation is also an outer-fold choice.
+  \item The natural-use set has one trial per person, all with the right hand: it measures right-hand recall only, with a wide exact CI, and a constant `right' answer would score 100\,\%.
+  \item The ECE null band treats trials as independent and ignores the clustering within persons, so it understates the noise: an ECE above the band is weaker evidence of miscalibration than it looks, and an ECE inside it is strong evidence of calibration.
+  \item Deviations from a textbook inner cross-fit, kept because they are cheaper and checked by the calibration statistics: the calibrators are fitted on cross-fitted logits of single ensemble members but applied to the ensemble mean; each member's early-stopping epoch is chosen on the rows that also supply its cross-fitted logits; a refit on the whole fold is replaced by the cross-validated ensemble; the MiniRocket biases are fitted on all outer-training rows, inner-validation persons included (label-free, but transductive for the inner choices).
+  \item The body-frame re-checks cover the window, normalisation and symmetry only; the other treatment decisions are inherited from the gravity-frame CNN.
+  \item Every model was evaluated on the oracle windows; the cue-free segmentation of production (Appendix~\ref{app:prod}) was not combined with these models in this lane.
+  \item The body frame was given to the 1D CNN only; MiniRocket and the time-frequency models still use the gravity frame.
+  \item Lane m2's engineered features include device-frame channels; whether its stack transfers to grips absent from training was not tested here.
+\end{itemize}

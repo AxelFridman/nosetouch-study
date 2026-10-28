@@ -1,0 +1,82 @@
+% sections/01_introduction.tex: the question, why it is hard, the approach, the status note, related work.
+% Numbers only through \R / \Rci. Static table: tab:related (prior work; literature only, no result of ours).
+% The status note is the ONLY place that states the audit status of the final-model lane.
+\section{Introduction}\label{sec:intro}
+
+\paragraph{The question.} A person holds a smartphone at arm's length and brings it to touch the nose, with the left
+or the right hand. The task, set by the principal investigator (PI), is to predict which hand from the phone's
+motion sensors alone, as the browser's DeviceMotion interface delivers them to a web page at about
+60~Hz~\cite{w3c2025deviceorientation}. The answer is a percentage, \pright{}: the probability that the right hand
+moved the phone. It should be calibrated (of the touches given 80\,\%, about 80\,\% should be right-hand touches),
+and it must hold for persons the model has never seen, because the PI will test it on new persons.
+
+\paragraph{Why it is hard.} Five things make the task hard.
+\begin{enumerate}[nosep,leftmargin=1.5em]
+  \item Persons differ in arm length, speed and style, and the model sees no movement of the test person.
+  \item Phones differ in sensors, sampling and browser~\cite{stisen2015heterogeneity}: iOS reports the
+    accelerometer with the opposite sign to Android, and the browser delivers only about 60~Hz.
+  \item The device axes turn with the grip, so the same arm movement gives different device-frame signals when the
+    phone is held upright, sideways or with the screen away.
+  \item The two hands make mirror-image movements, so most simple descriptors (speed, duration, path length) are
+    the same for both hands.
+  \item In production there is no start cue: the page must find the approach in a continuous stream, reject other
+    movements such as the return of the arm, and decide when it has seen enough.
+\end{enumerate}
+
+\paragraph{The approach.} The analysis rests on the left--right mirror symmetry of the body
+(Section~\ref{sec:physics}). Mirroring a movement flips the sign of a few chiral (mirror-odd) quantities, chiefly
+the rotation about gravity, and leaves the rest unchanged, so only chiral quantities can carry the hand. Every trial
+is standardised into a gravity frame that does not depend on the grip and a body frame that follows the phone's
+heading (Section~\ref{sec:methods}). Four model families, from a one-line rule to deep sequence models, are
+evaluated by leave-one-person-out (LOSO) cross-validation, with all tuning nested inside the training persons. A
+pre-specified cross-lane rule selects the final model among the lanes' candidates, and a nested run of this
+selection gives its selection-aware estimate (Section~\ref{sec:results}). Calibration, several attempts, natural free-choice use and
+robustness to an unseen grip are tested on the same folds. A separate simulation removes the start cue and adds
+detection, online logic and a stopping rule (Section~\ref{sec:production}). Secondary analyses ask what else the
+same data reveal: speed, grip, handedness and the value of demographics (Section~\ref{sec:secondary}). The
+appendices state every decision with its options, evidence and rationale.
+
+\paragraph{Status of this version.} This is a preliminary version, written for the researcher's review. The
+analysis was organised in lanes, and the appendices keep their names. The lanes on interpretable models (m1,
+Appendix~\ref{app:m1}), classical machine learning (m2, Appendix~\ref{app:m2}), time-frequency and deep models
+(m3, Appendix~\ref{app:m3}), the cue-free production pipeline (m4, Appendix~\ref{app:prod}), preprocessing (p1,
+Appendix~\ref{app:prep}) and the case study (x1, Appendix~\ref{app:pd01}) each passed two independent audits, one
+for rigour and one for reproducibility, and were fixed after each. The final-model lane (selection, calibration and
+export; Appendix~\ref{app:final}) is a first pass that has not yet been independently audited. The secondary
+analyses of speed, grip and handedness passed two audits with fixes; the demographics test is a quick, unaudited
+first pass. The final model has not yet been run inside the cue-free production simulation, so the production
+numbers of Section~\ref{sec:production} use that simulation's own reference classifier. No review of the
+report's completeness has run yet.
+
+\paragraph{Related work.} Table~\ref{tab:related} lists prior work on detecting the hand or the handedness from
+phone or wrist sensors. Most studies infer the hand from touch traces or grip during ordinary phone use
+\cite{goel2012gripsense,guo2016operating,nelavelli2018adaptive,fernandez2021implicit}, and several split the data
+by trial or at random, so that the same person can appear in training and test. Such splits overstate the accuracy
+for new persons \cite{saeb2017usecase,little2017crossvalidation,chaibubneto2019subject}, and with few persons a
+cross-validated estimate has wide error bars \cite{varoquaux2018cvfailure}. Closest to this task,
+Mohammadi-Ghazi et al.\ saw opposite rotation senses of the two hands in a clinical finger-to-nose test with wrist
+sensors, but built no classifier~\cite{mohammadighazi2022ataxia}. The studies in Table~\ref{tab:related} report
+accuracies; a calibrated probability is a separate requirement, and modern classifiers, deep networks in
+particular, are often over-confident~\cite{guo2017calibration}. This study therefore evaluates person-wise
+throughout and checks calibration for every model it ships.
+
+\begin{table}[htbp]
+\centering
+\caption{Prior work on detecting the hand or the handedness from phone or wrist sensors. Accuracies are as
+reported; most evaluations are not person-wise.}\label{tab:related}
+\footnotesize
+\begin{tabularx}{\linewidth}{@{}l>{\raggedright\arraybackslash}X r >{\raggedright\arraybackslash}X >{\raggedright\arraybackslash}X@{}}
+\toprule
+Study & Signal & N & Result & Caveat \\
+\midrule
+GripSense \cite{goel2012gripsense} & gyroscope, touch, vibration & 10 & 84.26\,\% hand posture & controlled study \\
+Löchtefeld et al.\ \cite{lochtefeld2015handedness} & sensors during the unlock gesture, $k$-NN & 12 & 98.51\,\% & all right-handed \\
+Guo et al.\ \cite{guo2016operating} & touch traces; acc + gyro for hand changes & 14 & $\approx$94\,\% precision & random 10-fold CV \\
+Nelavelli \& Ploetz \cite{nelavelli2018adaptive} & sign of the swipe-arc curvature & 12 & 99.53\,\% consistent & no held-out users \\
+Fernández et al.\ \cite{fernandez2021implicit} & touch features & 174 & up to 99.92\,\% TPR & oversampling before random splits \\
+Chen et al.\ \cite{chen2023handedness} & motion sensors, LSTM & n/r & 89.2--97.4\,\% & unclear if test users unseen \\
+Singh \& Singh \cite{singh2025dominant} & acc, gyro, orientation; XGBoost & n/r & 85.04\,\% (3 classes) & protocol not reported \\
+Mohammadi-Ghazi et al.\ \cite{mohammadighazi2022ataxia} & wrist IMU, finger-to-nose & 17 & opposite rotation sense & clinical, no classifier \\
+\bottomrule
+\end{tabularx}
+\end{table}

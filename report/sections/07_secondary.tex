@@ -1,0 +1,66 @@
+% sections/07_secondary.tex: speed, grip, handedness (lane sec, after its audit fixes) and the demographics add-on
+% test (lane demo, a quick unaudited first pass). Details, every table and the demo figures: Appendix H (app:sec).
+\section{Secondary analyses: speed, grip, handedness and demographics}\label{sec:secondary}
+
+The same recordings carry more than the hand. These secondary models feed nothing that the page displays, so the
+report makes no calibration claim for them. All use LOSO with nested tuning and balanced accuracy, the mean recall
+over the classes, because the classes are unbalanced (Appendix~\ref{app:sec:design}).
+
+\paragraph{Instructed speed.} The app ended a slow trial with stricter criteria than the other trials, so the
+oracle windows carry the speed label in their length. Re-running the app's detector with one parameter set for
+every trial gives label-blind windows (Appendix~\ref{app:sec:segmentation}). On these, the pre-specified
+multinomial LR on 16 mirror-invariant kinematic features reaches a balanced accuracy of
+\Rci{sec/speed_lr_common_bacc} (chance \R{sec/chance_speed}; Figure~\ref{fig:SEC_02_speed_confusion}). On the
+oracle windows it reaches \Rci{sec/speed_lr_bacc}, a label-informed and optimistic figure (paired difference
+\Rcib{sec/pair_speed_lr_common_vs_speed_lr_d_bacc}~points, Holm $p$~\R{sec/pair_speed_lr_common_vs_speed_lr_d_bacc_p_holm} over the balanced-accuracy
+comparisons of Appendix~\ref{app:sec:speed-models}). LightGBM is not better (difference
+\Rcib{sec/pair_speed_gbm_common_vs_speed_lr_common_d_bacc}~points, Holm $p$ =
+\R{sec/pair_speed_gbm_common_vs_speed_lr_common_d_bacc_p_holm}). Two caveats limit the result. The protocol
+confounds speed with grip: the grip alone predicts the instructed speed at \Rci{sec/speed_grip_bacc}, and the
+headline does not beat it in balanced accuracy (Holm $p$ =
+\R{sec/pair_speed_lr_common_vs_speed_grip_d_bacc_p_holm}). And the fast instruction was weak: it raised the peak
+angular speed for \R{sec/manip_standard_peak_natural_fast_n_expected} of
+\R{sec/manip_standard_peak_natural_fast_n} persons (Holm $p$~\R{sec/manip_standard_peak_natural_fast_p_holm} over the manipulation contrasts), but its effect on the duration is uncertain
+(natural/fast duration ratio \Rcib{sec/manip_standard_dur_fast_natural_ratio}, Holm $p$ =
+\R{sec/manip_standard_dur_fast_natural_p_holm}; Appendix~\ref{app:sec:manipulation}).
+
+\begin{figure}[htbp]
+\centering
+\genfig{sec/SEC_02_speed_confusion}
+\caption{Confusion matrices of the instructed speed on label-blind windows (LOSO; counts and row shares; rows:
+instructed speed) for the duration-only baseline, the headline kinematic LR and LightGBM, with balanced accuracy
+and macro-F1. From the sensors alone the speed is recognised only moderately above chance.}
+\label{fig:SEC_02_speed_confusion}
+\end{figure}
+
+\paragraph{Grip.} The grip is recognised at a balanced accuracy of \Rci{sec/grip_lr_bacc} from the up vector in
+device coordinates while the phone rests before the movement; a 12-feature model gives identical predictions. The
+\R{sec/grip_lr_n_errors} errors come from \R{sec/grip_lr_n_persons_with_errors} persons, and all
+\R{sec/grip_lr_n_up_matches_predicted} lie in the up-vector cluster of the predicted grip. These trials were
+probably held in another grip than instructed, although no independent record confirms it
+(Appendix~\ref{app:sec:grip}).
+
+\paragraph{Dominant hand.} Mirror-invariant kinematics show no detectable dominant-hand signal
+(Figure~\ref{fig:SEC_06_dominance_auc}): the pooled AUC is \Rci{sec/dom_auc}, against a within-person permutation
+null with mean \R{sec/dom_null_pooled_mean} ($p$ = \R{sec/dom_p_pooled}, unadjusted, a single pre-specified test). With only \R{sec/dom_n_left} left-handed
+persons, no person-level handedness model was fitted; they are shown individually
+(Appendix~\ref{app:sec:dominance}).
+
+\begin{figure}[htbp]
+\centering
+\genfig{sec/SEC_06_dominance_auc}
+\caption{Can mirror-invariant kinematics tell a trial of the dominant hand? (a) The pooled AUC against its
+within-person label-permutation null (200 permutations, the whole nested pipeline re-run). (b) The AUC within each
+person; diamonds: the two left-handed persons, shown individually. No dominant-hand signal is detected.}
+\label{fig:SEC_06_dominance_auc}
+\end{figure}
+
+\paragraph{Demographics.} Production has no demographics. A quick, unaudited first-pass test asked whether they
+would help if it had (Appendix~\ref{app:sec:demo}). A second-stage logistic regression on the final model's logit,
+fitted inside each fold, was given the persons' age, sex, height, handedness and usual phone hand. Against the same
+second stage without covariates, adding them changes the accuracy by \Rcib{demo/main_dacc}~points (Holm $p$ = \R{demo/main_holm_acc} over the two add-on
+variants), and adding their
+interactions with the logit raises the log loss by \Rcib{demo/inter_dll} (Holm $p$ = \R{demo/inter_holm_ll};
+Figure~\ref{fig:DEMO_01_paired} in Appendix~\ref{app:sec:demo}). The base model is the shipped final model, whose selection is exploratory.
+Demographics are not added. Natural-use recall cannot judge such an add-on, because a rule that always answers right
+scores \R{demo/ruleright_nat_recall} on the all-right free-choice trials.

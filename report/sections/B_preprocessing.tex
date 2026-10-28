@@ -1,0 +1,671 @@
+% sections/B_preprocessing.tex: Lane p1.
+% Owner: the writer named in the report plan. Numbers only through \R / \Rci; figures through \genfig,
+% tables through \gentab (report/README.md).
+\section{Preprocessing and data-treatment decisions}\label{app:prep}
+
+This appendix justifies every signal-processing and data-treatment choice of the pipeline (lane p1).
+Each choice was tested by changing one setting at a time and re-running the full leave-one-person-out
+(LOSO) evaluation with a fixed panel of three models.
+Every default survives this test. The appendix also covers the calibration of the panel's \pright{} and
+the combination of several attempts.
+Abbreviations: confidence interval (CI), logistic regression (LR), gradient-boosted trees (GBM),
+MiniRocket with a ridge classifier (MR), area under the ROC curve (AUC), expected calibration error (ECE),
+Benjamini--Hochberg (BH). A difference in accuracy is given in percentage points (points).
+
+% ------------------------------------------------------------------------------------------------
+\subsection{How each choice was judged}\label{app:prep:method}
+
+\paragraph{The panel.} Three models of different kinds were fixed before any option was compared, each
+with one configuration (Table~\ref{tab:p1_panel}).
+\emph{LR}: an L2 logistic regression ($C = \R{p1/lr_c}$) on the means of \R{p1/n_bins} time bins of the
+\R{p1/lr_n_channels} chiral gravity-frame channels (the yaw rate $\vomega\cdot\ghat$ and its cumulative
+integral), trained with mirror augmentation.
+With mirror augmentation the fitted LR is antisymmetric, $p(m(x)) = 1 - p(x)$, so mirror-even inputs get no
+weight (Section~\ref{sec:physics}).
+\emph{GBM}: LightGBM with fixed parameters (\R{p1/gbm_n_estimators} trees, learning rate
+\R{p1/gbm_learning_rate}, \R{p1/gbm_num_leaves} leaves, row and column subsampling \R{p1/gbm_subsample} and
+\R{p1/gbm_colsample}) on \R{p1/gbm_features_per_channel} summary features of each of the
+\R{p1/gbm_n_channels} channels, with mirror augmentation.
+\emph{MR}: MiniRocket~\cite{dempster2021minirocket} (\R{p1/mr_features} features requested) on the
+\R{p1/mr_n_channels} gravity-frame channels, with a ridge classifier whose penalty and Platt
+scaling~\cite{platt1999probabilistic} were fitted by an inner \R{p1/mr_inner_splits}-fold split over the
+training persons.
+The panel spans a linear model on two physically motivated channels, a tree ensemble on engineered features
+and a random-kernel time-series model. A treatment that helps or hurts all three is a property of the data,
+not of one model.
+
+\paragraph{Options.} An \emph{option} is an alternative to one default. Options on the recorded stream
+(cut-off, filter order, causal filter, gap bridging, interpolation, sampling rate, rounding, timestamp
+jitter, gravity estimate, window, bound errors) were built by re-standardising the raw records with one
+setting changed. This produced \R{p1/n_variants} variant caches, including the default one. With every
+setting at its default, the rebuilt arrays equal the analysis cache exactly (largest difference
+\R{p1/variant_fidelity_max_diff} over \R{p1/variant_fidelity_n_trials} trials). Options on the training set
+(channel sets, normalisation, winsorising, augmentation, training-row filters, platform) were applied inside
+each training fold. In all, the lane ran \R{p1/n_experiments} LOSO experiments on the \R{p1/n_trials}
+primary trials of \R{p1/n_persons} persons.
+
+\paragraph{Paired comparison.} Each option was compared with the same model under the current pipeline,
+on the same trials and folds. The comparison gives the pooled accuracy difference with its CI
+(\R{p1/n_boot} person resamples), the mean per-person log-loss difference with its CI, and an exact
+sign-flip test over persons. The comparisons form three families, each adjusted by BH and by Holm: the
+options (\R{p1/fam_options_size} option-by-model comparisons), the robustness costs
+(\R{p1/fam_robustness_size} test-time segmentation errors) and the pairs (\R{p1/fam_pairs_size} remedies
+and size-matched controls).
+
+\paragraph{Verdicts.} \emph{Worse} or \emph{better}: the paired CI excludes 0 and the BH $q$ is below
+\R{p1/alpha}. \emph{Nominally worse} or \emph{nominally better}: only the CI excludes 0; this is suggestive,
+not significant. \emph{Identical}: every prediction is within \R{p1/identical_tol} of the default (solver
+precision). \emph{No difference}: the CI includes 0. This is absence of evidence, not equivalence. The
+lower end of its CI is the largest loss the data allow, and the upper end is the largest gain forgone.
+
+\paragraph{Decision rule.} The rule was fixed in advance: change a default only if one option is better for
+at least two panel models and worse for none. An option run on one model cannot meet the rule; this
+applies to one option of the frame choice and one of the augmentation choice.
+
+\paragraph{Other roles.} A \emph{robustness} run perturbs the test input of an unchanged model; it sets a
+requirement for production and is never an option. A \emph{remedy} is judged only against the problem it
+addresses. A \emph{scoring} run scores the trials an exclusion rule removes with the base model. A
+\emph{control} removes as many training trials or persons at random as an option does. The leak check
+ran on every fold for the base and nested-calibrated runs, and passed; for the other variants it ran on
+\R{p1/leak_sample_folds} seeded folds.
+
+\gentab{p1/p1_panel}
+
+The panel's natural-use result is right-hand recall on the free-choice trials (all right-hand so far; a
+constant right answer would score 100\,\%): LR \R{p1/lr_nat_answered}, GBM \R{p1/gbm_nat_answered} and MR
+\R{p1/mr_nat_answered} of \R{p1/gbm_nat_n} trials (Table~\ref{tab:p1_panel}). No panel model returned a
+\pright{} of exactly 0.5 on these trials (coverage \R{p1/lr_nat_coverage}, \R{p1/gbm_nat_coverage} and
+\R{p1/mr_nat_coverage}), so the forced-choice accuracy equals the answered accuracy.
+GBM has the highest base accuracy, \Rci{p1/gbm_accuracy}. Calling it the best panel model is a choice made
+on the outer folds among \R{p1/best_n_configs_tried} models, so it is exploratory.
+
+% ------------------------------------------------------------------------------------------------
+\subsection{Overview: every default is kept}\label{app:prep:overview}
+
+Figure~\ref{fig:P1_01_forest} shows every option against the current pipeline for each panel model.
+Table~\ref{tab:p1_decisions} summarises the \R{p1/n_choices} choices and Table~\ref{tab:p1_decisions_by_model}
+gives the same choices per model. The rule keeps the default in \R{p1/n_choices_kept} of \R{p1/n_choices}
+choices and changes none (\R{p1/n_choices_changed}). Unless stated otherwise, $q$ below is the BH-adjusted
+value within the options family.
+
+No option is better than the current pipeline, even nominally (\R{p1/n_options_better} better,
+\R{p1/n_options_nominally_better} nominally better). Of the \R{p1/fam_options_size} option comparisons,
+\R{p1/n_options_ci_excludes_0} have a CI that excludes 0; about \R{p1/expected_false_ci} would do so by
+chance at the 95\,\% level. BH keeps \R{p1/n_options_worse}, both worse, and Holm keeps
+\R{p1/n_options_holm}:
+\begin{itemize}[nosep]
+\item device-frame channels instead of the chiral channels in LR: \Rci{p1/d_lr_frame_device}~points,
+  BH $q$~=~\R{p1/q_lr_frame_device}, Holm $p$~=~\R{p1/holm_lr_frame_device};
+\item gravity-frame channels only in GBM: \Rci{p1/d_gbm_frame_gravity}~points,
+  BH $q$~=~\R{p1/q_gbm_frame_gravity}, Holm $p$~=~\R{p1/holm_gbm_frame_gravity}.
+\end{itemize}
+The other \R{p1/n_options_nominally_worse} CIs that exclude 0 are nominally worse and do not survive either
+adjustment. Of the remaining comparisons, \R{p1/n_options_identical} are identical to the default and
+\R{p1/n_options_no_difference} show no difference.
+
+The per-person log loss points the same way. Its paired CI lies above 0 for the device-frame LR
+(\Rcib{p1/dll_lr_frame_device}), the gravity-frame GBM (\Rcib{p1/dll_gbm_frame_gravity}) and the GBM
+without mirror augmentation (\Rcib{p1/dll_gbm_no_mirror}), among others.
+A few options lower the log loss nominally without changing accuracy: the fixed 3-s window for MR
+(\Rcib{p1/dll_mr_win_fixed}), the approach plus hold for GBM (\Rcib{p1/dll_gbm_win_hold}) and time warping
+for GBM (\Rcib{p1/dll_gbm_time_warp}). The rule decides on accuracy, so these remain leads for future work,
+not changes.
+Figure~\ref{fig:P1_01_forest} shows the accuracy differences of all \R{p1/fam_options_size}
+option-by-model comparisons. The full numbers (accuracy, accuracy difference with its CI, BH $q$, log-loss
+difference with its CI and verdict) are in \code{tables/p1/p1_options_a} and \code{p1_options_b} of the
+analysis outputs; at more than a page each, they are too long to reproduce here.
+
+\begin{figure}[p]
+\centering
+\genfig{p1/P1_01_forest}
+\caption{Every data-treatment option against the current pipeline, per panel model: paired difference in
+LOSO accuracy (points) with its 95\,\% CI (\R{p1/n_persons} persons; \R{p1/fam_options_size} comparisons in
+one multiplicity family). Filled: CI excludes 0 and BH $q < \R{p1/alpha}$; light fill: CI alone excludes 0;
+open circle: no difference; open square: identical predictions. The exclusion-rule rows add the excluded
+trials to training and score the primary trials only. No option beats the default for two models, so every
+default is kept.}
+\label{fig:P1_01_forest}\label{fig:app:prep-forest}
+\end{figure}
+
+\gentab{p1/p1_decisions}
+\gentab{p1/p1_decisions_by_model}
+
+% ------------------------------------------------------------------------------------------------
+\subsection{Low-pass filter: cut-off, order and phase}\label{app:prep:filter}
+
+\paragraph{Options.} The default is a zero-phase Butterworth low-pass at \R{p1/lowpass_hz}~Hz, order
+\R{p1/lowpass_order}, applied after resampling to \R{p1/fs_hz}~Hz. The options were no low-pass, cut-offs
+of 5, 10 and 20~Hz, orders 2 and 8, and a causal (one-pass) filter of the same design.
+
+\paragraph{Evidence.} The movement lives below the cut-off: \R{describe/gyro_power_below_lowpass} of the
+gyroscope power and \R{describe/acc_power_below_lowpass} of the accelerometer power of the approach lie
+below 15~Hz, on both platforms (Figure~\ref{fig:S2_07_spectrum}). No filter option changes accuracy beyond
+noise (Figure~\ref{fig:P1_02_cutoff}). Only the 5-Hz cut-off in LR is nominally worse,
+\Rci{p1/d_lr_lp5}~points (BH $q$~=~\R{p1/q_lr_lp5}). The largest loss compatible with the data is
+\Rb{p1/d_mr_lp_none_lo}~points (no low-pass, MR), and the largest gain forgone is
+\Rb{p1/d_gbm_lp5_hi}~points (5~Hz, GBM).
+
+\paragraph{Phase.} A causal filter delays the signal. At the current design it delays a 1-Hz movement by
+\R{p1/causal_delay_ms}~ms; a 10-Hz cut-off would cost \R{p1/delay_10hz_o4_ms}~ms, a 20-Hz cut-off
+\R{p1/delay_20hz_o4_ms}~ms, and order 8 at 15~Hz \R{p1/delay_15hz_o8_ms}~ms
+(Figure~\ref{fig:P1_10_filter_delay}). Its accuracy cost is within noise: LR \Rci{p1/d_lr_lp_causal} and GBM
+\Rci{p1/d_gbm_lp_causal}~points.
+
+\paragraph{Decision.} Keep the zero-phase 15-Hz filter of order 4. The predictor processes a recorded
+buffer, so a zero-phase filter is also available in production. If a later online stage needs a causal
+filter, the data bound its accuracy cost at \Rb{p1/d_gbm_lp_causal_lo}~points.
+
+\begin{figure}[htbp]
+\centering
+\begin{subfigure}[t]{0.49\linewidth}
+\centering
+\genfig{core/S2_07_spectrum}
+\caption{Cumulative power spectrum of the approach (median over \R{describe/primary_trials} primary
+trials); the vertical line is the 15-Hz cut-off.}
+\label{fig:S2_07_spectrum}
+\end{subfigure}\hfill
+\begin{subfigure}[t]{0.49\linewidth}
+\centering
+\genfig{p1/P1_10_filter_delay}
+\caption{Group delay of causal Butterworth low-pass filters (order 4) at \R{p1/fs_hz}~Hz; the zero-phase
+filter of the pipeline has none.}
+\label{fig:P1_10_filter_delay}
+\end{subfigure}
+\caption{Why the cut-off is 15~Hz and why the filter is zero-phase. (a)~Almost all movement power lies below
+the cut-off on both platforms. (b)~A causal filter at the current design would delay a 1-Hz movement by
+\R{p1/causal_delay_ms}~ms.}
+\label{fig:app:prep-filter}
+\end{figure}
+
+\begin{figure}[htbp]
+\centering
+\genfig{p1/P1_02_cutoff}
+\caption{Low-pass filter options. Left: cut-off of the zero-phase Butterworth filter (order 4); right: its
+order at 15~Hz, and the causal filter of the same design. Paired accuracy difference against the current
+pipeline (star), per panel model (legend: current accuracy), with 95\,\% CIs; markers as in
+Figure~\ref{fig:P1_01_forest}. The default is kept.}
+\label{fig:P1_02_cutoff}\label{fig:app:prep-cutoff}
+\end{figure}
+
+% ------------------------------------------------------------------------------------------------
+\subsection{Gaps, sampling rate, timestamps and gravity}\label{app:prep:sampling}
+
+\paragraph{Gaps and imputation.} The default bridges gaps of up to \R{p1/max_gap_ms}~ms by linear
+interpolation. Trials with a longer gap near the movement are excluded by rule E4d
+(Section~\ref{app:prep:exclusions}). Bridging gaps of up to 250~ms changes no primary trial
+(\R{p1/vdiff_gap250_n_differing} trials differ), so its predictions are identical. Bridging only up to
+50~ms changes \R{p1/vdiff_gap50_n_differing} trials and shows no difference. Cubic-spline and
+sample-and-hold resampling show no difference either; the largest loss compatible with the data is
+\Rb{p1/d_gbm_interp_hold_lo}~points (sample-and-hold, GBM). Decision: keep linear bridging up to
+\R{p1/max_gap_ms}~ms.
+
+\paragraph{Sampling rate and timestamps.} The predictor must tolerate slower browsers and imprecise
+timestamps, because phones differ in rate and timing~\cite{stisen2015heterogeneity}. Keeping every second
+or third raw sample (30 and 20~Hz), rounding the iOS values to 0.1, or adding Gaussian noise of SD 2, 5 or
+10~ms to the sample times shows no difference for any model (Figure~\ref{fig:P1_04_sampling}). The largest
+drop is LR at 20~Hz, \Rci{p1/d_lr_fs20}~points. The largest loss compatible with the data is
+\Rb{p1/d_mr_fs20_lo}~points (20~Hz, MR). Decision: keep the native rate and precision, resampled to
+\R{p1/fs_hz}~Hz. This is a bound, not a proof of robustness.
+
+\paragraph{Gravity estimate.} The chiral channels are defined relative to gravity, so the gravity estimate
+matters in principle. The default propagates gravity with the gyroscope. A 1-Hz low-pass of the
+accelerometer and the browser's own fusion~\cite{w3c2025deviceorientation} show no difference
+(Table~\ref{tab:p1_decisions}). The largest loss compatible with the data is
+\Rb{p1/d_lr_grav_lowpass_lo}~points (1-Hz low-pass, LR); the largest gain forgone is
+\Rb{p1/d_gbm_grav_browser_hi}~points (browser fusion, GBM). Decision: keep the gyroscope-propagated
+estimate, because the browser fusion differs between platforms and is outside our control.
+
+\begin{figure}[htbp]
+\centering
+\genfig{p1/P1_04_sampling}
+\caption{Robustness to the recording. Paired accuracy difference against the current pipeline (star) when
+every second or third raw sample is kept (30 and 20~Hz; the low-pass is capped at 0.4 times the rate), and
+when Gaussian noise is added to the raw sample times. 95\,\% CIs; markers as in
+Figure~\ref{fig:P1_01_forest}. A CI that includes 0 bounds the cost by its lower end; it does not show
+equivalence.}
+\label{fig:P1_04_sampling}\label{fig:app:prep-sampling}
+\end{figure}
+
+% ------------------------------------------------------------------------------------------------
+\subsection{Representation: frame and window}\label{app:prep:frame}
+
+\paragraph{Frame (channel set).} Each panel model has its own default: LR uses the
+\R{p1/lr_n_channels} chiral gravity-frame channels, MR the \R{p1/mr_n_channels} gravity-frame channels and
+GBM all \R{p1/gbm_n_channels} channels. These are the only two options that are worse after the BH
+adjustment (Section~\ref{app:prep:overview}). Device-frame channels cost LR
+\Rci{p1/d_lr_frame_device}~points, and restricting GBM to the gravity frame costs
+\Rci{p1/d_gbm_frame_gravity}~points. All \R{p1/gbm_n_channels} channels in LR show no difference
+(\Rci{p1/d_lr_frame_all}~points). The device-frame channels cannot act as a grip-to-hand shortcut here,
+because the instructed grips are balanced across hands ($\chi^2$ test, $p$~=~\R{p1/grip_chi2_p}). They can,
+however, fail on grips that differ from training: in the final-model selection the device-frame candidates
+lose accuracy on the sideways grips and are removed by its grip test (Appendix~\ref{app:final}).
+
+\paragraph{Window and time base.} The default window is the approach, time-normalised to
+\R{p1/n_norm} samples. The options were the first half of the approach only, the approach plus the hold,
+the approach with pre-onset context, and a fixed 3-s window. None changes accuracy beyond noise
+(Table~\ref{tab:p1_decisions}). The largest gain forgone is \Rb{p1/d_mr_win_fixed_hi}~points (fixed
+window, MR) and the largest loss compatible is \Rb{p1/d_lr_win_pre_lo}~points (pre-onset context, LR).
+Decision: keep the approach. Production must segment the movement without a cue, and a window that needs
+the hold or more context adds latency and depends more on the detector.
+
+% ------------------------------------------------------------------------------------------------
+\subsection{Robustness to segmentation errors}\label{app:prep:segmentation}
+
+Production has no GO cue, so the detector of Appendix~\ref{app:prod} finds the approach with errors of tens
+to hundreds of milliseconds. To set a requirement for that detector, models trained on the oracle bounds
+(the approach bounds the app stored) were tested on bounds moved by independent uniform errors of up to
+$\pm 50$, $\pm 100$ and $\pm 200$~ms, or with the onset 100~ms late (Figure~\ref{fig:P1_03_segmentation},
+Table~\ref{tab:p1_robustness}).
+
+No perturbation survives the BH adjustment in the robustness family. At $\pm 100$~ms the differences are
+LR \Rci{p1/d_lr_bjit100} and GBM \Rci{p1/d_gbm_bjit100}~points. At $\pm 200$~ms GBM is nominally worse,
+\Rci{p1/d_gbm_bjit200}~points (BH $q$~=~\R{p1/q_gbm_bjit200}). The largest loss compatible with the data
+is therefore \Rb{p1/d_gbm_bjit200_lo}~points.
+
+Training with jittered copies of the bounds (up to $\pm 100$~ms) was tried as a remedy. Against oracle-only
+training at the same jittered test bounds it shows no difference: LR \Rci{p1/d_rem_lr_bjit100_trained}
+and GBM \Rci{p1/d_rem_gbm_bjit100_trained}~points (BH $q$~=~\R{p1/q_rem_lr_bjit100_trained} and
+\R{p1/q_rem_gbm_bjit100_trained} in the pairs family; Table~\ref{tab:app:prep-pairs}).
+Decision: keep the oracle bounds in training. Treat bound errors as a requirement on the detector: at
+errors up to $\pm 100$~ms no cost is detectable with \R{p1/n_persons} persons, and the data allow a loss of
+at most \Rb{p1/d_lr_bjit100_lo}~points (LR). The errors here are synthetic and uniform; the real
+detector's errors are evaluated in Appendix~\ref{app:prod}.
+
+\begin{figure}[htbp]
+\centering
+\genfig{p1/P1_03_segmentation}
+\caption{Robustness to segmentation errors: paired accuracy difference of a model trained on the oracle
+bounds when its test bounds are moved by independent uniform errors of up to $\pm J$ (circles) or the
+onset is 100~ms late (triangles). Diamonds: trained with jittered copies too, tested at $\pm 100$~ms and
+judged against the oracle-trained model at the same bounds. 95\,\% CIs. Jitter training does not help; the
+cost of bound errors is a requirement for the detector.}
+\label{fig:P1_03_segmentation}\label{fig:app:prep-segmentation}
+\end{figure}
+
+\gentab{p1/p1_robustness}
+
+% ------------------------------------------------------------------------------------------------
+\subsection{Normalisation}\label{app:prep:norm}
+
+The default feeds the channels in physical units. The options were a z-score per channel, a median and
+interquartile-range scaling (both fitted on the mirror-augmented training rows, which keeps the mirror
+symmetry) and a per-trial peak scaling (Figure~\ref{fig:P1_05_normalisation}). For LR the two per-channel
+scalings are identical to the default, because LR standardises its own features (largest change of
+\pright{}: \R{p1/maxdp_lr_norm_zscore}). No option differs from the default for any model. The widest CIs
+belong to the per-trial peak scaling: LR \Rci{p1/d_lr_norm_trial_peak} and MR
+\Rci{p1/d_mr_norm_trial_peak}~points. Decision: no normalisation. Physical units keep the speed and
+amplitude of the movement; a per-trial peak scaling discards the amplitude.
+
+\begin{figure}[htbp]
+\centering
+\genfig{p1/P1_05_normalisation}
+\caption{Normalisation of the input channels against none (physical units), per panel model: paired
+accuracy (left) and mean per-person log-loss (right) differences with 95\,\% CIs. Open squares: identical
+predictions (LR standardises its own features). No option improves on physical units.}
+\label{fig:P1_05_normalisation}\label{fig:app:prep-normalisation}
+\end{figure}
+
+% ------------------------------------------------------------------------------------------------
+\subsection{Outliers, flags and exclusion rules}\label{app:prep:exclusions}
+
+Two principles held throughout: evaluation trials are never dropped or relabelled, and any cleaning of the
+training set must beat a size-matched control.
+
+\paragraph{Training-side cleaning.} The options were winsorising at \R{p1/winsor_pct}\,\% and
+$100 - \R{p1/winsor_pct}$\,\%, removing the trials of each quality flag (grip mismatch, false start,
+segmenter disagreement above 100~ms, repeated samples, possible clipping) or of all flags from training,
+and removing the swap-signature blocks (trials whose yaw sign suggests swapped hands). None helps
+(Figure~\ref{fig:P1_01_forest}). Removing all flagged trials is nominally worse for GBM,
+\Rci{p1/d_gbm_drop_all_flags}~points (BH $q$~=~\R{p1/q_gbm_drop_all_flags}). Against a control that removes
+as many random trials per person and hand, it shows no difference: GBM
+\Rci{p1/d_ctl_gbm_drop_all_flags} and LR \Rci{p1/d_ctl_lr_drop_all_flags}~points (pairs family,
+Table~\ref{tab:app:prep-pairs}). The control alone costs LR \Rci{p1/d_lr_drop_all_flags_sizematch}~points
+(BH $q$~=~\R{p1/q_lr_drop_all_flags_sizematch}). So the loss comes from the smaller training set, not from
+the value of the flagged trials. Decision: keep flagged trials and swap blocks in training.
+
+\paragraph{Scoring the removed trials.} An exclusion that removes scorable trials makes the headline
+optimistic and the production gate too strict. Figure~\ref{fig:P1_09_exclusions} scores the removed and
+flagged trials with the base models. The full table (\code{tables/p1/p1_subsets} of the analysis outputs)
+is too long to reproduce; the main rows follow.
+\begin{itemize}[nosep]
+\item \emph{E4d} (an unbridged gap of more than \R{p1/max_gap_ms}~ms within \R{p1/gap_window_pad_s}~s of
+  the movement) removes \R{p1/e4d_n} trials of \R{p1/e4d_n_persons} persons (\R{p1/e4d_n_android} Android,
+  \R{p1/e4d_n_ios} iOS). The gap falls inside the approach in \R{p1/e4d_n_inapp} of them
+  (\R{p1/e4d_n_persons_inapp} persons; median longest gap \R{p1/e4d_inapp_gap_median_ms}~ms) and only in
+  the margins in \R{p1/e4d_n_margin}. With linear imputation, the in-approach trials score
+  \Rci{p1/sub_lr_e4d_inapp_linear} (LR) and \Rci{p1/sub_gbm_e4d_inapp_linear} (GBM): compatible with the
+  primary accuracy for LR and inconclusive for GBM. The margin-only trials score
+  \Rci{p1/sub_lr_e4d_margin_linear} and \Rci{p1/sub_gbm_e4d_margin_linear}.
+\item \emph{E4b/E4c} (shorter than \R{p1/min_duration_ms}~ms, or peak rotation below
+  \R{p1/min_peak_dps}~deg/s) removes \R{p1/sub_gbm_e4bc_base_n} trials of \R{p1/sub_gbm_e4bc_base_np}
+  persons. They score \Rci{p1/sub_lr_e4bc_base} (LR, inconclusive) and \Rci{p1/sub_gbm_e4bc_base} (GBM,
+  below the primary accuracy).
+\item \emph{Thresholds twice as strict} would remove \R{p1/sub_gbm_tight_fail_n} more trials of
+  \R{p1/sub_gbm_tight_fail_np} persons, which score \Rci{p1/sub_gbm_tight_fail} (GBM): compatible with
+  the primary accuracy, so stricter thresholds would discard scorable trials.
+\item \emph{Subsets with fewer than 5 persons} get no CI; the values below are pooled over the trials of
+  these few persons and are descriptive only. Grip-mismatch trials
+  (\R{p1/sub_gbm_flag_grip_mismatch_n} trials, \R{p1/sub_gbm_flag_grip_mismatch_np} persons): LR
+  \R{p1/sub_lr_flag_grip_mismatch}, GBM \R{p1/sub_gbm_flag_grip_mismatch}, MR
+  \R{p1/sub_mr_flag_grip_mismatch}. Possible clipping (\R{p1/sub_gbm_flag_clip_candidate_n} trials,
+  \R{p1/sub_gbm_flag_clip_candidate_np} persons): LR \R{p1/sub_lr_flag_clip_candidate}, GBM
+  \R{p1/sub_gbm_flag_clip_candidate}, MR \R{p1/sub_mr_flag_clip_candidate}. Swap-signature blocks
+  (\R{p1/sub_gbm_swap_n} trials of \R{p1/sub_gbm_swap_np} person): LR \R{p1/sub_lr_swap}, GBM
+  \R{p1/sub_gbm_swap}, MR \R{p1/sub_mr_swap}. The swap blocks are a sensitivity analysis only; their labels
+  were never changed.
+\end{itemize}
+Adding the excluded trials to training does not change the accuracy on the primary trials (E4d: LR
+\Rci{p1/d_lr_e4d_trained}, GBM \Rci{p1/d_gbm_e4d_trained}~points; E4b/E4c: LR \Rci{p1/d_lr_excl_loose},
+GBM \Rci{p1/d_gbm_excl_loose}~points).
+
+\paragraph{Decision.} Keep E4b/E4c. They are justified a priori: a reach from arm's length lasts longer and
+rotates the forearm, so these trials are fragments rather than reaches (Appendix~\ref{app:data}); the small
+scored sample does not decide it. Keep E4d for comparability. There is no evidence that the imputed
+in-approach trials score worse, but the sample is small, so production should flag an attempt with a gap
+inside the movement rather than trust it.
+
+\begin{figure}[htbp]
+\centering
+\genfig{p1/P1_09_exclusions}
+\caption{Accuracy on the trials that an exclusion rule removes or a flag marks, scored by the base models
+unless stated: E4d split by where the gap falls, with three imputations for gaps inside the approach;
+E4b/E4c; trials that thresholds twice as strict would remove; flagged trials; the swap-signature blocks.
+Dotted lines: all primary trials. 95\,\% CIs only for subsets of at least 5 persons (open markers: fewer, no
+CI); n = trials, p.\ = persons. The removed trials are not clearly harder to score, except the E4b/E4c
+fragments.}
+\label{fig:P1_09_exclusions}\label{fig:app:prep-exclusions}
+\end{figure}
+
+% ------------------------------------------------------------------------------------------------
+\subsection{Platform transfer}\label{app:prep:platform}
+
+Android and iOS differ in sensors, rates, gaps and sensor fusion. A model that transfers only within a
+platform would need training data from each. The options trained on the same platform only or on the other
+platform only (Figure~\ref{fig:P1_08_platform}). Both also shrink the training set, so each was compared
+with a control that removes as many training persons at random.
+
+Against the pooled pipeline, GBM trained on the other platform is nominally worse,
+\Rci{p1/d_gbm_platform_cross}~points (BH $q$~=~\R{p1/q_gbm_platform_cross}), and LR trained on the same
+platform is nominally worse, \Rci{p1/d_lr_platform_same}~points (BH $q$~=~\R{p1/q_lr_platform_same}).
+Against the size-matched controls, only GBM cross-platform training remains nominally worse,
+\Rci{p1/d_ctl_gbm_platform_cross}~points (BH $q$~=~\R{p1/q_ctl_gbm_platform_cross} in the pairs family);
+the other three pairs show no difference (Table~\ref{tab:app:prep-pairs}). Decision: pool both platforms.
+Platform is a stratum, never a model input. The suggestive GBM loss is a reason to keep recruiting on both
+platforms.
+
+\begin{figure}[htbp]
+\centering
+\genfig{p1/P1_08_platform}
+\caption{Platform transfer: accuracy on the persons of each platform (\R{describe/persons_android} Android,
+\R{describe/persons_ios} iOS) when the model is trained on all other persons (pooled), on the same platform
+only, or on the other platform only, each next to its size-matched control (open markers: as many training
+persons drawn at random). LOSO; 95\,\% CIs. Only the difference from the control isolates the platform;
+pooling is kept.}
+\label{fig:P1_08_platform}\label{fig:app:prep-platform}
+\end{figure}
+
+% Compact version of the generated tables/p1/p1_pairs.tex, whose long row labels wrap into a table about a
+% page tall: the same 16 comparisons (the arm accuracies and log-loss differences are in the generated file).
+% To show the full table instead, replace this float by \gentab{p1/p1_pairs} and point the references to
+% tab:p1_pairs.
+\begin{table}[htbp]
+\centering
+\small
+\caption{The pairs family: remedies against the problem they address, options against their size-matched
+controls, and the controls against the current pipeline. Paired accuracy difference A minus B (points) with
+its 95\,\% CI; $q$: BH within the \R{p1/fam_pairs_size} comparisons of the family. The arm accuracies and
+log-loss differences are in \code{tables/p1/p1_pairs} of the analysis outputs.}
+\label{tab:app:prep-pairs}
+\begin{tabular}{@{}>{\raggedright\arraybackslash}p{6.4cm}lrrl@{}}
+\toprule
+A against B & Model & Difference [CI] & $q$ & Verdict \\
+\midrule
+\multicolumn{5}{@{}l}{\emph{Remedies}}\\
+Jitter-trained vs oracle-trained, both tested at $\pm 100$~ms & LR & \Rcib{p1/d_rem_lr_bjit100_trained} &
+  \R{p1/q_rem_lr_bjit100_trained} & \R{p1/v_rem_lr_bjit100_trained} \\
+ & GBM & \Rcib{p1/d_rem_gbm_bjit100_trained} & \R{p1/q_rem_gbm_bjit100_trained} &
+  \R{p1/v_rem_gbm_bjit100_trained} \\
+E4d trials in training vs primary-only training, scored on primary and E4d trials & LR &
+  \Rcib{p1/d_rem_lr_e4d_trained} & \R{p1/q_rem_lr_e4d_trained} & \R{p1/v_rem_lr_e4d_trained} \\
+ & GBM & \Rcib{p1/d_rem_gbm_e4d_trained} & \R{p1/q_rem_gbm_e4d_trained} & \R{p1/v_rem_gbm_e4d_trained} \\
+\midrule
+\multicolumn{5}{@{}l}{\emph{Options against their size-matched controls}}\\
+All flagged trials out of training vs as many random trials out & LR & \Rcib{p1/d_ctl_lr_drop_all_flags} &
+  \R{p1/q_ctl_lr_drop_all_flags} & \R{p1/v_ctl_lr_drop_all_flags} \\
+ & GBM & \Rcib{p1/d_ctl_gbm_drop_all_flags} & \R{p1/q_ctl_gbm_drop_all_flags} &
+  \R{p1/v_ctl_gbm_drop_all_flags} \\
+Same platform only vs as many random persons & LR & \Rcib{p1/d_ctl_lr_platform_same} &
+  \R{p1/q_ctl_lr_platform_same} & \R{p1/v_ctl_lr_platform_same} \\
+ & GBM & \Rcib{p1/d_ctl_gbm_platform_same} & \R{p1/q_ctl_gbm_platform_same} &
+  \R{p1/v_ctl_gbm_platform_same} \\
+Other platform only vs as many random persons & LR & \Rcib{p1/d_ctl_lr_platform_cross} &
+  \R{p1/q_ctl_lr_platform_cross} & \R{p1/v_ctl_lr_platform_cross} \\
+ & GBM & \Rcib{p1/d_ctl_gbm_platform_cross} & \R{p1/q_ctl_gbm_platform_cross} &
+  \R{p1/v_ctl_gbm_platform_cross} \\
+\midrule
+\multicolumn{5}{@{}l}{\emph{Controls against the current pipeline}}\\
+As many random trials out as the flagged ones & LR & \Rcib{p1/d_lr_drop_all_flags_sizematch} &
+  \R{p1/q_lr_drop_all_flags_sizematch} & \R{p1/v_lr_drop_all_flags_sizematch} \\
+ & GBM & \Rcib{p1/d_gbm_drop_all_flags_sizematch} & \R{p1/q_gbm_drop_all_flags_sizematch} &
+  \R{p1/v_gbm_drop_all_flags_sizematch} \\
+As many random persons as the same platform & LR & \Rcib{p1/d_lr_platform_same_sizematch} &
+  \R{p1/q_lr_platform_same_sizematch} & \R{p1/v_lr_platform_same_sizematch} \\
+ & GBM & \Rcib{p1/d_gbm_platform_same_sizematch} & \R{p1/q_gbm_platform_same_sizematch} &
+  \R{p1/v_gbm_platform_same_sizematch} \\
+As many random persons as the other platform & LR & \Rcib{p1/d_lr_platform_cross_sizematch} &
+  \R{p1/q_lr_platform_cross_sizematch} & \R{p1/v_lr_platform_cross_sizematch} \\
+ & GBM & \Rcib{p1/d_gbm_platform_cross_sizematch} & \R{p1/q_gbm_platform_cross_sizematch} &
+  \R{p1/v_gbm_platform_cross_sizematch} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+% ------------------------------------------------------------------------------------------------
+\subsection{Augmentation}\label{app:prep:augmentation}
+
+Mirror augmentation adds the mirrored copy of every training trial with the other hand's label
+(Equation~\eqref{eq:mirror}); it encodes the left-right symmetry of the task. The options were no mirror
+augmentation, an added time warp (amplitude up to \R{p1/warp_max})~\cite{um2017augmentation}, and added
+screen-away flips (GBM only). Without mirror augmentation, GBM accuracy shows no difference
+(\Rci{p1/d_gbm_no_mirror}~points) but its log loss rises by \Rcib{p1/dll_gbm_no_mirror}. Screen-away
+flips are nominally worse for GBM, \Rci{p1/d_gbm_screen_flip}~points (BH $q$~=~\R{p1/q_gbm_screen_flip}).
+Time warping is nominally worse for LR, \Rci{p1/d_lr_time_warp}~points (BH $q$~=~\R{p1/q_lr_time_warp}),
+and nominally lowers the GBM log loss. Decision: keep mirror augmentation alone.
+
+% ------------------------------------------------------------------------------------------------
+\subsection{Calibration of the panel's P(right)}\label{app:prep:calibration}
+
+The product is a probability, so the panel's \pright{} was checked for calibration
+(Figure~\ref{fig:P1_06_reliability}). Table~\ref{tab:p1_calibration} gives every calibrator,
+Table~\ref{tab:p1_calibration_paired} its paired difference from the uncalibrated model, and
+Table~\ref{tab:p1_calibration_platform} the result per platform.
+Calibration was summarised by three numbers. The calibration slope is the coefficient of a logistic
+regression of the hand on logit \pright{} (1 = calibrated, below 1 = over-confident). The intercept
+(calibration-in-the-large) is its offset. The ECE was computed over \R{p1/ece_bins} equal-mass bins and
+compared with the ECE of perfectly calibrated predictions on the same bins (\R{p1/ece_null_sims}
+simulations). This null treats trials as independent, so it is supporting evidence only.
+
+\paragraph{Remedies.} Four fixed calibrators (Platt~\cite{platt1999probabilistic},
+temperature~\cite{guo2017calibration}, isotonic and beta) were fitted inside every outer training fold on
+cross-fitted predictions of the training persons (\R{p1/inner_splits} grouped inner folds) and applied to
+the held-out person. Comparing these \R{p1/n_fixed_calibrators} on the outer folds is exploratory. The
+headline is the \emph{nested} choice: inside each training fold, grouped cross-validation chose among
+\R{p1/n_auto_candidates} candidates (none, temperature, Platt, beta). These maps are strictly increasing, so
+they keep the ranking within a fold. Isotonic is not a candidate because it ties predictions: it leaves
+\R{p1/cal_gbm_isotonic_n_unique} distinct values of \R{p1/n_trials} for GBM and
+\R{p1/cal_lr_isotonic_n_unique} for LR, and it costs LR ranking (AUC \Rcib{p1/calpd_lr_isotonic_roc_auc}).
+
+\paragraph{GBM is over-confident and the nested calibrator corrects it.} Uncalibrated, its slope is
+\Rcib{p1/gbm_slope} and its intercept \Rcib{p1/gbm_citl}. Its ECE is \R{p1/gbm_ece} against a null 95th
+percentile of \R{p1/gbm_ece_null_q95} ($p$~=~\R{p1/gbm_ece_p}; BH $q$~=~\R{p1/caltest_gbm_ece_null_q} and
+Holm $p$~=~\R{p1/caltest_gbm_ece_null_holm} in the calibration test family of \R{p1/caltest_family_size}
+tests, Table~\ref{tab:p1_calibration_tests}). Using training persons only, the fitted temperature exceeds 1
+in \R{p1/cal_gbm_t_above_1} of \R{p1/cal_gbm_t_n_folds} folds (median \R{p1/cal_gbm_t_median}, range
+\R{p1/cal_gbm_t_min} to \R{p1/cal_gbm_t_max}). With the nested calibrator (temperature in
+\R{p1/cal_gbm_auto_folds_temperature} folds, none in \R{p1/cal_gbm_auto_folds_none}, beta in
+\R{p1/cal_gbm_auto_folds_beta}), the slope is \Rcib{p1/gbm_cal_slope}, the intercept
+\Rcib{p1/gbm_cal_citl}, and the ECE \R{p1/gbm_cal_ece} against a null 95th percentile of
+\R{p1/gbm_cal_ece_null_q95} ($p$~=~\R{p1/gbm_cal_ece_p}). The paired slope change is
+\Rcib{p1/calpd_gbm_auto_slope} ($p$~\R{p1/caltest_gbm_slope_change_p}; BH $q$~=~\R{p1/caltest_gbm_slope_change_q}, Holm
+$p$~=~\R{p1/caltest_gbm_slope_change_holm}). Its effect on ranking and accuracy is negligible: AUC
+\Rcib{p1/calpd_gbm_auto_roc_auc}, accuracy \Rci{p1/calpd_gbm_auto_accuracy}~points. The log-loss gain,
+\Rcib{p1/calpd_gbm_auto_log_loss}, is within noise at \R{p1/n_persons} persons. Decision: when a GBM gives the product
+\pright{}, calibrate it with the nested calibrator.
+
+\paragraph{The LR's calibrator hurts.} Uncalibrated, the LR slope is \Rcib{p1/lr_slope} (its CI covers 1)
+and its intercept \Rcib{p1/lr_citl}; its ECE, \R{p1/lr_ece}, exceeds the null 95th percentile of
+\R{p1/lr_ece_null_q95} ($p$~=~\R{p1/lr_ece_p}; BH $q$~=~\R{p1/caltest_lr_ece_null_q}, Holm
+$p$~=~\R{p1/caltest_lr_ece_null_holm}). The nested calibrator (none in \R{p1/cal_lr_auto_folds_none} folds,
+temperature in \R{p1/cal_lr_auto_folds_temperature}, Platt in \R{p1/cal_lr_auto_folds_platt}) gives a slope
+of \Rcib{p1/lr_cal_slope} and an intercept of \Rcib{p1/lr_cal_citl}, but a larger ECE, \R{p1/lr_cal_ece},
+against a null 95th percentile of \R{p1/lr_cal_ece_null_q95} ($p$~\R{p1/lr_cal_ece_p}). The slope moves by only
+\Rcib{p1/calpd_lr_auto_slope} (BH $q$~=~\R{p1/caltest_lr_slope_change_q}, Holm
+$p$~=~\R{p1/caltest_lr_slope_change_holm} in the calibration test family), while the paired log loss rises
+by \Rcib{p1/calpd_lr_auto_log_loss} and the Brier score by \Rcib{p1/calpd_lr_auto_brier}. Decision: leave
+the LR uncalibrated. Its deviations are not a monotone distortion that a rank-preserving map can remove.
+The fixed isotonic map (exploratory) lowers the ECE to \R{p1/cal_lr_isotonic_ece} (null 95th percentile
+\R{p1/cal_lr_isotonic_ece_null_q95}; slope \Rcib{p1/cal_lr_isotonic_slope}, intercept
+\Rcib{p1/cal_lr_isotonic_citl}), but it ties predictions and costs ranking.
+
+\paragraph{MR} carries its own inner Platt scaling. Its slope is \Rcib{p1/mr_slope}, its intercept
+\Rcib{p1/mr_citl}, and its ECE \R{p1/mr_ece} against a null 95th percentile of \R{p1/mr_ece_null_q95}
+($p$~=~\R{p1/mr_ece_p}, unadjusted: MR was not part of the calibration test family).
+
+\paragraph{Per platform.} The pooled calibrator does not fully fix each platform
+(Table~\ref{tab:p1_calibration_platform}). Uncalibrated GBM is most over-confident on iOS (slope
+\Rcib{p1/cal_gbm_none_ios_slope}, intercept \Rcib{p1/cal_gbm_none_ios_citl}; ECE
+\R{p1/cal_gbm_none_ios_ece}, null 95th percentile \R{p1/cal_gbm_none_ios_ece_null_q95}) and less so on
+Android (slope \Rcib{p1/cal_gbm_none_android_slope}, intercept \Rcib{p1/cal_gbm_none_android_citl}; ECE
+\R{p1/cal_gbm_none_android_ece}, null \R{p1/cal_gbm_none_android_ece_null_q95}). After the nested calibrator, the Android slope is
+\Rcib{p1/cal_gbm_auto_android_slope} (intercept \Rcib{p1/cal_gbm_auto_android_citl}; ECE
+\R{p1/cal_gbm_auto_android_ece}, null \R{p1/cal_gbm_auto_android_ece_null_q95}) and the iOS slope
+\Rcib{p1/cal_gbm_auto_ios_slope} (intercept \Rcib{p1/cal_gbm_auto_ios_citl}; ECE
+\R{p1/cal_gbm_auto_ios_ece}, null \R{p1/cal_gbm_auto_ios_ece_null_q95}). On each platform the ECE stays
+slightly above its null band. With \R{describe/persons_ios} iOS persons this is a caveat, not a finding.
+
+\begin{figure}[htbp]
+\centering
+\genfig{p1/P1_06_reliability}
+\caption{Reliability of \pright{} for GBM (left) and LR (right), before calibration and after the
+calibrator chosen inside every training fold (\R{p1/ece_bins} equal-mass bins; bars: 95\,\% CI of the
+observed share of right hands; LOSO predictions). Legend: calibration slope with its CI, and the ECE with
+the 95th percentile of the ECE of perfectly calibrated predictions on the same bins. The nested
+calibrator brings the GBM slope to about 1; for LR it does not help.}
+\label{fig:P1_06_reliability}\label{fig:app:prep-reliability}
+\end{figure}
+
+\gentab{p1/p1_calibration}
+\gentab{p1/p1_calibration_paired}
+\gentab{p1/p1_calibration_tests}
+\gentab{p1/p1_calibration_platform}
+
+% ------------------------------------------------------------------------------------------------
+\subsection{Combining several attempts}\label{app:prep:aggregates}
+
+The app may combine $k$ attempts of one person. Attempts of one person are correlated, so summing their
+logits as if they were independent overstates the certainty, and averaging their probabilities understates
+it. Four rules were compared on random $k$-subsets of one person and hand, for $k$ up to \R{p1/k_max}:
+the mean of \pright{}, the mean of the logits, the sum of the logits, and the sum divided by a scale
+\tauk{} fitted on the training persons of each fold, $\pright = \sigma(\sum_i z_i / \tauk)$, where $z_i$ is
+the logit of attempt $i$ and $\sigma$ the logistic function (written $T_k$ in the figure and tables). The
+same \R{p1/agg_gbm_n_persons} persons, those with at least \R{p1/k_max} trials of each hand, enter at every
+$k$
+(Figure~\ref{fig:P1_07_aggregates}, Tables~\ref{tab:app:prep-aggregates} and~\ref{tab:p1_aggregates_paired}).
+
+For GBM at $k = 5$, the calibration slope is \Rcib{p1/agg_gbm_k5_sum_logit_slope} for the sum of the
+logits (over-confident), \Rcib{p1/agg_gbm_k5_mean_prob_slope} for the mean of \pright{} and
+\Rcib{p1/agg_gbm_k5_mean_logit_slope} for the mean of the logits (both under-confident). The scaled sum
+gives \Rcib{p1/agg_gbm_k5_sum_logit_t_slope}, the closest to 1. Its median scale is
+$\tau_5$~=~\R{p1/cal_gbm_t_sum_k5}, between 1 (the plain sum) and 5 (the mean of the logits). For LR the
+scaled sum gives \Rcib{p1/agg_lr_k5_sum_logit_t_slope} ($\tau_5$~=~\R{p1/cal_lr_t_sum_k5}).
+By log loss, the GBM rules cannot be told apart with \R{p1/agg_gbm_n_persons} persons: the scaled sum minus the sum is
+\Rcib{p1/aggd_gbm_k5_sum_logit_ll}, minus the mean of the logits \Rcib{p1/aggd_gbm_k5_mean_logit_ll}, and
+minus the mean of \pright{} \Rcib{p1/aggd_gbm_k5_mean_prob_ll}.
+The aggregate analysis has no perfect-calibration null band for its ECE and no intercept, so this verdict
+rests on the slope and the log loss only.
+
+Decision: report the summed logits divided by \tauk{}, with \tauk{} refitted whenever the training data
+change. It is the principled rule, not a demonstrated improvement over the mean of the logits.
+
+\begin{figure}[htbp]
+\centering
+\genfig{p1/P1_07_aggregates}
+\caption{Combining $k$ attempts of one person and hand (GBM; the same \R{p1/agg_gbm_n_persons} persons at
+every $k$; every person and hand weighs the same). Left: ECE (no CI and no null band); right: log loss with
+95\,\% CIs. Rules: mean of the probabilities, mean of the logits, sum of the logits, and that sum divided by
+the training-fold scale \tauk{} ($T_k$). The scaled sum has the calibration slope closest to 1
+(Table~\ref{tab:app:prep-aggregates}).}
+\label{fig:P1_07_aggregates}\label{fig:app:prep-aggregates}
+\end{figure}
+
+% Compact version of the generated tables/p1/p1_aggregates.tex (40 rows; its ECE column has no
+% perfect-calibration null band): calibration slopes and log losses only. To show the full table instead,
+% replace this float by \gentab{p1/p1_aggregates} and point the references to tab:p1_aggregates.
+\begin{table}[htbp]
+\centering
+\footnotesize\setlength{\tabcolsep}{4pt}
+\caption{Calibration of $k$-attempt aggregates (\R{p1/agg_gbm_n_persons} persons, the same at every $k$;
+every person and hand weighs the same): calibration slope at $k = 2$, 3 and 5 (CI only at $k = 5$) and log
+loss at $k = 5$ with 95\,\% CIs. At $k = 1$ the rules coincide (slope \R{p1/agg_gbm_k1_mean_prob_slope}
+for GBM, \R{p1/agg_lr_k1_mean_prob_slope} for LR). A slope above 1 is under-confident, below 1
+over-confident. The full table, with accuracy, Brier score and ECE at every $k$, is
+\code{tables/p1/p1_aggregates} of the analysis outputs.}
+\label{tab:app:prep-aggregates}
+\begin{tabular}{@{}llrrrr@{}}
+\toprule
+Model & Rule & Slope, $k = 2$ & Slope, $k = 3$ & Slope, $k = 5$ [CI] & Log loss, $k = 5$ [CI] \\
+\midrule
+GBM & mean of \pright{} & \R{p1/agg_gbm_k2_mean_prob_slope} & \R{p1/agg_gbm_k3_mean_prob_slope} &
+  \Rcib{p1/agg_gbm_k5_mean_prob_slope} & \Rcib{p1/agg_gbm_k5_mean_prob_log_loss} \\
+ & mean of logits & \R{p1/agg_gbm_k2_mean_logit_slope} & \R{p1/agg_gbm_k3_mean_logit_slope} &
+  \Rcib{p1/agg_gbm_k5_mean_logit_slope} & \Rcib{p1/agg_gbm_k5_mean_logit_log_loss} \\
+ & sum of logits & \R{p1/agg_gbm_k2_sum_logit_slope} & \R{p1/agg_gbm_k3_sum_logit_slope} &
+  \Rcib{p1/agg_gbm_k5_sum_logit_slope} & \Rcib{p1/agg_gbm_k5_sum_logit_log_loss} \\
+ & sum of logits / \tauk{} & \R{p1/agg_gbm_k2_sum_logit_t_slope} & \R{p1/agg_gbm_k3_sum_logit_t_slope} &
+  \Rcib{p1/agg_gbm_k5_sum_logit_t_slope} & \Rcib{p1/agg_gbm_k5_sum_logit_t_log_loss} \\
+\midrule
+LR & mean of \pright{} & \R{p1/agg_lr_k2_mean_prob_slope} & \R{p1/agg_lr_k3_mean_prob_slope} &
+  \Rcib{p1/agg_lr_k5_mean_prob_slope} & \Rcib{p1/agg_lr_k5_mean_prob_log_loss} \\
+ & mean of logits & \R{p1/agg_lr_k2_mean_logit_slope} & \R{p1/agg_lr_k3_mean_logit_slope} &
+  \Rcib{p1/agg_lr_k5_mean_logit_slope} & \Rcib{p1/agg_lr_k5_mean_logit_log_loss} \\
+ & sum of logits & \R{p1/agg_lr_k2_sum_logit_slope} & \R{p1/agg_lr_k3_sum_logit_slope} &
+  \Rcib{p1/agg_lr_k5_sum_logit_slope} & \Rcib{p1/agg_lr_k5_sum_logit_log_loss} \\
+ & sum of logits / \tauk{} & \R{p1/agg_lr_k2_sum_logit_t_slope} & \R{p1/agg_lr_k3_sum_logit_t_slope} &
+  \Rcib{p1/agg_lr_k5_sum_logit_t_slope} & \Rcib{p1/agg_lr_k5_sum_logit_t_log_loss} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\gentab{p1/p1_aggregates_paired}
+
+% ------------------------------------------------------------------------------------------------
+\subsection{Accuracy by instructed condition}\label{app:prep:conditions}
+
+Table~\ref{tab:p1_conditions} stratifies the GBM predictions by the instructed condition. Conditions were
+never model inputs, no test was run, and the GBM designation is exploratory. Accuracy is
+\Rci{p1/cond_speed_fast} at fast speed and \Rci{p1/cond_speed_slow} at slow speed, and
+\Rci{p1/cond_tier_3} in protocol tier 3, the lowest of the four tiers. Strata with fewer than 5 persons have no CI. The
+secondary analyses of speed and grip are in Appendix~\ref{app:sec}.
+
+\gentab{p1/p1_conditions}
+
+\FloatBarrier
+% ------------------------------------------------------------------------------------------------
+\subsection{Caveats}\label{app:prep:caveats}
+
+\begin{itemize}[nosep]
+\item The panel is small and fixed. Not every option ran on every model; MR ran only on the most
+  informative options, to save compute.
+\item With \R{p1/n_persons} persons, the resolution is a few points. ``No difference'' is absence of evidence; the lower
+  CI bound is the largest loss the data allow.
+\item Every choice was judged on the oracle bounds. The cue-free detector could change the ranking of the
+  window options.
+\item The segmentation errors are synthetic and uniform, not those of a real detector.
+\item The ECE null treats trials as independent. The fixed calibrators are compared on the outer folds
+  (exploratory, \R{p1/n_fixed_calibrators} configurations).
+\item The GBM panel model uses device-frame channels. In the final-model selection such models lose
+  accuracy on the sideways grips and are removed by the grip test (Appendix~\ref{app:final}), so the GBM
+  verdicts transfer to the final model only where they do not depend on the device frame.
+\item The variants ran the leak check on \R{p1/leak_sample_folds} seeded folds only; the base and
+  nested-calibrated runs ran it on every fold.
+\end{itemize}

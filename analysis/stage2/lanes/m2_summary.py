@@ -1,0 +1,515 @@
+"""Lane m2: ``reports/stage2/m2_SUMMARY.md``, generated from the saved derived files only (run by the numbers step).
+
+Every number in the summary is printed through ``m2_report.fmt`` from an entry of the numbers file
+(``m2_report.number_values``), and every judgement (better, worse, identical, adopted, detected) is computed from
+the saved results, so the text cannot drift from the results. ``untraced_numbers`` lists the numeric tokens of a
+text that match no numbers entry (the test of this contract)."""
+from __future__ import annotations
+
+import json
+import re
+from typing import Any
+
+import pandas as pd
+
+from stage2.lanes import m2_pipeline as P
+from stage2.lanes import m2_report as R
+from stage2.lanes import m2_stats as S
+from stage2.pipeline import Lane
+
+L = Lane('m2')
+DISPLAY = {'m2_select': 'nested selection', 'm2_lr_full': 'L2 logistic regression (default)', 'm2_lgbm': 'LightGBM'}
+#: display names of stratum levels (anything else: the level with spaces)
+LEVEL_TEXT = {'android': 'Android', 'ios': 'iOS'}
+
+
+class _Text:
+    """The summary being written, with the numbers entries at hand."""
+
+    def __init__(self, n: dict[str, Any]) -> None:
+        self.n = n
+        self.lines: list[str] = []
+        self.missing: list[str] = []
+
+    def w(self, s: str = '') -> None:
+        self.lines.append(s)
+
+    def v(self, key: str) -> str:
+        if key not in self.n:                         # an experiment not run yet: say so instead of failing
+            self.missing.append(key)
+            return 'n/a'
+        return R.fmt(self.n, key)
+
+    def has(self, *keys: str) -> bool:
+        return all(k in self.n for k in keys)
+
+    def pe(self, key: str) -> str:
+        """A p-value number as a relation: '= 0.042' or '< 0.001'."""
+        if key not in self.n:
+            self.missing.append(key)
+            return '= n/a'
+        return R.p_is(self.n, key)
+
+    def count(self, key: str, noun: str) -> str:
+        """'1 comparison' / '12 comparisons' (the number from the numbers file)."""
+        return f"{self.v(key)} {noun}{'' if self.n.get(key, {}).get('value') == 1 else 's'}"
+
+    def ci(self, key: str) -> str:
+        return f'[{self.v(key + "_lo")}, {self.v(key + "_hi")}]' if self.has(key + '_lo', key + '_hi') else ''
+
+    def vc(self, key: str) -> str:
+        """value [lo, hi] (the CI only when it exists)."""
+        c = self.ci(key)
+        return f'{self.v(key)} {c}'.strip() if self.has(key) else 'n/a'
+
+
+def _disp(name: str, label: str) -> str:
+    return DISPLAY.get(name, label)
+
+
+def _vs_base(T: _Text, s: str) -> str:
+    """'accuracy +x points [lo, hi], log loss +y [lo, hi]; Holm p (acc / log loss) = a / b' or 'identical'."""
+    if not T.has(f'{s}_d_acc'):
+        return ''
+    if T.v(f'{s}_ll_verdict') == 'identical':
+        return (f"identical to its baseline within solver precision (max |dP| {T.v(s + '_max_dp')}, "
+                f"{T.v(s + '_class_changes')} trials change hand)")
+    out = (f"accuracy {T.v(s + '_d_acc')} points {T.ci(s + '_d_acc')}, log loss {T.v(s + '_d_ll')} "
+           f"{T.ci(s + '_d_ll')}")
+    if T.has(f'{s}_p_ll_holm'):
+        out += (f"; Holm p accuracy {T.v(s + '_p_acc_holm')}, log loss {T.v(s + '_p_ll_holm')} "
+                f"(log loss {T.v(s + '_ll_verdict')})")
+    else:
+        out += ' (descriptive, no test)'
+    return out
+
+
+def _group_decision(T: _Text, t: pd.DataFrame, names: list[str], default: str) -> str:
+    """The decision of one data-treatment choice, computed from the Holm-adjusted verdicts of its variants."""
+    lab = {x: str(t.loc[x, 'label']).split(': ', 1)[-1] for x in names if x in t.index}
+    verdict = {x: T.v(R.short(x) + '_ll_verdict') for x in lab if T.has(R.short(x) + '_ll_verdict')}
+    better = [lab[x] for x, vv in verdict.items() if vv == 'better']
+    worse = [lab[x] for x, vv in verdict.items() if vv == 'worse']
+    out = f'**Decision:** keep {default} (pre-specified)'
+    if better:
+        return (out + '; better log loss after Holm: ' + ', '.join(better) + ' (exploratory: switching now would '
+                'choose on the outer folds, so it is a candidate to pre-specify for the next data).')
+    return (out + ': no alternative has a better log loss after the Holm adjustment'
+            + (f"; worse: {', '.join(worse)}." if worse else '.'))
+
+
+def build() -> str:
+    n = R.number_values()
+    T = _Text(n)
+    v, w = T.v, T.w
+    t = pd.DataFrame(L.read_json('m2_experiments')['rows']).set_index('name')
+    s = L.read_json('m2_summary')
+    cal = L.read_json('m2_calibration')
+    ka = L.read_json('m2_k_attempts')
+    caps = json.loads((L.fig_dir / 'captions.json').read_text(encoding='utf-8')) if (L.fig_dir / 'captions.json').exists() else {}
+    exps = P.experiments()
+    head = s['headline'][0]
+    hs = R.short(head)
+    best = s.get('best_by_log_loss')
+
+    w('# Lane m2: rich hand-crafted features and classical machine learning\n')
+    w('*Generated by `python -m stage2.pipeline numbers --lanes m2` from the saved files in `reports/stage2/tables/m2/` '
+      'and `results/m2_*.json`; every number below is an entry of `results/m2_numbers.json` (LaTeX macro '
+      '`\\MTwo<Key>`), and every judgement is computed from the saved results. Do not edit by hand.*\n')
+    w('## Goal\n')
+    w('Find the best classical (non-deep) model of P(right hand) from one approach movement, honestly tuned '
+      '(nested, leave-one-person-out), and show which data treatment and which features drive it: feature families, '
+      'windows, frames, scaling, mirror handling, calibration, multi-attempt aggregation, learning curve, importance '
+      'and breakdowns.\n')
+
+    # ── headline ──
+    w('## Headline (leave-one-person-out, 95 % person-cluster bootstrap CIs)\n')
+    w('| Pipeline | Accuracy | AUC | Log loss | ECE (null 97.5 %) | Brier | Free choice: right recall | k = 3 | Configs compared |')
+    w('|---|---|---|---|---|---|---|---|---|')
+    names = [head] + [x for x in ('m2_lr_full', best) if x and x != head]
+    tree = s['headline'][2] if len(s['headline']) > 2 else None
+    names += [x for x in (tree,) if x and x not in names]
+    for name in names:
+        k = R.short(name)
+        cn = f'cal_{k}_none'
+        ece = f"{v(k + '_ece')}" + (f" ({v(cn + '_ece_null_hi')})" if T.has(cn + '_ece_null_hi') else '')
+        w(f"| `{name}` {_disp(name, t.loc[name, 'label'])} | {T.vc(k + '_accuracy')} | {T.vc(k + '_auc')} | "
+          f"{T.vc(k + '_log_loss')} | {ece} | {v(k + '_brier')} | {v(k + '_nat_correct')}/{v(k + '_nat_n')} "
+          f"({v(k + '_nat_acc')}) | {T.vc(k + '_acc_k3')} | {v(k + '_configs')} |")
+    w('')
+    w(f"- **Honest headline:** `{head}` (nested selection by inner cross-validated log loss among "
+      f"{', '.join(P.SELECT_CANDIDATES)}; one procedure, n_configs_tried = {v(hs + '_configs')}): "
+      f"{T.vc(hs + '_accuracy')}, log loss {T.vc(hs + '_log_loss')}, against the reference floor "
+      f"{T.vc('ref_accuracy')}: {v(hs + '_ref_d_acc')} points {T.ci(hs + '_ref_d_acc')}, sign-flip p "
+      f"{T.pe(hs + '_ref_p')} (Holm over the {v('fam_vs_reference_size')} comparisons with the reference: "
+      f"{v(hs + '_ref_p_holm')}).")
+    if T.has('lr_full_accuracy'):
+        w(f"- **Pre-specified default** (`m2_lr_full`, L2 logistic regression, {v('n_features')} features, chosen before "
+          f"any outer result): {T.vc('lr_full_accuracy')}, log loss {T.vc('lr_full_log_loss')}; {v('lr_full_ref_d_acc')} "
+          f"points over the reference {T.ci('lr_full_ref_d_acc')} (Holm p {T.pe('lr_full_ref_p_holm')}).")
+    if T.has('sel_n_folds'):
+        w('- **What the nested selection chose** (outer folds): ' + ', '.join(
+            f"{c} {v('sel_choice_' + c)}" for c in P.SELECT_CANDIDATES) + f" of {v('sel_n_folds')}; median inner "
+          f"log-loss margin over the runner-up {v('sel_margin_median')}. Every candidate's inner predictions are out of "
+          'sample (the SVM\'s Platt map is cross-fitted across the inner folds), so the criterion favours no candidate. '
+          'Inner cross-validated log loss (mean over the outer folds) against the same pipeline\'s outer log loss: '
+          + ', '.join(f"{c} {v('sel_inner_ll_' + c)} vs {v(e + '_log_loss')}" for c, e in
+                      (('lr_l2', 'lr_full'), ('svm_rbf', 'svm_rbf'), ('lgbm', 'lgbm'), ('ens_soft', 'ens_soft'))
+                      if T.has('sel_inner_ll_' + c, e + '_log_loss'))
+          + ' (inner models see fewer persons, so their loss is expected to be slightly higher, not lower).')
+    if best:
+        bs = R.short(best)
+        w(f"- **Best single pipeline by outer log loss** (exploratory: the best of {v('n_models_compared')} pipelines "
+          f"compared on the outer folds): {v('best_model')} ({v(bs + '_accuracy')}, log loss {v(bs + '_log_loss')})"
+          + (f"; against the default {_vs_base(T, bs)}, over the family of {v('fam_model_vs_default_size')} "
+             'comparisons with the default.' if T.has(bs + '_d_acc') else '; it is the default.'))
+    nat_right, nat_left = n['nat_n_right']['value'], n['nat_n_left']['value']
+    w(f"- **Free-choice (natural-use) trials:** {v('nat_n')} trials of {v('nat_n_persons')} persons, "
+      f"{v('nat_n_right')} with the right hand and {v('nat_n_left')} with the left. "
+      + ('With one hand only, the free-choice number is right-hand recall, not an accuracy over both hands; a '
+         f"constant 'right' predictor would score 100 %. Comparator: right-hand recall on the primary trials, "
+         f"{v(hs + '_right_recall')} for the headline. An abstention (P = 0.5) scores 1/2, never a right-hand answer "
+         f"(coverage of the headline: {v(hs + '_nat_coverage')})." if nat_left == 0 or nat_right == 0 else
+         'Both hands occur, so the free-choice number is an accuracy.') + '\n')
+
+    # ── experiments ──
+    w('## Experiments (one line each; results JSON in `reports/stage2/results/`)\n')
+    w(f"Every experiment is leave-one-person-out through `stage2.cv.run_experiment` (all folds leak-checked), features "
+      f"from `m2_features` (per trial), hyperparameters tuned only inside fit_predict on {v('inner_folds')} inner "
+      'person folds. Differences are paired against the baseline named in brackets (person bootstrap, 95 % CI; '
+      'exact sign-flip test over persons, Holm-adjusted within the comparison family; "identical" = predictions within '
+      'solver precision, not a test).\n')
+    for name, e in exps.items():
+        k = R.short(name)
+        if not T.has(k + '_accuracy'):
+            w(f'- `{name}.json` ({e.group}): {e.label}: NOT COMPUTED')
+            continue
+        extra = f"; vs `{e.baseline}`: {_vs_base(T, k)}" if T.has(k + '_d_acc') else ''
+        w(f"- `{name}.json` ({e.group}): {e.label}: {T.vc(k + '_accuracy')}, log loss {v(k + '_log_loss')}, AUC "
+          f"{v(k + '_auc')}, ECE {v(k + '_ece')}, n_configs_tried {v(k + '_configs')}{extra}")
+    w('')
+    w('**Comparison families of the multiplicity adjustment** (Holm, per metric): ' + '; '.join(
+        f"{d['text']} ({T.count('fam_' + R.slug(f) + '_size', 'comparison')})" for f, d in (s.get('families') or {}).items())
+      + '.\n')
+
+    # ── data treatment ──
+    w('## Data treatment and representation: options, evidence, decision\n')
+    w(f"Default (pre-specified before any outer result): approach window (time-normalised), all {v('n_channels')} "
+      f"channels, {v('n_families')} families with k = {v('n_bins')} bins, z-score fitted on the training rows, mirror "
+      'augmentation, L2 logistic regression. Each alternative is paired against it on the same trials.\n')
+
+    defaults = {'window': 'the time-normalised approach window', 'frame': 'both frames (all channels)',
+                'bins': f"k = {v('n_bins')} bins", 'scaling': 'z-score scaling', 'mirror': 'mirror augmentation'}
+
+    def line(name: str) -> str:
+        k = R.short(name)
+        if not T.has(k + '_accuracy'):
+            return f'`{name}`: not computed'
+        return f"{t.loc[name, 'label']}: {v(k + '_accuracy')}; {_vs_base(T, k)}"
+    for g, title in (('window', 'Window'), ('frame', 'Channel frame'), ('bins', 'Time bins'), ('scaling', 'Scaling'),
+                     ('mirror', 'Mirror handling')):
+        gn = [x for x, e in exps.items() if e.group == g]
+        w(f'- **{title}:** ' + '; '.join(line(x) for x in gn) + '. ' + _group_decision(T, t, gn, defaults[g]))
+    if T.has('unscaled_inner_fits'):
+        w(f"- **No scaling, evidence:** the default features' SDs span {v('feature_sd_orders')} orders of magnitude; with "
+          f"the lbfgs iteration cap of {v('max_iter_unscaled')}, {v('unscaled_inner_nonconverged')} of "
+          f"{v('unscaled_inner_fits')} inner fits and {v('unscaled_final_nonconverged')} of {v('n_persons')} outer-fold "
+          'final fits of the unscaled model stopped at the cap (not converged; recorded in its result). Scaling is '
+          'kept for the linear, kernel and k-NN models; trees are scale-free.')
+    if T.has('fixed_n_frozen'):
+        w(f"- **Fixed window, caveat:** the {v('fixed_window_s')}-s window is not onset-only: the cache freezes every "
+          f"channel from the app's end cue on, which happens in {v('fixed_n_frozen')} of {v('fixed_n_trials')} primary "
+          f"trials (median {v('fixed_frozen_share')} of the post-onset window; freeze point vs approach duration "
+          f"Spearman {v('fixed_rho')}), and its gravity reference uses the rest after the end. Its features include the "
+          'frozen tail, so it is not robust to end-detection errors, and production has no end cue.')
+    w(f"- **Filtering, resampling, gap handling** are the cache's ({v('lowpass_hz')} Hz zero-phase low-pass, "
+      f"{v('fs_hz')} Hz grid, gaps up to {v('max_gap_ms')} ms interpolated, longer gaps near the movement excluded; "
+      'stage2 README and lane p1); this lane inherits them unchanged. Every feature is checked finite before a fit.\n')
+
+    # ── families ──
+    w('## Feature families (drop one / only one)\n')
+    w(f"With mirror augmentation a linear model gives every mirror-even feature (and the intercept) zero weight, so the "
+      f"augmented ablation tests only the {v('reg_odd')} odd or swapped features of the default set; the "
+      f"{v('reg_even')} even ones (wavelet energies, band powers, SD, energy, duration, ...) are tested by the ablation "
+      'without mirroring, where every family can carry weight.\n')
+    for g, title in (('family_drop', 'Drop one, with augmentation'), ('family_only', 'Only one, with augmentation'),
+                     ('family_drop_nomirror', 'Drop one, without mirroring'),
+                     ('family_only_nomirror', 'Only one, without mirroring')):
+        gn = [x for x, e in exps.items() if e.group == g]
+        if gn:
+            w(f'- **{title}:** ' + '; '.join(line(x) for x in gn) + '.')
+    ab = [x for x in t.index if t.loc[x, 'group'].startswith('family_only')
+          and abs(t.loc[x, 'p_min'] - 0.5) < S.ABSTAIN_TOL and abs(t.loc[x, 'p_max'] - 0.5) < S.ABSTAIN_TOL]
+    if ab:
+        w('- **Abstaining ablations:** ' + ', '.join(f'`{x}`' for x in ab) + ' predict P = 0.5 for every trial (no '
+          'mirror-odd feature): their accuracy is the share of right hands, not evidence about the family.')
+    from stage2.lanes.m2_features import FAMILIES
+    even = []
+    for f in FAMILIES:
+        k = f'lrnm_only_{f}'
+        if n.get(f'reg_{f}_odd', {}).get('value') == 0 and T.has(k + '_accuracy_lo', k + '_accuracy_hi'):
+            chance = n[k + '_accuracy_lo']['value'] <= 0.5 <= n[k + '_accuracy_hi']['value']
+            even.append(f"{f} alone without mirroring {T.vc(k + '_accuracy')}"
+                        + (' (at chance: the CI includes one half)' if chance else ''))
+    if even:
+        w('- **Mirror-even families, tested without mirroring:** ' + '; '.join(even) + '.')
+    worse_fams = [f"{t.loc[x, 'label'].replace('without ', '')} ({'with augmentation' if t.loc[x, 'group'] == 'family_drop' else 'without mirroring'})"
+                  for x in t.index if t.loc[x, 'group'] in ('family_drop', 'family_drop_nomirror')
+                  and T.has(R.short(x) + '_ll_verdict') and v(R.short(x) + '_ll_verdict') == 'worse']
+    w('- **Decision:** keep every family (the pre-specified default); removals that worsen the held-out log loss after '
+      'the Holm adjustment: ' + (', '.join(worse_fams) or 'none') + '.')
+    imp = L.read_json('m2_importance')
+    for m in ('m2_lr_full', 'm2_lgbm'):
+        if m in imp:
+            k = f'imp_{R.short(m)}'
+            fam = pd.Series(imp[m]['family_share']).sort_values(ascending=False)
+            ch = pd.Series(imp[m]['channel_share']).sort_values(ascending=False).head(5)
+            w(f"- **Held-out importance, {m}** (mean |contribution to the logit| on held-out persons; a correlation "
+              'pair split equally between its channels): families ' + ', '.join(f"{f} {v(f'{k}_fam_{f}')}" for f in fam.index)
+              + '; top channels ' + ', '.join(f"{c} {v(f'{k}_ch_{R.slug(c)}')}" for c in ch.index)
+              + f"; gravity-frame channels {v(k + '_frame_gravity')}, device-frame {v(k + '_frame_device')}.")
+    w('')
+
+    # ── calibration ──
+    w('## Calibration\n')
+    w(f"Method: ECE ({v('ece_bins')} equal-mass bins) is judged against the ECE that perfectly calibrated outcomes "
+      '(y drawn from Bernoulli(p), trials independent: a lower bound on the noise) give with the same predictions, not '
+      'with a percentile bootstrap CI (resampling inflates the ECE, so such a CI can exclude its own estimate). '
+      'Calibration slope and calibration-in-the-large come with person-bootstrap 95 % CIs (perfect: 1 and 0). Remedies '
+      '(Platt, temperature, isotonic, beta, Platt per platform) are fitted inside every outer fold on cross-fitted '
+      'predictions of the training persons and compared by paired log-loss and Brier differences, Holm-adjusted over '
+      'the calibrators of a model.\n')
+    for src in cal.get('order', []):
+        m = cal['models'][src]
+        k = f'cal_{R.short(src)}'
+        w(f'**{src}**\n')
+        w('| Calibrator | ECE (null mean / 97.5 %) | Slope [95 % CI] | CITL [95 % CI] | Log loss | Brier | '
+          'Log loss vs none [CI], Holm p | Brier vs none [CI] |')
+        w('|---|---|---|---|---|---|---|---|')
+        for c in m['variants']:
+            kc = f'{k}_{c}'
+            vs = (f"{v(kc + '_d_ll')} {T.ci(kc + '_d_ll')}, {v(kc + '_p_ll_holm')}" if T.has(kc + '_d_ll') else '--')
+            vb = (f"{v(kc + '_d_brier')} {T.ci(kc + '_d_brier')}" if T.has(kc + '_d_brier') else '--')
+            w(f"| {R.CAL_TEXT.get(c, c)} | {v(kc + '_ece')} ({v(kc + '_ece_null_mean')} / {v(kc + '_ece_null_hi')}) | "
+              f"{T.vc(kc + '_slope')} | {T.vc(kc + '_citl')} | {v(kc + '_log_loss')} | {v(kc + '_brier')} | {vs} | {vb} |")
+        w('')
+        dec = m['decision']
+        kn = f'{k}_none'
+        best_c = dec.get('best_calibrator')
+        w(f"- **Detected:** uncalibrated ECE {v(kn + '_ece')} against a perfect-calibration mean of "
+          f"{v(kn + '_ece_null_mean')} (97.5 % {v(kn + '_ece_null_hi')}), slope {T.vc(kn + '_slope')}, "
+          f"calibration-in-the-large {T.vc(kn + '_citl')}: "
+          + ('miscalibration detected.' if v(k + '_detected') == 'yes' else
+             'no detectable miscalibration (the slope CI includes 1, the CITL CI includes 0 and the ECE lies within '
+             'its null band).'))
+        if best_c:
+            kb = f'{k}_{best_c}'
+            w(f"- **Remedy and evidence:** {v(k + '_n_calibrators')} calibrators fitted inside the outer folds; lowest "
+              f"log loss: {v(k + '_best')} ({v(kb + '_d_ll')} {T.ci(kb + '_d_ll')}, Holm p {T.pe(kb + '_p_ll_holm')}). "
+              f"**Decision:** {'adopt ' + v(k + '_adopted') if v(k + '_adopted') != 'uncalibrated' else 'keep the model uncalibrated'}"
+              + (' (no calibrator improves the held-out log loss after the adjustment).'
+                 if v(k + '_adopted') == 'uncalibrated' else ' (its paired gain survives the adjustment).'))
+        if T.has(f'{k}_platt_platform_vs_platt_d_ll'):
+            kp = f'{k}_platt_platform_vs_platt'
+            verdict = v(kp + '_verdict') if T.has(kp + '_verdict') else 'not different'
+            w(f"- **Platforms:** " + ', '.join(
+                f"{LEVEL_TEXT.get(pl, pl)} slope {T.vc(f'{kn}_{R.slug(pl)}_slope')}, ECE {v(f'{kn}_{R.slug(pl)}_ece')} "
+                f"(null 97.5 % {v(f'{kn}_{R.slug(pl)}_ece_null_hi')}, {v(f'{kn}_{R.slug(pl)}_n_persons')} persons)"
+                for pl in m['variants']['none']['platform'])
+              + f"; a platform-specific Platt map against one global map: log loss {v(kp + '_d_ll')} {T.ci(kp + '_d_ll')}"
+              + (f", Holm p {T.pe(kp + '_p_ll_holm')} over the {T.count(kp + '_family_size', 'analysed model')} "
+                 f"({verdict})" if T.has(kp + '_p_ll_holm', kp + '_family_size') else '')
+              + '. '
+              + ('No evidence that the platforms need different maps (underpowered).'
+                 if (verdict != 'better'
+                     and not any(m['decision'].get('platform_miscalibration_detected', {}).values()))
+                 else 'The platforms may need different maps.'))
+        elif m['variants']['none']['platform']:
+            w('- **Platforms:** ' + ', '.join(
+                f"{LEVEL_TEXT.get(pl, pl)} slope {T.vc(f'{kn}_{R.slug(pl)}_slope')}, ECE {v(f'{kn}_{R.slug(pl)}_ece')} "
+                f"(null 97.5 % {v(f'{kn}_{R.slug(pl)}_ece_null_hi')})" for pl in m['variants']['none']['platform'])
+              + '.')
+        w('')
+    if head in ka:
+        sk = f'ka_{hs}'
+        km = v(sk + '_k_max')
+        d = ka[head]
+        w(f"**Multi-attempt aggregates** (`{head}`, k = {km} attempts of one person and hand, {v(sk + '_n_persons')} "
+          f"persons; tau_k of the tempered sum fitted inside each outer fold on the training persons' cross-fitted "
+          'predictions, so the held-out person never informs its own temperature)\n')
+        w('| Aggregate | Log loss [95 % CI] | ECE | Mean confidence | Share correct | Confidence - correct [95 % CI] |')
+        w('|---|---|---|---|---|---|')
+        for r in d['rows']:
+            if int(r['k']) != int(d['k_max']):
+                continue
+            a = R.AGG_SHORT[r['aggregator']]
+            kk = f'{sk}_k{km}_{a}'
+            w(f"| {R.AGG_TEXT[r['aggregator']]} | {T.vc(kk + '_ll')} | {v(kk + '_ece')} | {v(kk + '_conf')} | "
+              f"{v(kk + '_acc')} | {T.vc(kk + '_gap')} |")
+        w('')
+        for p in d.get('pairs', []):
+            if int(p['k']) != int(d['k_max']):
+                continue
+            kk = f"{sk}_k{km}_{R.AGG_SHORT[p['a']]}_vs_{R.AGG_SHORT[p['b']]}"
+            w(f"- {R.AGG_TEXT[p['a']]} minus {R.AGG_TEXT[p['b']]}: log loss {v(kk + '_d_ll')} {T.ci(kk + '_d_ll')}, "
+              f"Holm p {T.pe(kk + '_p_holm')}.")
+        rec = d.get('recommended')
+
+        def conf_word(a: str) -> str:
+            k0 = f'{sk}_k{km}_{a}_gap'
+            if not T.has(k0 + '_lo', k0 + '_hi'):
+                return 'n/a'
+            lo, hi = n[k0 + '_lo']['value'], n[k0 + '_hi']['value']
+            word = 'over-confident' if lo > 0 else ('under-confident' if hi < 0 else 'calibrated within its CI')
+            return f'{word} ({T.vc(k0)})'
+        w(f"- **Decision:** display the {v(sk + '_recommended')} (lowest log loss at k = {km}; "
+          f"{conf_word(R.AGG_SHORT.get(rec, ''))}); decide with the mean P(right) (the k-attempt accuracy curve). The "
+          f"mean P is {conf_word('meanp')} and the plain sum of logits {conf_word('sum')}"
+          + (f"; the nested tau_{km} (median {v(f'{sk}_tau_k{km}')}) means the {km} attempts carry about "
+             f"{v(f'{sk}_eff_k{km}')} independent attempts' worth of evidence." if T.has(f'{sk}_tau_k{km}') else '.')
+          + ('' if rec == 'sum_logit_tempered' else ' The nested tempered sum is not the best aggregate here.') + '\n')
+
+    # ── breakdowns ──
+    w('## Breakdowns of the headline model\n')
+    bd = pd.read_csv(L.tab_dir / 'm2_strata.csv')
+    d = bd[bd['model'] == head]
+    w(f"Strata stratify predictions only (never inputs). A person-bootstrap CI only with at least "
+      f"{v('min_persons_ci')} persons.\n")
+    w('| Factor | Level | Trials | Persons | Accuracy [95 % CI] |')
+    w('|---|---|---|---|---|')
+    for _, r in d.iterrows():
+        kk = f"bd_{hs}_{R.slug(r['factor'])}_{R.slug(r['level'])}"
+        lev = LEVEL_TEXT.get(str(r['level']), str(r['level']).replace('_', ' '))
+        w(f"| {r['factor_label']} | {lev} | {v(kk + '_n')} | {v(kk + '_persons')} | "
+          f"{T.vc(kk + '_acc')} |")
+    k = f'pp_{hs}'
+    w(f"\n- Per person: median {v(k + '_median')}, lowest {v(k + '_min')} ({v(k + '_min_person')}), "
+      f"{v(k + '_below80')} of {v(k + '_n')} below 80 %.")
+    w(f"- Gated (the trials passing the predictor gates G1 + G2, {v(hs + '_gated_n')}): accuracy {v(hs + '_gated_acc')}.")
+    w(f"- Free choice: {v(hs + '_nat_correct')}/{v(hs + '_nat_n')} right-hand trials recognised "
+      f"({v(hs + '_nat_acc')} {T.ci(hs + '_nat')}).")
+    if head in ka:
+        sk = f'ka_{hs}'
+        parts = []
+        for r in ka[head]['k_curve']:
+            kk = int(r['k'])
+            parts.append(f'k={kk} ' + T.vc(f'{sk}_k{kk}_acc'))
+        w('- k attempts (mean P, per-person balanced accuracy): ' + ', '.join(parts)
+          + f" ({v(sk + '_n_persons')} persons; left out: {v(sk + '_left_out')}).\n")
+
+    # ── learning curve ──
+    lcp = L.tab_dir / 'm2_lc_runs.csv'
+    if lcp.exists():
+        lc = pd.read_csv(lcp)
+        sub = lc[lc['n_train_persons_requested'].astype(str) != 'all']
+        w('## Learning curve\n')
+        sizes = sorted(int(float(x)) for x in sub['n_train_persons_requested'].unique())
+        w('- ' + '; '.join(f"{v(f'lc_n{x:02d}_persons')} persons: accuracy {v(f'lc_n{x:02d}_acc_mean')} (range "
+                           f"{v(f'lc_n{x:02d}_acc_min')} to {v(f'lc_n{x:02d}_acc_max')}), log loss "
+                           f"{v(f'lc_n{x:02d}_ll_mean')} ({v(f'lc_n{x:02d}_reps')} subsets)" for x in sizes)
+          + f"; every training person ({v('lc_all_persons')}): {v('lc_all_acc')}, log loss {v('lc_all_ll')} (one run).")
+        if 'M2_05_learning_curve' in caps:
+            w('- ' + caps['M2_05_learning_curve'].get('decision', ''))
+        w('')
+
+    # ── figures, finalists, regenerate ──
+    w('## Figures (`reports/stage2/figures/m2/`; plotted data in `tables/m2/<name>.csv`)\n')
+    for name, c in caps.items():
+        w(f"- `{name}`: {c.get('decision', '')}")
+    w('')
+    w('## Finalists (`results/finalists_m2.json`)\n')
+    for f in s.get('finalists') or []:
+        k = R.short(f['name'])
+        w(f"- `{f['name']}`: module `{f['module']}`, build_x `{f['build_x']}`, factory `{f['factory']}`, params "
+          f"`{json.dumps(f['params'])}`; n_configs_tried of the finalist choice {v('n_models_compared')} (the pipelines "
+          f"compared on the outer folds; the result's own: {v(k + '_configs')}); {T.vc(k + '_accuracy')}, log loss "
+          f"{v(k + '_log_loss')}.")
+    w('')
+    w('## Regenerate\n')
+    w('```')
+    w('cd analysis')
+    w('.venv/Scripts/python.exe -m stage2.pipeline compute --lanes m2            # missing / stale experiments, then derived data')
+    w('.venv/Scripts/python.exe -m stage2.pipeline compute --lanes m2 --force    # every experiment (single process)')
+    w('.venv/Scripts/python.exe -m stage2.scripts.run_m2 --threads 1 --only "m2_lr_*"   # one of two single-thread workers (shared queue, lock files)')
+    w('.venv/Scripts/python.exe -m stage2.pipeline figures --lanes m2            # redraw every figure from saved files')
+    w('.venv/Scripts/python.exe -m stage2.pipeline tables --lanes m2             # CSV + LaTeX tables')
+    w('.venv/Scripts/python.exe -m stage2.pipeline numbers --lanes m2            # m2_numbers.json, numbers.tex, this summary')
+    w('.venv/Scripts/python.exe -m pytest stage2/tests/test_m2_features.py stage2/tests/test_m2_models.py stage2/tests/test_m2_figures.py -q -p no:cacheprovider')
+    w('```\n')
+
+    # ── caveats ──
+    w('## Caveats and open questions\n')
+    w(f"- {v('n_persons')} persons: every CI is wide; differences of a point or two between pipelines are not resolved, "
+      'and every significance statement here is Holm-adjusted within its named comparison family.')
+    w(f"- The model comparison ({v('n_models_compared')} pipelines), the calibrators and the ablations are exploratory "
+      '(their n_configs_tried is in every result, the registry and the finalists file); only the nested selection and '
+      'the pre-specified default are headline-grade. The cross-lane synthesis re-selects among the finalists nested.')
+    from stage2.lanes import m2_models as M
+    fixed = [M.MODELS[m].label.split(' (')[0] for m in M.MODELS if len(M.MODELS[m].grid) == 1]
+    w(f"- Budget: {v('inner_folds')} inner person folds; Optuna trials per outer fold: "
+      + ', '.join(f"{m} {v('trials_' + m)}" for m in sorted(P.TRIALS))
+      + (f"; {' and '.join(fixed)} with one fixed configuration, not tuned ({v('forest_n_estimators')} trees, "
+         f"{M.FOREST_DEFAULT['max_features']}(p) features per split, leaves of at least {v('forest_min_leaf')} rows)"
+         if fixed and T.has('forest_n_estimators', 'forest_min_leaf') else '')
+      + '; LightGBM mirror variants: ' + ', '.join(P.MIRROR_LABELS[x] for x in P.LGBM_MIRRORS)
+      + ' (against augmentation; the linear model has all four).')
+    w('- Oracle (app) segmentation: production will see detected windows (cue-free lane); the approach-window features '
+      'inherit any segmentation error there, and the fixed window depends on the end cue (see above).')
+    if nat_left == 0 or nat_right == 0:
+        w(f"- The {v('nat_n')} free-choice trials use one hand only: a right-hand recall, not a calibration or "
+          'accuracy check over both hands.')
+    w(f"- Bootstrap sizes: experiment metrics and paired comparisons use {v('n_boot')} person resamples; the derived "
+      f"intervals (strata, platforms, reliability bands, calibration slopes) {v('n_boot_derived')} and the "
+      f"multi-attempt aggregate intervals {v('n_boot_attempts')}.")
+    w('- The nested tau_k is fitted on inner cross-fitted predictions, which come from models trained on fewer persons '
+      'than the final model; if those predictions are less confident than the final ones, the tempered sum can be '
+      'slightly over-confident on held-out persons (its confidence gap above shows by how much).')
+    dev = v('imp_lr_full_frame_device') if T.has('imp_lr_full_frame_device') else 'n/a'
+    w('- Open: does per-trial amplitude normalisation survive on detected windows? Do the device-frame features (share '
+      f"of the default LR's held-out contribution: {dev}) generalise to unseen grips (leave-one-grip-out)?")
+    if T.missing:
+        w('\n*Shown as n/a (their experiments have no saved result yet): '
+          + ', '.join(f'`{k}`' for k in dict.fromkeys(T.missing)) + '.*')
+        print(f'm2 summary: {len(set(T.missing))} number(s) missing (n/a in the text)', flush=True)
+    return '\n'.join(T.lines) + '\n'
+
+
+#: numeric tokens that are conventions, not results: the 95 % of a CI, the 97.5th percentile, the 80 % line,
+#: P = 0.5 (an abstention) and 100 % (a constant predictor's recall)
+CONVENTIONS = {'95', '97.5', '80', '0.5', '100'}
+_NUMBER = re.compile(r'[-+]?\d+(?:\.\d+)?(?:e[-+]?\d+)?%?')
+
+
+def numeric_tokens(text: str) -> list[str]:
+    """Numbers of a text outside code spans and identifiers (M2_07, db2, n04) and not glued to a unit word."""
+    body = re.sub(r'`[^`]*`', ' ', text)
+    out = []
+    for m in _NUMBER.finditer(body):
+        a, b = m.span()
+        prev = body[a - 1] if a else ' '
+        nxt = body[b] if b < len(body) else ' '
+        if prev.isalnum() or prev in '_.' or nxt.isalpha() or nxt == '_':
+            continue
+        out.append(m.group())
+    return out
+
+
+def untraced_numbers(text: str, numbers: dict[str, Any]) -> list[str]:
+    """Numeric tokens of ``text`` that match no formatted numbers entry and are neither conventions (CONVENTIONS) nor
+    small structural integers (0..5: k attempts, panel and step counts of the method)."""
+    allowed = set(CONVENTIONS) | {str(i) for i in range(0, 6)}
+    vals = set()
+    for k in numbers:
+        s = R.fmt(numbers, k).lstrip('<>')
+        vals |= {s, s.rstrip('%'), s.lstrip('+'), s.lstrip('+').rstrip('%')}
+    out = []
+    for tok in numeric_tokens(text):
+        bare = tok.rstrip('%').lstrip('+')
+        if tok in vals or bare in vals or tok in allowed or bare in allowed:
+            continue
+        out.append(tok)
+    return out
+
+
+def write() -> None:
+    L.summary_path.write_text(build(), encoding='utf-8', newline='\n')

@@ -24,3 +24,7 @@
 
 # Python caches of scripts/
 __pycache__/
+
+# The PD01 case study (Appendix I) describes a health condition: keep its source local until the researcher
+# explicitly approves publishing it. main.tex loads it with \InputIfFileExists, so a clone without it still builds.
+/sections/I_case_study.tex

@@ -1,0 +1,670 @@
+% sections/H_secondary.tex: Lanes sec and demo (appendix).
+% Numbers only through \R / \Rci; figures through \genfig, tables through \gentab (report/README.md).
+% Sources: analysis/reports/stage2/sec_SUMMARY.md, demo_SUMMARY.md, figures/{sec,demo}/captions.json,
+% tables/{sec,demo}/*, results/{sec,demo}_numbers.json; audits handoff/agent_results/syn_sec_audit_*.json.
+% Figures SEC_02 and SEC_06 are placed in sections/07_secondary.tex and only referred to here.
+\section{Secondary analyses in full}\label{app:sec}
+
+This appendix reports the secondary tasks of the protocol: the instructed speed (fast, natural, slow), the
+instructed grip (upright, top left, top right) and the dominant hand. It ends with a test of whether demographics
+would help the hand prediction. Speed, grip and dominance are targets here. They never enter the hand model as
+inputs, and no model of this appendix feeds the displayed \pright{}. Table~\ref{tab:app:sec-decisions} lists
+every decision with its options, its choice and its evidence; the subsections give the detail. The main-text
+summary is Section~\ref{sec:secondary}. Abbreviations used in this appendix: leave-one-person-out (LOSO),
+logistic regression (LR), gradient-boosted trees (LightGBM), area under the ROC curve (AUC), confidence interval
+(CI), standard deviation (SD), interquartile range (IQR), ordinary least squares (OLS), spectral arc length
+(SPARC).
+
+\begin{table}[tbp]
+\centering
+\small
+\caption{Decisions of the secondary analyses: the options considered, the choice and where its evidence is.}
+\label{tab:app:sec-decisions}
+\begin{tabularx}{\linewidth}{@{}>{\raggedright\arraybackslash}p{2.5cm}>{\raggedright\arraybackslash}X%
+>{\raggedright\arraybackslash}X>{\raggedright\arraybackslash}p{2.3cm}@{}}
+\toprule
+Decision & Options & Choice & Evidence \\
+\midrule
+Speed windows & the app's stored (oracle) windows; the app's detector re-run with one parameter set
+  (label-blind); a fixed window from the onset & label-blind; oracle numbers kept as a label-informed,
+  optimistic reference & \ref{app:sec:segmentation}, Fig.~\ref{fig:SEC_09_segmentation} \\
+Common detector setting & the defaults with the longest movement cap; the slow trials' stricter end criterion
+  & the defaults with the longest cap & \ref{app:sec:segmentation}, Tab.~\ref{tab:sec_segmentation} \\
+Manipulation check & all trials; standard-variant trials; with or without the session position &
+  standard variant, both windows, position-adjusted as sensitivity & \ref{app:sec:manipulation},
+  Tab.~\ref{tab:sec_speed_manipulation} \\
+Speed headline & LR on the duration; LR on 16 mirror-invariant kinematic features; LightGBM on every channel
+  & the pre-specified LR on the kinematic features & \ref{app:sec:speed-models},
+  Tab.~\ref{tab:sec_model_pairs} \\
+Speed metrics & accuracy; balanced accuracy; macro-F1 & balanced accuracy (primary) and macro-F1, with
+  per-class recall, precision and F1 & \ref{app:sec:design} \\
+Speed training trials & every primary trial; standard variant only & every primary trial &
+  \ref{app:sec:speed-models} \\
+Speed vs the protocol & ignore; grip-only reference and grip strata & grip-only reference and grip strata &
+  \ref{app:sec:confounds}, Tab.~\ref{tab:sec_design} \\
+Grip model & up vector before the onset; 12 orientation features; LightGBM on every channel &
+  the pre-specified 12-feature LR (identical to the up vector alone) & \ref{app:sec:grip},
+  Tab.~\ref{tab:sec_grip_models} \\
+Grip labels & correct the probable errors; keep as instructed & keep as instructed; explain the errors &
+  \ref{app:sec:grip}, Fig.~\ref{fig:SEC_05_grip_physics} \\
+Dominance inputs & every channel; mirror-invariant features only & mirror-invariant only (cannot encode
+  which hand moved) & \ref{app:sec:dominance} \\
+Dominance reference & AUC 0.5; within-person label-permutation null & the permutation null &
+  \ref{app:sec:dominance}, Tab.~\ref{tab:sec_dominance_model} \\
+Person-level handedness & a model; individual values & individual values (2 left-handed persons) &
+  \ref{app:sec:dominance} \\
+Demographics & add to the hand model; leave out & leave out & \ref{app:sec:demo},
+  Fig.~\ref{fig:DEMO_01_paired} \\
+Calibration of these models & assess; not assess & not assessed (none feeds the displayed \pright{}) &
+  \ref{app:sec:design} \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+% ------------------------------------------------------------------------------------------------------------
+\subsection{Targets, design and evaluation}\label{app:sec:design}
+
+\paragraph{Targets.} The \R{sec/n_trials} primary trials of the \R{sec/n_persons} persons carry an instructed
+speed (fast \R{sec/n_speed_fast}, natural \R{sec/n_speed_natural}, slow \R{sec/n_speed_slow}) and an instructed
+grip (upright \R{sec/n_grip_upright}, top left \R{sec/n_grip_top_left}, top right \R{sec/n_grip_top_right}).
+Of these, \R{sec/n_standard} are of the standard movement variant. The other variants (pause, jerky) were made at
+natural speed only; \R{sec/n_fastslow_nonstandard} fast or slow trials belong to them. Slow trials are few: a
+median of \R{sec/slow_per_person_median} per person, at most \R{sec/slow_per_person_max}, and
+\R{sec/n_persons_no_slow} person has none.
+
+\paragraph{Evaluation.} Every model was evaluated LOSO on the same person splits as the hand models, with the
+same cap on trials per person \cite{saeb2017usecase}. Hyperparameters were tuned inside each outer fold on inner
+folds of the training persons, on the class-balanced log loss, with class-balanced weights. Each model is
+pre-specified: one model family whose penalty or tree parameters are tuned by nesting, so no configuration was
+selected on the outer folds unless stated. Brackets are 95\,\% CIs from \R{sec/n_boot} person resamples.
+
+\paragraph{Metrics.} The primary metric is the balanced accuracy (chance \R{sec/chance_speed} for three
+classes), reported with the macro-F1 and with the recall, precision and F1 of every class. Plain accuracy would
+reward answering natural, the class of \R{sec/n_speed_natural} of the \R{sec/n_trials} trials. The price of the
+class-balanced weights is a low precision for the rare slow class (Appendix~\ref{app:sec:speed-models}). This is
+a metric choice, not a tested remedy.
+
+\paragraph{Paired comparisons.} Two models are compared on the trials both scored
+(Tables~\ref{tab:sec_model_pairs} and~\ref{tab:sec_model_pairs_ll}). The pooled balanced-accuracy difference is
+tested with an exact sign-flip test on the per-person contributions, the pooled macro-F1 difference with a
+person-swap test, and the mean per-person log-loss and accuracy differences with a sign-flip test over persons.
+Each metric forms its own Holm family over the \R{sec/n_model_pairs} comparisons of the two tables. A pair in which
+no trial changes class and the log-loss difference is below \R{sec/ll_precision} is called identical and is not
+tested.
+
+\paragraph{No calibration claims.} None of these models feeds the displayed percentage, which is the \pright{}
+of the hand model. Their log losses are reported with the other metrics; their calibration was not assessed.
+
+\gentab{sec/sec_model_pairs}
+\gentab{sec/sec_model_pairs_ll}
+
+% ------------------------------------------------------------------------------------------------------------
+\FloatBarrier
+\subsection{Speed: label-blind windows}\label{app:sec:segmentation}
+
+\paragraph{The problem.} The app resolved its online segmentation parameters per instructed condition
+(Appendix~\ref{app:data:segmentation}). By default an approach ends after \R{sec/seg_default_end_sustain_ms}\,ms below
+\R{sec/seg_default_end_gyro_dps}\,deg/s and \R{sec/seg_default_end_acc_ms2}\,m/s$^2$, with a movement cap of
+\R{sec/seg_default_max_movement_ms}\,ms. A slow trial ends only after \R{sec/seg_slow_end_sustain_ms}\,ms below
+\R{sec/seg_slow_end_gyro_dps}\,deg/s and \R{sec/seg_slow_end_acc_ms2}\,m/s$^2$, with a cap of
+\R{sec/seg_slow_max_movement_ms}\,ms; pause and jerky trials also wait longer for their end. The stored (oracle)
+window of a slow trial is therefore chosen by its label. Its duration, and every feature computed over it,
+carries a criterion that a sensor-only system does not have.
+
+\paragraph{Options.} (i) The oracle windows. (ii) The app's own detector re-run on every stored stream with one
+parameter set for every trial: the label-blind windows. (iii) A fixed window from the label-blind onset; it was
+not run in this version. For (ii), two common settings were considered: the defaults with the longest movement
+cap of any condition (\R{sec/seg_common_max_movement_ms}\,ms), or the slow trials' stricter end criterion for
+every trial.
+
+\paragraph{Evidence.} With the stored parameters, the re-run detector reproduces the stored bounds of
+\R{sec/reseg_n_reproduced} of \R{sec/reseg_n_trials} trials exactly. With the common default setting it keeps the
+bounds of \R{sec/reseg_natural_share_std_same} of the standard natural trials and
+\R{sec/reseg_fast_share_std_same} of the standard fast ones, but of \R{sec/reseg_slow_n_std_same} of the
+\R{sec/reseg_slow_n_std} slow trials (Table~\ref{tab:sec_segmentation}; Figure~\ref{fig:SEC_09_segmentation}a).
+The median slow approach shrinks from \R{sec/reseg_slow_dur}\,s to \R{sec/reseg_slow_dur_common}\,s, as short as
+a natural one (\R{sec/reseg_natural_dur_common}\,s). It now ends after a median \R{sec/reseg_slow_path_share} of
+its rotation (IQR \R{sec/reseg_slow_path_share_q25} to \R{sec/reseg_slow_path_share_q75}). The
+stricter criterion is no usable common choice: applied to every trial, it ends the approach before the arm starts
+back in only \R{sec/reseg_fast_strict_ok_std} of the standard fast and \R{sec/reseg_natural_strict_ok_std} of the
+standard natural trials. The common default setting ends all \R{sec/reseg_n_common_ok} primary trials and
+\R{sec/reseg_nat_ok} of the \R{sec/reseg_nat_n} free-choice trials. Every trial was re-standardised on the
+label-blind bounds through the cache's own code path. On the oracle bounds this path reproduces the cached arrays
+of all \R{sec/restd_n_checked} trials (largest difference \R{sec/restd_max_diff}).
+
+\paragraph{Consequence.} The same pre-specified LR falls from a balanced accuracy of \Rci{sec/speed_lr_bacc} on
+the oracle windows to \Rci{sec/speed_lr_common_bacc} on the label-blind windows (paired difference
+\Rcib{sec/pair_speed_lr_common_vs_speed_lr_d_bacc}~points, $p < 0.001$, Holm over the balanced-accuracy family).
+Its slow recall falls from \R{sec/speed_lr_rec_slow} to \R{sec/speed_lr_common_rec_slow}
+(Figure~\ref{fig:SEC_09_segmentation}b). The same paired difference (label-blind minus oracle) is
+\Rcib{sec/pair_speed_gbm_common_vs_speed_gbm_d_bacc}~points for LightGBM and
+\Rcib{sec/pair_speed_ang_common_vs_speed_ang_d_bacc}~points for an LR on the \R{sec/speed_ang_n_features}
+duration and angular features (both $p < 0.001$, Holm).
+
+\paragraph{Decision.} The label-blind windows carry every sensor-only speed result, and the label-blind LR is the
+speed headline. The oracle-window numbers are kept as a label-informed, optimistic reference. They are not an
+upper bound: the label-blind numbers belong to the app's default end rule, which truncates a slow reach at its
+first slow phase, and a detector built for slow movements could recover more. No segmentation parameter depends
+on the hand, so the hand models are unaffected.
+
+\begin{figure}[tbp]
+\centering
+\genfig{sec/SEC_09_segmentation}
+\caption{The approach window depended on the instructed speed. (a) Per trial, the approach duration of the app's
+stored (oracle) window against that of the app's detector re-run with one parameter set for every trial
+(label-blind; dashed: equal). The median slow approach shrinks from \R{sec/reseg_slow_dur}\,s to
+\R{sec/reseg_slow_dur_common}\,s; fast and natural trials barely change. (b) Recall per instructed speed of the
+headline LR fitted on each kind of window (LOSO; dotted: chance). The oracle-window speed results are optimistic,
+because the segmentation used the label.}
+\label{fig:SEC_09_segmentation}\label{fig:app:sec-segmentation}
+\end{figure}
+
+\gentab{sec/sec_segmentation}
+
+% ------------------------------------------------------------------------------------------------------------
+\FloatBarrier
+\subsection{Speed: the manipulation check}\label{app:sec:manipulation}
+
+\paragraph{Method.} The check asks whether the persons moved differently when told to. Per person, the median
+approach duration and peak angular speed were taken per instructed speed, on the \R{sec/manip_standard_n_trials}
+standard-variant trials (the variants occur at natural speed only). Across persons the analysis gives the median
+per-person ratio of the expected-higher to the expected-lower speed (1 = no difference) with its CI, the number of
+persons in the instructed order, and a Wilcoxon signed-rank test, Holm-adjusted over the four contrasts of each
+set of trials (Table~\ref{tab:sec_speed_manipulation}; Figure~\ref{fig:SEC_01_speed_manipulation}).
+
+\paragraph{Fast vs natural.} The fast instruction raised the peak angular speed in
+\R{sec/manip_standard_peak_natural_fast_n_expected} of \R{sec/manip_standard_peak_natural_fast_n} persons (ratio
+\Rci{sec/manip_standard_peak_natural_fast_ratio}, $p < 0.001$, Holm). It shortened the reach in only
+\R{sec/manip_standard_dur_fast_natural_n_expected} of \R{sec/manip_standard_dur_fast_natural_n} persons
+(natural/fast duration ratio \Rci{sec/manip_standard_dur_fast_natural_ratio}, Holm $p$
+\R{sec/manip_standard_dur_fast_natural_p_holm}). The persons followed the fast instruction at the peak; its effect
+on the duration of the whole reach is weak and uncertain.
+
+\paragraph{Order and practice.} The protocol ran the fast trials before the natural ones for
+\R{sec/des_fast_before} of \R{sec/des_fast_before_n} persons, and natural reaches shortened over the session
+(median within-person Spearman $\rho$ of the log duration with the position \R{sec/des_practice_rho}, negative for
+\R{sec/des_practice_neg} of \R{sec/des_practice_n} persons, Wilcoxon $p$ \R{sec/des_practice_p}). The unadjusted
+contrast therefore mixes instruction and practice. Two sensitivity analyses form their own Holm family with the
+adjusted peak contrast. A per-person OLS of the log duration on speed and position gives natural longer than fast
+for \R{sec/adj_standard_duration_log_n_expected} of \R{sec/adj_standard_duration_log_n} persons (ratio
+\Rci{sec/adj_standard_duration_log_ratio}, Holm $p$ \R{sec/adj_standard_duration_log_p_holm}). Keeping only the
+natural trials made before the person's last fast trial gives \R{sec/adj_standard_duration_overlap_n_expected} of
+\R{sec/adj_standard_duration_overlap_n} persons (ratio \Rci{sec/adj_standard_duration_overlap_ratio}, Holm $p$
+\R{sec/adj_standard_duration_overlap_p_holm}). The direction is the instructed one in each analysis; the size
+stays uncertain. Adjusted for position, the peak angular speed is higher for fast in
+\R{sec/adj_standard_ang_speed_peak_n_expected} of \R{sec/adj_standard_ang_speed_peak_n} persons ($p < 0.001$,
+Holm).
+
+\paragraph{Slow vs natural.} On the oracle windows, slow reaches are longer than natural ones for
+\R{sec/manip_standard_dur_natural_slow_n_expected} of \R{sec/manip_standard_dur_natural_slow_n} persons (ratio
+\Rci{sec/manip_standard_dur_natural_slow_ratio}, $p < 0.001$, Holm). On the label-blind windows only
+\R{sec/manip_common_dur_natural_slow_n_expected} of \R{sec/manip_common_dur_natural_slow_n} are (ratio
+\Rci{sec/manip_common_dur_natural_slow_ratio}, Holm $p$ \R{sec/manip_common_dur_natural_slow_p_holm}): most of the
+oracle contrast is the stricter end criterion (Appendix~\ref{app:sec:segmentation}). At the peak, natural reaches
+are faster than slow ones for \R{sec/manip_standard_peak_slow_natural_n_expected} of
+\R{sec/manip_standard_peak_slow_natural_n} persons on the oracle windows (Holm $p$
+\R{sec/manip_standard_peak_slow_natural_p_holm}) and for \R{sec/manip_common_peak_slow_natural_n_expected} of
+\R{sec/manip_common_peak_slow_natural_n} on the label-blind windows (Holm $p$ \R{sec/manip_common_peak_slow_natural_p_holm}).
+
+\paragraph{Decision.} The check uses the standard-variant trials, both kinds of window, and the position-adjusted
+contrasts as a sensitivity analysis. Over every primary trial, variants included, fast reaches are shorter than
+natural ones for only \R{sec/manip_all_dur_fast_natural_n_expected} of \R{sec/manip_all_dur_fast_natural_n}
+persons (Holm $p$ \R{sec/manip_all_dur_fast_natural_p_holm}).
+
+\begin{figure}[tbp]
+\centering
+\genfig{sec/SEC_01_speed_manipulation}
+\caption{Manipulation check of the speed instruction on the oracle windows: every standard-variant trial (small
+dots) and the per-person median (large dots) of (a) the approach duration and (b) the peak angular speed per
+instructed speed, for each of the \R{sec/manip_standard_n_persons} persons. Panel titles: persons whose medians
+follow the instruction (Wilcoxon over persons, Holm). Fast reaches were faster at the peak for
+\R{sec/manip_standard_peak_natural_fast_n_expected} of \R{sec/manip_standard_peak_natural_fast_n} persons; their
+shortening is uncertain and confounded with the session order. The slow durations are partly the app's stricter
+end criterion.}
+\label{fig:SEC_01_speed_manipulation}\label{fig:app:sec-manipulation}
+\end{figure}
+
+\gentab{sec/sec_speed_manipulation}
+
+% ------------------------------------------------------------------------------------------------------------
+\FloatBarrier
+\subsection{Speed: models and paired comparisons}\label{app:sec:speed-models}
+
+\paragraph{Options.} Four models were fitted on each kind of window (Table~\ref{tab:sec_speed_models}): a
+multinomial L2 LR on the log duration alone (the baseline); the same LR on the \R{sec/n_even_features}
+mirror-invariant kinematic features of Table~\ref{tab:sec_features} (the pre-specified headline); LightGBM on
+summary statistics of every channel; and an LR on the up vector before the onset (the grip, a nuisance reference;
+Appendix~\ref{app:sec:confounds}). Every feature is a function of one trial; scalers and models were fitted inside
+the folds \cite{pedregosa2011sklearn}.
+
+\paragraph{Headline.} On the label-blind windows the headline LR reaches a balanced accuracy of
+\Rci{sec/speed_lr_common_bacc} and a macro-F1 of \Rci{sec/speed_lr_common_f1} (chance \R{sec/chance_speed}).
+Recall, precision and F1 are \R{sec/speed_lr_common_rec_fast}, \R{sec/speed_lr_common_prec_fast} and
+\R{sec/speed_lr_common_f1_fast} for fast; \R{sec/speed_lr_common_rec_natural},
+\R{sec/speed_lr_common_prec_natural} and \R{sec/speed_lr_common_f1_natural} for natural; and
+\R{sec/speed_lr_common_rec_slow}, \R{sec/speed_lr_common_prec_slow} and \R{sec/speed_lr_common_f1_slow} for slow
+(Table~\ref{tab:sec_speed_classes}). The class-balanced weights make it call slow
+\R{sec/speed_lr_common_npred_slow} times for \R{sec/speed_lr_common_n_slow} slow trials. The largest confusion is
+between natural and slow: \R{sec/speed_lr_common_cmr_natural_slow} of the natural trials are called slow and
+\R{sec/speed_lr_common_cmr_slow_natural} of the slow trials natural (Table~\ref{tab:sec_speed_confusion};
+Figure~\ref{fig:SEC_02_speed_confusion}).
+
+\paragraph{Kinematics vs duration.} The duration alone reaches \Rci{sec/speed_dur_common_bacc}. The kinematic
+features add \Rcib{sec/pair_speed_lr_common_vs_speed_dur_common_d_bacc}~points of balanced accuracy ($p < 0.001$,
+Holm) and \Rcib{sec/pair_speed_lr_common_vs_speed_dur_common_d_f1} of macro-F1 (Holm $p$
+\R{sec/pair_speed_lr_common_vs_speed_dur_common_d_f1_p_holm}). Decision: the kinematic features, not the duration
+alone.
+
+\paragraph{LR vs LightGBM.} On the label-blind windows LightGBM reaches \Rci{sec/speed_gbm_common_bacc} (macro-F1
+\Rci{sec/speed_gbm_common_f1}). Its difference from the headline is
+\Rcib{sec/pair_speed_gbm_common_vs_speed_lr_common_d_bacc}~points in balanced accuracy (Holm $p$
+\R{sec/pair_speed_gbm_common_vs_speed_lr_common_d_bacc_p_holm}) and
+\Rcib{sec/pair_speed_gbm_common_vs_speed_lr_common_d_f1} in macro-F1 (Holm $p$
+\R{sec/pair_speed_gbm_common_vs_speed_lr_common_d_f1_p_holm}); neither is significant. Its log-loss difference is
+\Rcib{sec/pair_speed_gbm_common_vs_speed_lr_common_d_ll} and its accuracy difference
+\Rcib{sec/pair_speed_gbm_common_vs_speed_lr_common_d_acc}~points (both $p < 0.001$, Holm;
+Table~\ref{tab:sec_model_pairs_ll}). Plain accuracy weights the classes by their size, and LightGBM recalls the
+largest class far more often (natural recall \R{sec/speed_gbm_common_rec_natural} against
+\R{sec/speed_lr_common_rec_natural}) and slow far less often (\R{sec/speed_gbm_common_rec_slow} against
+\R{sec/speed_lr_common_rec_slow}). On the oracle windows LightGBM's macro-F1 difference is
+\Rcib{sec/pair_speed_gbm_vs_speed_lr_d_f1} ($p < 0.001$, Holm), while its balanced accuracy differs by
+\Rcib{sec/pair_speed_gbm_vs_speed_lr_d_bacc}~points (Holm $p$ \R{sec/pair_speed_gbm_vs_speed_lr_d_bacc_p_holm}).
+Decision: the LR stays the headline because it was pre-specified and is interpretable, not because it scores
+best.
+
+\paragraph{Training trials.} Trained on the standard-variant trials only, the LR reaches
+\Rci{sec/speed_lr_std_bacc} on those trials. Against the all-trials model on the same
+\R{sec/pair_speed_lr_std_vs_speed_lr_common_n} trials the difference is
+\Rcib{sec/pair_speed_lr_std_vs_speed_lr_common_d_bacc}~points (Holm $p$
+\R{sec/pair_speed_lr_std_vs_speed_lr_common_d_bacc_p_holm}). Decision: train on every primary trial.
+
+\paragraph{Free-choice trials.} Each of the \R{sec/speed_lr_common_nat_n} free-choice trials was scored by its
+person's fold model on its label-blind window. The model calls \R{sec/speed_lr_common_nat_natural} of them
+natural, \R{sec/speed_lr_common_nat_fast} fast and \R{sec/speed_lr_common_nat_slow} slow. This natural-speed
+recall of \R{sec/speed_lr_common_nat_share_natural} concerns free-choice trials only, all made at natural speed,
+where a constant natural answer would score 100\,\%; it is not a balanced measure.
+
+\gentab{sec/sec_speed_models}
+\gentab{sec/sec_speed_classes}
+\gentab{sec/sec_speed_confusion}
+
+% ------------------------------------------------------------------------------------------------------------
+\FloatBarrier
+\subsection{Speed and the protocol: grip and order}\label{app:sec:confounds}
+
+\paragraph{The confound.} The protocol confounds the instructed speed with the grip and with the position in the
+session (Table~\ref{tab:sec_design}). Slow trials were upright in \R{sec/des_slow_upright} of \R{sec/des_slow_n}.
+Among standard-variant trials, \R{sec/des_side_fast} of the fast, \R{sec/des_side_natural} of the natural and
+\R{sec/des_side_slow} of the slow trials were held sideways. Fast trials were more often sideways than natural
+ones for \R{sec/des_fast_more_side} of \R{sec/des_fast_more_side_n} persons. The median relative position in the
+session (0 = first, 1 = last) was \R{sec/des_pos_slow} for slow, \R{sec/des_pos_fast} for fast and
+\R{sec/des_pos_natural} for natural trials; slow came before natural for \R{sec/des_slow_before} of
+\R{sec/des_slow_before_n} persons. A model can therefore predict the speed from the grip or from practice instead
+of from the movement.
+
+\paragraph{Grip-only reference.} An LR on the up vector before the onset alone predicts the instructed speed with a
+balanced accuracy of \Rci{sec/speed_grip_bacc} (slow recall \R{sec/speed_grip_rec_slow}). The headline does not
+differ from it significantly in balanced accuracy (\Rcib{sec/pair_speed_lr_common_vs_speed_grip_d_bacc}~points,
+Holm $p$ \R{sec/pair_speed_lr_common_vs_speed_grip_d_bacc_p_holm}) but beats it in macro-F1
+(\Rcib{sec/pair_speed_lr_common_vs_speed_grip_d_f1}, $p < 0.001$, Holm). The mirror-invariant features themselves
+carry some grip information: they separate sideways from upright trials with a balanced accuracy of
+\Rci{sec/side_even_bacc} (chance \R{sec/chance_side}).
+
+\paragraph{Within grip strata.} The models were re-scored within the upright and within the sideways trials after
+prediction (Tables~\ref{tab:sec_speed_strata} and~\ref{tab:sec_speed_strata_pairs}). A speed enters a stratum only
+with trials of at least \R{sec/str_min_persons} persons, so slow is left out of the sideways stratum. Within the
+upright trials the headline reaches \R{sec/str_speed_lr_common_upright_bacc} over three classes and LightGBM
+\R{sec/str_speed_gbm_common_upright_bacc} (difference
+\Rcib{sec/str_pair_speed_gbm_common_vs_speed_lr_common_upright_d_bacc}~points, Holm $p$
+\R{sec/str_pair_speed_gbm_common_vs_speed_lr_common_upright_d_bacc_p_holm}). Within the sideways trials (fast and
+natural) they reach \R{sec/str_speed_lr_common_sideways_bacc} and \R{sec/str_speed_gbm_common_sideways_bacc}
+(\Rcib{sec/str_pair_speed_gbm_common_vs_speed_lr_common_sideways_d_bacc}~points, Holm $p$
+\R{sec/str_pair_speed_gbm_common_vs_speed_lr_common_sideways_d_bacc_p_holm}). LightGBM, which sees the
+device-frame channels, predicts fast for \R{sec/str_speed_gbm_common_upright_pred_fast} of the upright and
+\R{sec/str_speed_gbm_common_sideways_pred_fast} of the sideways trials, close to the instructed shares
+(\R{sec/str_speed_gbm_common_upright_true_fast} and \R{sec/str_speed_gbm_common_sideways_true_fast}). The headline
+predicts fast for \R{sec/str_speed_lr_common_upright_pred_fast} and \R{sec/str_speed_lr_common_sideways_pred_fast}.
+
+\paragraph{Decision.} The grip-only model is reported as a nuisance reference, and the model comparisons are
+repeated within grip strata. The speed accuracies may still partly reflect the protocol's grip and order
+structure.
+
+\gentab{sec/sec_design}
+\gentab{sec/sec_speed_strata}
+\gentab{sec/sec_speed_strata_pairs}
+
+% ------------------------------------------------------------------------------------------------------------
+\FloatBarrier
+\subsection{Speed: which features carry it}\label{app:sec:speed-features}
+
+\paragraph{Model-free effects.} Per person, the medians of each kinematic feature were compared between two
+instructed speeds on the standard-variant trials, in units of the feature's SD over all trials
+(Table~\ref{tab:sec_speed_univariate}; Figure~\ref{fig:SEC_03_speed_features}a). A Wilcoxon test over persons is
+Holm-adjusted over every feature and both contrasts (\R{sec/n_even_features} features, two contrasts). On the
+label-blind windows, fast differs from natural most in \R{sec/uni_common_fast_top1_feature}
+(\R{sec/uni_common_fast_top1_d}\,SD, positive for \R{sec/uni_common_fast_top1_npos} of
+\R{sec/uni_common_fast_top1_n} persons, Holm $p$ \R{sec/uni_common_fast_top1_p_holm}),
+\R{sec/uni_common_fast_top2_feature} (\R{sec/uni_common_fast_top2_d}\,SD, \R{sec/uni_common_fast_top2_npos} of
+\R{sec/uni_common_fast_top2_n}) and \R{sec/uni_common_fast_top3_feature} (\R{sec/uni_common_fast_top3_d}\,SD,
+\R{sec/uni_common_fast_top3_npos} of \R{sec/uni_common_fast_top3_n}). In all, \R{sec/uni_common_fast_n_sig}
+features differ significantly between fast and natural, and \R{sec/uni_common_slow_n_sig} between slow and natural. The
+largest slow effect is in \R{sec/uni_common_slow_top1_feature} (\R{sec/uni_common_slow_top1_d}\,SD, Holm $p$
+\R{sec/uni_common_slow_top1_p_holm}). On the oracle windows the counts are \R{sec/uni_oracle_fast_n_sig} and
+\R{sec/uni_oracle_slow_n_sig}, led by the slow trials' \R{sec/uni_oracle_slow_top1_feature}
+(\R{sec/uni_oracle_slow_top1_d}\,SD): the oracle slow contrasts are largely the label-dependent end criterion.
+
+\paragraph{Model coefficients.} The headline LR's largest coefficients (Figure~\ref{fig:SEC_03_speed_features}b)
+are \R{sec/coef_fast_top1_feature} (\R{sec/coef_fast_top1} log-odds per SD) and \R{sec/coef_fast_top2_feature}
+(\R{sec/coef_fast_top2}) for fast vs natural, and \R{sec/coef_slow_top1_feature} (\R{sec/coef_slow_top1}) and
+\R{sec/coef_slow_top2_feature} (\R{sec/coef_slow_top2}) for slow vs natural. These coefficients are conditional on
+the other, correlated features and vary across folds, so the model-free effects are the better guide to what
+carries the speed. Table~\ref{tab:sec_features} defines every feature and its mirror parity; smoothness follows
+the SPARC and jerk measures of the literature \cite{melendezcalderon2021smoothness,flash1985coordination}.
+
+\begin{figure}[tbp]
+\centering
+\genfig{sec/SEC_03_speed_features}
+\caption{Which kinematic features carry the instructed speed, on label-blind windows. (a) Per person, the
+difference of the medians between two instructed speeds in units of the feature's SD (median and interquartile
+range over persons; standard-variant trials). (b) The log-odds contrasts of the headline LR per SD of each
+feature (mean and range over the outer folds; conditional on the other features). Fast differs from natural most
+in \R{sec/uni_common_fast_top1_feature} and \R{sec/uni_common_fast_top2_feature}; no slow effect survives Holm.}
+\label{fig:SEC_03_speed_features}\label{fig:app:sec-features}
+\end{figure}
+
+% The generated table sets \small and is slightly taller than a page at that size; typeset it one size smaller.
+{\let\small\footnotesize\renewcommand{\arraystretch}{0.95}\gentab{sec/sec_speed_univariate}}
+\gentab{sec/sec_features}
+
+% ------------------------------------------------------------------------------------------------------------
+\FloatBarrier
+\subsection{Speed: who follows the instruction}\label{app:sec:followers}
+
+Figure~\ref{fig:SEC_08_speed_followers} is a description, not evidence. Per person it plots the natural/fast
+duration ratio on the label-blind windows against the headline model's two-class fast-vs-natural balanced
+accuracy on the same standard trials (the class decided between fast and natural only; chance 0.5). The two are
+correlated (Spearman $\rho$ \R{sec/fol_rho}, $p$ \R{sec/fol_p}, \R{sec/fol_n} persons, one exploratory test). The
+mean two-class balanced accuracy is \R{sec/fol_bacc_followed} for the \R{sec/fol_n_followed} persons whose fast
+reaches were shorter and \R{sec/fol_bacc_not} for the other \R{sec/fol_n_not}. The analysis is partly circular,
+because the duration it stratifies by is an input of the model it scores, and it was added after seeing the
+results.
+
+\begin{figure}[tbp]
+\centering
+\genfig{sec/SEC_08_speed_followers}
+\caption{Description, not evidence: per person, the median natural/fast duration ratio (standard-variant trials,
+label-blind windows; right of the dashed line: fast reaches shorter) against the headline model's two-class
+fast-vs-natural balanced accuracy on the same trials (dotted: chance). Open circles: the persons whose fast
+reaches were not shorter. Partly circular, because the duration is an input of the model.}
+\label{fig:SEC_08_speed_followers}\label{fig:app:sec-followers}
+\end{figure}
+
+% ------------------------------------------------------------------------------------------------------------
+\FloatBarrier
+\subsection{Grip: the up vector and the errors}\label{app:sec:grip}
+
+\paragraph{Physics.} The grip is the orientation of the phone in the hand, so it shows in where gravity points in
+the device frame during the still hold before the onset (Figure~\ref{fig:SEC_05_grip_physics}). The median unit up
+vector $\ghat$ (device $x$, $y$, $z$) is (\R{sec/upmed_upright_x}, \R{sec/upmed_upright_y},
+\R{sec/upmed_upright_z}) for upright, with the top edge up; (\R{sec/upmed_top_left_x}, \R{sec/upmed_top_left_y},
+\R{sec/upmed_top_left_z}) for top left, with the right edge up; and (\R{sec/upmed_top_right_x},
+\R{sec/upmed_top_right_y}, \R{sec/upmed_top_right_z}) for top right, with the left edge up. The device-frame
+channels carry the grip directly. The gravity-frame channels do not encode the orientation, but the grip changes
+how the arm moves (Appendix~\ref{app:sec:confounds}).
+
+\paragraph{Models.} Three nested models were fitted on the hold before the onset (Tables~\ref{tab:sec_grip_models}
+and~\ref{tab:sec_grip_classes}; Figure~\ref{fig:SEC_04_grip_confusion}): an LR on the up vector alone, the
+pre-specified headline LR on the \R{sec/n_grip_features} device-frame orientation features, and LightGBM on the
+summary statistics of every channel. The headline reaches a balanced accuracy of \Rci{sec/grip_lr_bacc} against
+the instruction (chance \R{sec/chance_grip}), with recalls of \R{sec/grip_lr_rec_upright} for upright,
+\R{sec/grip_lr_rec_top_left} for top left and \R{sec/grip_lr_rec_top_right} for top right. The up-vector model makes
+the same predictions: \R{sec/pair_grip_lr_vs_grip_up_n_changed} trials change class and the log-loss difference is
+\R{sec/pair_grip_lr_vs_grip_up_d_ll}, so the two models are identical and are not tested. LightGBM reaches
+\Rci{sec/grip_gbm_bacc}; its difference from the headline is \Rcib{sec/pair_grip_gbm_vs_grip_lr_d_bacc}~points
+(Holm $p$ \R{sec/pair_grip_gbm_vs_grip_lr_d_bacc_p_holm}; Table~\ref{tab:sec_model_pairs}). Decision: the headline
+stays the pre-specified 12-feature LR; the up vector before the onset carries all of its information.
+
+\paragraph{Errors.} The headline misclassifies \R{sec/grip_lr_n_errors} of \R{sec/n_trials} trials, all from
+\R{sec/grip_lr_n_persons_with_errors} persons (Tables~\ref{tab:sec_grip_confusion} and~\ref{tab:sec_grip_errors}):
+\R{sec/grip_err1_person} (\R{sec/grip_err1_pattern}), \R{sec/grip_err2_person} (\R{sec/grip_err2_pattern}) and
+\R{sec/grip_err3_person} (\R{sec/grip_err3_pattern}). Of the errors, \R{sec/grip_lr_n_sideways_swaps} are swaps
+between top left and top right. In \R{sec/grip_lr_n_up_matches_predicted} of the \R{sec/grip_lr_n_errors} errors
+the up vector lies closer to the median of the predicted grip than to that of the instructed one (ringed in
+Figure~\ref{fig:SEC_05_grip_physics}). A sign error is unlikely: the gravity sign was inferred from the instructed
+orientation for \R{sec/grip_sign_inferred} trials, and \R{sec/grip_lr_err_upright_correct} of the
+\R{sec/grip_lr_err_upright_n} upright trials of these persons are recognised. These trials were most likely held in
+the predicted grip.
+
+\paragraph{Consistency checks.} On the \R{sec/grip_lr_ref_n_confirmed} trials that neither the app nor the gravity
+rule flagged, the headline's balanced accuracy is \R{sec/grip_lr_ref_bacc_confirmed}. Its prediction equals the
+app's own start grip for \R{sec/grip_lr_ref_n_agree} of \R{sec/grip_lr_ref_n_known} trials
+(Table~\ref{tab:sec_grip_reference}). Both references read the same up vector as the model, so they agree by
+construction: they are consistency checks, not an independent confirmation. No video or instruction log records
+the grip actually held.
+
+\paragraph{Decision.} The grip labels are kept as instructed; the errors are explained by physics, not corrected.
+Any result stratified by instructed grip, in every lane, mis-assigns these \R{sec/grip_lr_n_errors} trials.
+
+\begin{figure}[tbp]
+\centering
+\genfig{sec/SEC_04_grip_confusion}
+\caption{Confusion matrices of the instructed grip (LOSO; counts and row shares; rows: instructed grip) for the
+up vector before the onset alone, the headline orientation LR and LightGBM, with their balanced accuracies. The
+first two are identical. The headline's \R{sec/grip_lr_n_errors} errors include \R{sec/grip_lr_n_sideways_swaps}
+swaps between top left and top right.}
+\label{fig:SEC_04_grip_confusion}\label{fig:app:sec-grip-confusion}
+\end{figure}
+
+\begin{figure}[tbp]
+\centering
+\genfig{sec/SEC_05_grip_physics}
+\caption{Why the grip is recognised and where it fails: the unit up vector in the device frame during the still
+hold before the onset, per trial, coloured by the instructed grip; (a) $x$ against $y$, (b) $x$ per instructed grip
+and hand. Upright puts the top edge ($+y$) up, top left the right edge ($+x$), top right the left edge ($-x$).
+Ringed: the trials the headline misclassifies; each of the \R{sec/grip_lr_n_up_matches_predicted} lies in the
+cluster of the predicted grip.}
+\label{fig:SEC_05_grip_physics}\label{fig:app:sec-grip-physics}
+\end{figure}
+
+\gentab{sec/sec_grip_models}
+\gentab{sec/sec_grip_classes}
+\gentab{sec/sec_grip_confusion}
+\gentab{sec/sec_grip_errors}
+\gentab{sec/sec_grip_reference}
+
+% ------------------------------------------------------------------------------------------------------------
+\FloatBarrier
+\subsection{Handedness and the dominant hand}\label{app:sec:dominance}
+
+\paragraph{Question.} Can a LOSO model tell a dominant-hand trial from mirror-invariant kinematics alone? These
+inputs are identical for a trial and its mirror image (Section~\ref{sec:physics}, Eq.~\eqref{eq:mirror}): every
+feature was bit-identical for \R{sec/mirror_n_identical} of \R{sec/mirror_n_trials} trials and their mirror images
+(largest difference \R{sec/mirror_max_abs_diff}). They cannot encode which hand moved, only how the dominant hand
+moves \cite{sainburg2002dominance,przybyla2012dominance}. The dominant hand is the right hand for the
+\R{sec/dom_n_right} right-handed persons and the left hand for the \R{sec/dom_n_left} left-handed ones, so
+dominance is confounded with the right hand for the majority. Every person has at least
+\R{sec/bal_min_dominant} dominant and \R{sec/bal_min_non_dominant} non-dominant trials. The first block was
+left-handed in \R{sec/bal_first_left} sessions and right-handed in \R{sec/bal_first_right} (exact binomial $p$
+\R{sec/bal_first_p}).
+
+\paragraph{Reference.} The pre-specified reference is a label-permutation null, not an AUC of 0.5. The labels
+were shuffled within each person \R{sec/dom_n_perm} times and the whole nested pipeline was re-run each time,
+which keeps each person's class balance.
+
+\paragraph{Result.} The pre-specified LR reaches a pooled AUC of \Rci{sec/dom_auc}, against a null mean of
+\R{sec/dom_null_pooled_mean} (95th percentile \R{sec/dom_null_pooled_q95}; one-sided permutation $p$
+\R{sec/dom_p_pooled}; Table~\ref{tab:sec_dominance_model}; Figure~\ref{fig:SEC_06_dominance_auc}). The mean
+within-person AUC is \Rci{sec/dom_within_auc} (null mean \R{sec/dom_null_within_mean}, $p$ \R{sec/dom_p_within});
+it is above 0.5 for \R{sec/dom_n_auc_above_half} of \R{sec/dom_n_persons} persons. The accuracy is
+\Rci{sec/dom_acc} and the log loss \R{sec/dom_ll}, against \R{sec/dom_ll_const} for a constant 0.5. The nested
+tuning chose the smallest penalty parameter of the grid (\R{sec/dom_c_min}, the strongest regularisation) in
+\R{sec/dom_n_folds_grid_min} of \R{sec/dom_n_folds} outer folds, and the predicted probability spans only
+\R{sec/dom_p_min} to \R{sec/dom_p_max}. No dominant-hand signal is detected; the CI still allows a pooled AUC up to
+\R{sec/dom_auc_hi}.
+
+\paragraph{Exploratory second model.} LightGBM (\R{sec/domgbm_n_configs} model classes tried in all, no permutation
+baseline) reaches a pooled AUC of \Rci{sec/domgbm_auc}, above the LR's null mean but close to its 95th percentile.
+Against the LR on the same trials, the per-person accuracy differs by \Rcib{sec/pair_dom_d_acc}~points (sign-flip
+$p$ \R{sec/pair_dom_d_acc_p}) and the log loss by \Rci{sec/pair_dom_d_ll} ($p$ \R{sec/pair_dom_d_ll_p}; one
+exploratory comparison, unadjusted). A weak signal that only a non-linear model finds cannot be excluded.
+
+\paragraph{Per person.} Table~\ref{tab:sec_dominance_persons} gives each person's within-person AUC and accuracy.
+The left-handed persons are shown individually, without a CI: \R{sec/dom_lh1_person} \R{sec/dom_lh1_auc} and
+\R{sec/dom_lh2_person} \R{sec/dom_lh2_auc}, against a right-handed median of \R{sec/dom_rh_auc_median} (range
+\R{sec/dom_rh_auc_min} to \R{sec/dom_rh_auc_max}).
+
+\paragraph{Within-person comparison.} Per person, the medians of six kinematic features were compared between the
+dominant and the non-dominant hand (Table~\ref{tab:sec_dominance_paired}; Figure~\ref{fig:SEC_07_dominance_paired};
+Wilcoxon over persons, Holm over the \R{sec/pd_n_features} features). No feature differs detectably:
+\R{sec/pd_n_sig} have a Holm $p$ below 0.05, and none does when matched on speed, grip and variant. The CIs bound
+the differences still compatible with the data: the duration changes by \R{sec/pd_duration_log_med}~[\Rb{sec/pd_duration_log_lo},
+\Rb{sec/pd_duration_log_hi}] (dominant higher for \R{sec/pd_duration_log_npos} of \R{sec/pd_duration_log_n}
+persons), the peak angular speed by \R{sec/pd_ang_speed_peak_med}~[\Rb{sec/pd_ang_speed_peak_lo},
+\Rb{sec/pd_ang_speed_peak_hi}], the angular path length by \R{sec/pd_ang_path_med}~[\Rb{sec/pd_ang_path_lo},
+\Rb{sec/pd_ang_path_hi}] (\R{sec/pd_ang_path_npos} of \R{sec/pd_ang_path_n} higher; Holm $p$
+\R{sec/pd_ang_path_p_holm}) and the linear path length by \R{sec/pd_lin_path_med}~[\Rb{sec/pd_lin_path_lo},
+\Rb{sec/pd_lin_path_hi}]. SPARC differs by \R{sec/pd_ang_sparc_med}~[\Rb{sec/pd_ang_sparc_lo},
+\Rb{sec/pd_ang_sparc_hi}] and the log dimensionless jerk by \R{sec/pd_ang_ldlj_med}~[\Rb{sec/pd_ang_ldlj_lo},
+\Rb{sec/pd_ang_ldlj_hi}]. The left-handed persons are shown individually (diamonds); their duration differences
+are \R{sec/pd_lh1_duration_log} (\R{sec/dom_lh1_person}) and \R{sec/pd_lh2_duration_log} (\R{sec/dom_lh2_person}).
+
+\paragraph{Concordance.} Table~\ref{tab:sec_concordance} counts the persons by self-reported handedness, usual phone
+hand and the hand of the first free-choice trial; it is descriptive only. Of the \R{sec/conc_n_phone_clear}
+persons who name one usual phone hand, \R{sec/conc_n_phone_right} name the right hand, and \R{sec/conc_nat_right} of the \R{sec/conc_n_nat} first
+free-choice trials used the right hand, which a constant would also give. The only contrast comes from the
+\R{sec/conc_n_left} left-handed persons: \R{sec/conc_left_nat_right} of them chose the right hand for the free trial
+and \R{sec/conc_left_phone_right} usually hold the phone in the right hand. Whether handedness or the usual phone
+hand goes with the free choice cannot be told apart with so few left-handed persons and no left-hand first free
+choice \cite{papadatoupastou2020handedness}. Of the \R{sec/conc_rep_n} free-choice trials of repeat visits,
+\R{sec/conc_rep_left} used the left hand.
+
+\paragraph{Decision.} No person-level handedness model is trained or evaluated: the \R{sec/dom_n_left} left-handed
+persons are fewer than the \R{sec/min_persons_ci} persons a stratum needs for a CI, so their values are shown
+individually. Self-reported handedness is the only dominance measure; no handedness questionnaire was given.
+
+\begin{figure}[tbp]
+\centering
+\genfig{sec/SEC_07_dominance_paired}
+\caption{Dominant vs non-dominant movements within each person: per person, the difference of the medians
+(dominant minus non-dominant; a percent change for the duration, the peak angular speed and the path lengths);
+the bar is the median over persons. Wilcoxon over persons, Holm over the \R{sec/pd_n_features} features. Diamonds:
+the \R{sec/dom_n_left} left-handed persons, shown individually. No feature differs detectably; the CIs still allow
+moderate differences (text).}
+\label{fig:SEC_07_dominance_paired}\label{fig:app:sec-dominance-paired}
+\end{figure}
+
+\gentab{sec/sec_dominance_model}
+\gentab{sec/sec_dominance_persons}
+\gentab{sec/sec_dominance_paired}
+\gentab{sec/sec_concordance}
+
+% ------------------------------------------------------------------------------------------------------------
+\FloatBarrier
+\subsection{Demographics add-on test}\label{app:sec:demo}
+
+This test is a quick first pass and has not been audited. Production does not know a user's age, sex, height,
+handedness or usual phone hand; the test asks whether these would help if it did. Nothing from it enters the
+production model.
+
+\paragraph{Design.} Refitting the final model with covariate inputs was too slow for this pass. Instead, a
+second-stage L2 LR was fitted on the final model's logit (Appendix~\ref{app:final}), with and without the person
+covariates: age, sex, height (with a missing indicator; \R{demo/profile_n_height_missing} heights are missing and
+were median-imputed inside the fold), self-reported handedness and usual phone hand. In each outer fold the stage
+was fitted on the final model's inner cross-fitted logits of the training persons and applied to the held-out
+person's logit from the saved LOSO predictions; it never uses other persons' outer-fold predictions. Its penalty
+was tuned on grouped inner folds. The variants are the sensor-only stage (the comparator), the stage with the
+covariates as main effects, the stage with covariates and covariate $\times$ logit interactions, the covariates
+alone (the floor), and two fixed rules for the base-rate note: answer the usual phone hand, or always answer right.
+Paired differences against the sensor-only stage are mean per-person differences with paired CIs and sign-flip
+$p$-values, Holm-adjusted over the two add-on variants within each metric.
+
+\paragraph{Cohort.} The \R{demo/profile_n_persons} persons include \R{demo/profile_n_left_handed} left-handed
+persons, \R{demo/profile_n_phone_both} who use both hands for the phone and \R{demo/profile_n_phone_left} who
+usually use the left; \R{demo/profile_n_female} are female and the ages span \R{demo/profile_age_min} to
+\R{demo/profile_age_max} years. Interactions such as `left-handed persons move differently' are therefore barely
+identified.
+
+\paragraph{Results.} Table~\ref{tab:demo_models} and Figure~\ref{fig:DEMO_01_paired} give the results. The
+sensor-only stage is neutral against the final model as shipped (accuracy \R{demo/stack_vs_shipped_dacc}~points,
+log loss \R{demo/stack_vs_shipped_dll}; unadjusted sign-flip $p$ \R{demo/stack_vs_shipped_p_acc} and
+\R{demo/stack_vs_shipped_p_ll}) and reaches an accuracy of \Rci{demo/sensor_acc}. Adding the covariates gives
+\Rci{demo/main_acc}: a paired difference of \Rci{demo/main_dacc}~points (Holm $p$ \R{demo/main_holm_acc}) and a
+log-loss difference of \Rci{demo/main_dll} (Holm $p$ \R{demo/main_holm_ll}). The covariates change
+\R{demo/main_flips} primary answers; \R{demo/main_better} person gains and \R{demo/main_worse} lose. With the interactions the accuracy is
+\Rci{demo/inter_acc} (difference \Rci{demo/inter_dacc}~points, Holm $p$ \R{demo/inter_holm_acc}), and the log loss
+rises by \Rci{demo/inter_dll} (Holm $p$ \R{demo/inter_holm_ll}, significant). The interactions change
+\R{demo/inter_flips} answers; \R{demo/inter_better} persons gain and \R{demo/inter_worse} lose. The covariates-only floor sits at chance:
+accuracy \Rci{demo/covonly_acc}, balanced accuracy \R{demo/covonly_bacc}, AUC \R{demo/covonly_auc}. This is
+expected, since every person did both hands: a person-level covariate can help only through interactions, and the
+interaction variant does not help.
+
+\paragraph{Exploratory base.} The absolute levels inherit the optimism of the final model as shipped, which is
+exploratory: the best of \R{m3/deep_ship_n_configs} configurations in lane m3, then chosen among
+\R{final/n_candidates} candidates. Its nested, selection-aware accuracy is \Rci{final/nested_accuracy}
+(Appendix~\ref{app:final}). The paired differences share the base, so its optimism largely cancels in them. The
+stage's penalty is chosen on the same inner logits it is fitted on, a second-order effect that is not removed.
+
+\paragraph{Natural use and the base rate.} On natural use the measure is the right-hand recall on the free-choice
+trials (all right-hand so far; a constant right answer would score 100\,\%). The shipped model and the sensor-only
+stage reach \R{demo/shipped_nat_recall} and \R{demo/sensor_nat_recall}, the two add-ons \R{demo/main_nat_recall}
+and \R{demo/inter_nat_recall}. The fixed rules show why this measure cannot judge an add-on
+(Figure~\ref{fig:DEMO_02_base_rate}). Always answering right scores \R{demo/ruleright_nat_recall} and the
+phone-hand rule \R{demo/rulephone_nat_recall}, yet both sit at chance on the primary set (balanced accuracy
+\R{demo/ruleright_bacc} and \R{demo/rulephone_bacc}). The phone-hand rule abstains (\pright{} exactly 0.5) for the
+\R{demo/profile_n_phone_both} persons who use both hands. On natural use it answers \R{demo/rulephone_nat_right} of
+the \R{demo/nat_n} trials, all correctly; its score gives each of the \R{demo/rulephone_nat_ties} abstentions half
+credit, and it has no forced choice for them. The floor's \R{demo/covonly_nat_recall} is not a signal: its
+\pright{} never moves more than \R{demo/covonly_max_dev} from 0.5 and sits just below it, because
+\R{demo/primary_right_share} of the primary trials are right-hand trials.
+
+\paragraph{Decision.} Demographics are not added, even as a hypothetical: no add-on variant improves accuracy or
+log loss on the same folds. With \R{demo/profile_n_left_handed} left-handed persons and
+\R{demo/profile_n_phone_left} who usually hold the phone in the left hand, this is a null result on a small, mostly
+right-handed sample, not evidence of no effect. Not done in this pass: a refit of the network with covariate
+inputs, a replication on a cheaper base model, a calibration analysis of the add-ons, and an audit.
+
+\begin{figure}[tbp]
+\centering
+\genfig{demo/DEMO_01_paired}
+\caption{Demographics add-on test (quick first pass, not audited): the covariates added to a second stage on the
+final model's logit, against the same stage without them, on the same LOSO folds. Mean per-person differences with
+paired 95\,\% CIs and Holm-adjusted sign-flip $p$ over the two add-on variants within each metric (filled red:
+below 0.05). Grey: the sensor-only stage against the shipped model (unadjusted). Negative accuracy and positive
+log-loss differences mean the covariates hurt.}
+\label{fig:DEMO_01_paired}\label{fig:app:sec-demo-paired}
+\end{figure}
+
+\begin{figure}[tbp]
+\centering
+\genfig{demo/DEMO_02_base_rate}
+\caption{The base-rate effect: balanced accuracy on the primary set (both hands for every person) and right-hand
+recall on the \R{demo/nat_n} free-choice trials (all right-hand so far; a constant right answer would score
+100\,\%). The fixed rules look excellent on natural use and sit at chance on the primary set, so natural use cannot
+judge an add-on; the add-on test is judged on the primary set.}
+\label{fig:DEMO_02_base_rate}\label{fig:app:sec-demo-base-rate}
+\end{figure}
+
+\gentab{demo/demo_models}
+
+% ------------------------------------------------------------------------------------------------------------
+\FloatBarrier
+\subsection{Caveats and open questions}\label{app:sec:caveats}
+
+\begin{itemize}[nosep]
+\item None of these models runs in production. A production speed or grip estimate would take its bounds from the
+  cue-free detector (Appendix~\ref{app:prod}), whose end detection meets the same difficulty with slow reaches; its
+  sensitivity to end-detection errors would have to be measured.
+\item The label-blind speed estimate belongs to one detector setting, the app's defaults. A fixed window from the
+  onset or a detector tuned for slow movements would give other numbers; neither was run.
+\item The linear path length integrates the acceleration with zero velocity at both bounds. The drift that the
+  linear correction cannot remove grows with the duration.
+\item Slow trials are few (a median of \R{sec/slow_per_person_median} per person), so per-person slow statistics
+  rest on very few movements.
+\item Added after seeing the results (exploratory; $p$-values not corrected for that): the per-person description
+  of Figure~\ref{fig:SEC_08_speed_followers}, the LightGBM dominance model, the grip consistency checks, the
+  segmentation check, the grip-only reference, the grip strata and the position-adjusted contrasts.
+\item The null dominance result does not test whether the hand model's evidence lies only in the chiral channels;
+  that remains a hypothesis.
+\item Open: a person-relative speed measure, normalised by the person's own natural movements; and a
+  dominance-related movement style that transfers to left-handed persons, which needs more left-handed persons.
+\end{itemize}

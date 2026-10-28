@@ -1,0 +1,50 @@
+# Stage 2 environment (analysis/.venv, Python 3.11.9, Windows 11, CPU only), frozen 2026-10-27.
+#
+# Install on top of requirements.txt, pinning the scientific stack so that nothing is downgraded:
+#   python -m pip install -r requirements.txt
+#   python -m pip install torch==2.14.1 --index-url https://download.pytorch.org/whl/cpu
+#   python -m pip install -r requirements-stage2.txt
+# Every import below was verified on 2026-10-27 (torch forward pass, a LightGBM fit, an Optuna TPE study,
+# a statsmodels Logit and a PyWavelets decomposition). Later lanes must NOT install packages.
+#
+# aeon (for MiniRocket) was NOT installed: aeon 1.6.0 needs numba < 0.64, and every numba release in
+# that range requires numpy < 2.4, so pip's resolver could only satisfy it by falling back to the empty
+# placeholder aeon 0.0.0 (dry run with numpy==2.4.6, pandas==3.1.0, scikit-learn==1.9.1 pinned).
+# Installing it would downgrade numpy. A MiniRocket lane must implement the transform itself
+# (numpy / torch), e.g. after Dempster et al. 2021.
+
+# --- scientific stack (unchanged by the Stage 2 installs) ---
+numpy==2.4.6
+scipy==1.17.1
+pandas==3.1.0
+scikit-learn==1.9.1
+matplotlib==3.11.2
+jsonschema==4.26.0
+pytest==9.1.1
+
+# --- added for Stage 2 ---
+# torch from the CPU wheel index (see above); the +cpu local version is what pip reports.
+torch==2.14.1
+lightgbm==4.7.0
+optuna==5.0.0
+statsmodels==0.15.0
+PyWavelets==1.9.0
+
+# --- dependencies pulled in by the packages above (exact versions of this environment) ---
+alembic==1.20.1
+colorlog==6.12.0
+filelock==3.32.3
+formulaic==1.2.2
+fsspec==2026.7.0
+interface_meta==2.0.1
+Jinja2==3.1.6
+Mako==1.4.3
+MarkupSafe==3.0.3
+mpmath==1.3.0
+networkx==3.6.1
+patsy==1.0.3
+PyYAML==6.0.3
+SQLAlchemy==2.1.6
+sympy==1.14.0
+tqdm==4.70.1
+wrapt==2.5.1

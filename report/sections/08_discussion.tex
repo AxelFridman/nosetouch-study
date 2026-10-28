@@ -1,0 +1,45 @@
+% sections/08_discussion.tex: what the results mean, limitations and next steps. The audit status of the
+% final-model lane is stated only in the introduction; do not repeat it here.
+\section{Discussion}\label{sec:discussion}
+
+\paragraph{What the results mean.} The hand that brings a phone to the nose can be read from the phone's motion
+sensors for persons the model has never seen. The signal is physical: early in the approach the phone turns about
+gravity in opposite senses for the two hands, and only chiral quantities carry the hand. A 1D CNN on gravity- and
+body-frame channels had the lowest log loss, although paired comparisons cannot separate it from the other leaders
+(\R{final/concl_n_leaders} in all); the cross-lane selection that chose it in \R{final/sel_m3_deep} of
+\R{final/sel_folds} folds has a selection-aware accuracy of \Rci{final/nested_accuracy}. Its body-frame input limits
+the change on a grip absent from training to \Rb{final/final_grip_d}~points, against \Rb{final/rob_m2_lgbm_grip_d}
+to \Rb{final/rob_m2_lr_grip_d}~points for the leaders on device-frame channels. With its in-fold Platt calibrator its percentage is
+consistent with calibration, and combining three attempts with the scaled sum of logits raises the accuracy without
+making the percentage over- or under-confident on average. The main risk lies before the
+classifier: finding the approach without a cue costs accuracy, and natural free-choice movements are often
+rejected.
+
+\paragraph{Limitations.}
+\begin{itemize}[nosep,leftmargin=1.5em]
+  \item Only \R{describe/n_persons} persons, mostly students in their twenties; \R{describe/n_left_handed} left-handed and
+    \R{describe/persons_ios} on iOS. Rare groups are barely represented.
+  \item One free-choice trial per person, all right-hand: natural-use recall cannot show whether left-hand free
+    choice is recognised as well, and a constant right answer would score 100\,\%.
+  \item The main analysis uses the oracle windows stored by the app; the cue-free numbers come from lane m4's yaw8
+    classifier, not the final model.
+  \item Screen-away holds and multi-attempt sessions are synthesised from the recordings, not recorded.
+  \item The final model's own LOSO numbers are optimistic: it was the best of \R{final/final_configs}
+    configurations in its lane and was then chosen among \R{final/n_candidates} candidates on the outer folds, and
+    its body-frame input was designed after outer-fold results had been seen. The nested estimate removes the
+    optimism of choosing among the \R{final/n_candidates} candidates, not that of the lanes' own outer-fold choices
+    (\R{final/n_exploratory_candidates} candidates; the CNN the best of \R{final/final_configs}) nor that of the
+    post hoc body-frame design.
+  \item The browser delivers about 60~Hz, and the app segmented slow trials with criteria that depend on the
+    instructed speed, which affects every analysis stratified by speed (Appendix~\ref{app:sec:segmentation}).
+\end{itemize}
+
+\paragraph{Next steps.}
+\begin{enumerate}[nosep,leftmargin=1.5em]
+  \item Run the final model inside the cue-free production simulation, and teach the detector free-choice approaches.
+  \item Build the Stage~3 inference page from the exported model, with the rest-pose check, the stillness check and
+    the displayed aggregate of equation~\eqref{eq:aggregate}.
+  \item Record more participants, especially left-handed persons, and left-hand free-choice trials.
+  \item Close the open reviews listed in the status note (Section~\ref{sec:intro}).
+  \item Let the PI evaluate the page prospectively on new persons.
+\end{enumerate}

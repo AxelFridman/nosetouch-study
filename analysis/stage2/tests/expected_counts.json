@@ -1,0 +1,178 @@
+{
+ "_note": "Snapshot counts pinned by the stage2 tests. Update after adding a participant: rebuild (python -m stage2.pipeline all --force), check that the old values are reproduced without the new person (python -m stage2.scripts.expected_counts --without P21), then rewrite this file (python -m stage2.scripts.expected_counts --write).",
+ "snapshot": "2026-10-27",
+ "curation": {
+  "sessions": 27,
+  "included": 24,
+  "excluded": 3,
+  "persons": 20,
+  "multi_session_persons": {
+   "P01": 2,
+   "P09": 2,
+   "P14": 3
+  },
+  "unassigned_excluded_sessions": 2,
+  "superseded_persons": [
+   "P17"
+  ]
+ },
+ "primary": {
+  "trials": 598,
+  "persons": 20,
+  "left": 302,
+  "right": 296
+ },
+ "natural_use": {
+  "headline": 20,
+  "with_repeats": 22,
+  "persons": 20,
+  "repeat_session_labels": [
+   "P09-s2",
+   "P14-s3"
+  ]
+ },
+ "flow": {
+  "start": {
+   "removed": 0,
+   "remaining": 878,
+   "sessions": 27,
+   "persons": 21,
+   "natural_use_added": 0,
+   "natural_use_removed": 0,
+   "natural_use": 0
+  },
+  "E0": {
+   "removed": 42,
+   "remaining": 836,
+   "sessions": 24,
+   "persons": 20,
+   "natural_use_added": 0,
+   "natural_use_removed": 0,
+   "natural_use": 0
+  },
+  "E0s": {
+   "removed": 0,
+   "remaining": 836,
+   "sessions": 24,
+   "persons": 20,
+   "natural_use_added": 0,
+   "natural_use_removed": 0,
+   "natural_use": 0
+  },
+  "E1": {
+   "removed": 172,
+   "remaining": 664,
+   "sessions": 24,
+   "persons": 20,
+   "natural_use_added": 0,
+   "natural_use_removed": 0,
+   "natural_use": 0
+  },
+  "E2": {
+   "removed": 0,
+   "remaining": 664,
+   "sessions": 24,
+   "persons": 20,
+   "natural_use_added": 0,
+   "natural_use_removed": 0,
+   "natural_use": 0
+  },
+  "E3": {
+   "removed": 0,
+   "remaining": 641,
+   "sessions": 24,
+   "persons": 20,
+   "natural_use_added": 23,
+   "natural_use_removed": 0,
+   "natural_use": 23
+  },
+  "E4a": {
+   "removed": 0,
+   "remaining": 641,
+   "sessions": 24,
+   "persons": 20,
+   "natural_use_added": 0,
+   "natural_use_removed": 0,
+   "natural_use": 23
+  },
+  "E4b": {
+   "removed": 2,
+   "remaining": 639,
+   "sessions": 24,
+   "persons": 20,
+   "natural_use_added": 0,
+   "natural_use_removed": 0,
+   "natural_use": 23
+  },
+  "E4c": {
+   "removed": 11,
+   "remaining": 628,
+   "sessions": 24,
+   "persons": 20,
+   "natural_use_added": 0,
+   "natural_use_removed": 1,
+   "natural_use": 22
+  },
+  "E4d": {
+   "removed": 30,
+   "remaining": 598,
+   "sessions": 24,
+   "persons": 20,
+   "natural_use_added": 0,
+   "natural_use_removed": 0,
+   "natural_use": 22
+  },
+  "E4e": {
+   "removed": 0,
+   "remaining": 598,
+   "sessions": 24,
+   "persons": 20,
+   "natural_use_added": 0,
+   "natural_use_removed": 0,
+   "natural_use": 22
+  },
+  "N1": {
+   "removed": 0,
+   "remaining": 598,
+   "sessions": 24,
+   "persons": 20,
+   "natural_use_added": 0,
+   "natural_use_removed": 2,
+   "natural_use": 20
+  }
+ },
+ "e1_attempts": 172,
+ "flags_primary": {
+  "grip_mismatch": 23,
+  "seg_disagree_100ms": 115,
+  "clip_candidate": 8,
+  "repeated_samples": 126,
+  "false_start": 128,
+  "screen_rotated": 2
+ },
+ "grip_mismatch_persons": [
+  "P05",
+  "P09",
+  "P16"
+ ],
+ "gates_failed_primary": {
+  "gate_g1": 16,
+  "gate_g2": 13,
+  "gate_pass": 28
+ },
+ "report_sessions": 27,
+ "swap_signature_blocks": [
+  [
+   "P08-s1",
+   1
+  ],
+  [
+   "P08-s1",
+   2
+  ]
+ ],
+ "arrays_rows": {
+  "primary": 598,
+  "channels": 17
+ }
+}

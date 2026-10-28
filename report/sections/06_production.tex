@@ -1,0 +1,124 @@
+% sections/06_production.tex: the cue-free pipeline of lane m4 (detector, online logic, stopping rule, calibrated
+% output, user instructions) and lane final's export. Lane prod (the final model inside the simulation) was not
+% run for this version: every cue-free number here uses lane m4's reference hand classifier yaw8.
+\section{Towards production: cue-free detection and stopping}\label{sec:production}
+
+In production there is no start cue and no stored bound. The page receives a continuous stream; it must find the
+approach, reject other movements, decide when to answer and show a calibrated \pright{}. A simulation of this
+pipeline ran on the full recordings (Appendix~\ref{app:prod}). Its numbers use the simulation's own reference hand
+classifier, yaw8 (a mirror-augmented logistic regression on the cumulative yaw at 8 instants), \emph{not} the final
+CNN. They measure what detection and stopping cost, not how the final model performs without a cue; running the
+final model inside this simulation is the next step (Section~\ref{sec:discussion}).
+
+\subsection{Finding the approach}\label{sec:production:detection}
+Figure~\ref{fig:M4_01_detection_outcomes} shows what each detector hands to the classifier. The baseline detector,
+v0, takes the first movement after a fixed stillness: its first detection is the approach in
+\R{describe/cuefree_share_approach} of recordings, part of the approach in
+\R{describe/cuefree_share_approach_partial}, an earlier movement in \R{describe/cuefree_share_earlier_movement},
+the return in \R{describe/cuefree_share_return} and nothing in \R{describe/cuefree_share_none}. The production detector cuts the stream into candidate movement
+segments and scores each with a segment classifier that does not use the hand, from features such as the stillness
+before the segment, its displacement and the change of the up vector. It accepts the most likely candidate when
+its probability of being an approach is at least \R{m4/det_threshold}. Its scored segment is the approach in
+\R{m4/prod_share_approach} of recordings, part of the approach in \R{m4/prod_share_approach_partial}, an earlier
+movement in \R{m4/prod_share_earlier_movement} and the return in \R{m4/prod_share_return}; it rejects
+\R{m4/prod_share_rejected} (Appendix~\ref{app:prod:detector}).
+
+\begin{figure}[htbp]
+\centering
+\genfig{m4/M4_01_detection_outcomes}
+\caption{What each cue-free detector hands to the hand classifier on the \R{m4/n_recordings} full recordings
+(rest, approach, hold, return), scored against the app's stored events (percentages). v0 takes the first movement
+after a fixed stillness; the learned detectors pick the candidate with the highest P(approach) and reject it below
+the threshold. The production detector scores far fewer earlier movements than v0.}
+\label{fig:M4_01_detection_outcomes}
+\end{figure}
+
+\subsection{What detection costs}\label{sec:production:ladder}
+Figure~\ref{fig:M4_02_accuracy_ladder} gives the accuracy ladder of the yaw8 classifier: \Rci{m4/oracle_acc} on the
+oracle windows, \Rci{m4/vzero_acc} behind v0 and \Rci{m4/prod_acc} in the production pipeline, where an abstention
+earns half credit. An abstention is a rejected recording or a calibrated \pright{} of exactly 0.5. The production
+pipeline accepts an approach in \R{m4/prod_coverage} of recordings, but \R{m4/prod_n_answered_tie} of these
+\R{m4/prod_n_answered} get exactly 0.5 from the calibrator (Section~\ref{sec:production:calibration}). It therefore
+shows a hand for \R{derived/m4_prod_shown_coverage} of recordings (its coverage), is right on
+\R{derived/m4_prod_shown_acc} of those, and scores \R{m4/prod_acc_forced} when forced to answer every recording.
+Detection changes the accuracy by \Rcib{m4/d_prod_vs_oracle}~points against the oracle windows (Holm $p$ =
+\R{m4/d_prod_vs_oracle_p_holm}, family of \R{m4/paired_family_n} comparisons). The pipeline was chosen among
+\R{m4/n_configs_final} cue-free pipelines on the outer folds, so its number is exploratory.
+
+The detector relies on the stillness the app enforced before each trial. When the stillness before the approach is
+cut, the production pipeline falls from \R{m4/stress_production_1_acc} with 1~s of stillness kept to
+\R{m4/stress_production_0_acc} with none, when it answers only \R{m4/stress_production_0_cov} of recordings
+(Appendix~\ref{app:prod:stress}). A model-free check of the rest pose catches a phone held with the screen away:
+on synthesised screen-away twins it stops \R{m4/stressflip_production_rec_gate} of recordings and cuts the share
+answered wrongly from \R{m4/gripwrongflip_rec_without} to \R{m4/gripwrongflip_rec_with} (Holm $p$~\R{m4/gripwrongflip_rec_p_holm}, family
+of \R{m4/grip_family_n}), while it stops \R{m4/stress_production_rec_gate} of the recordings held toward the person
+(Appendix~\ref{app:prod:grip}).
+
+\begin{figure}[htbp]
+\centering
+\genfig{m4/M4_02_accuracy_ladder}
+\caption{Hand accuracy of the cue-free pipelines on the full recordings (no start cue, no stored bounds), against
+the same yaw8 classifier on the oracle windows (dashed). An abstention earns half credit. The gap between the
+oracle windows and the production pipeline is the cost of detection.}
+\label{fig:M4_02_accuracy_ladder}
+\end{figure}
+
+\subsection{Online logic and the stopping rule}\label{sec:production:stopping}
+Multi-attempt sessions were synthesised by splicing a person's cued recordings with 1~s of stillness at each
+junction, and the pipeline was replayed on them sample by sample (Figure~\ref{fig:M4_08_timeline}). With up to three
+accepted attempts the session accuracy is \Rci{m4/sess_1_k3_acc}, against \Rci{m4/sesstrue_1_k3_acc} when only the
+true approaches are kept. Only \R{m4/sessdet_precision} of the accepted attempts are approaches; the others, earlier
+movements and returns, cancel most of the gain of combining (Appendix~\ref{app:prod:sessions}). The stopping rule
+answers once the aggregated \pright{} leaves the band between $1 - p_{\mathrm{stop}}$ and $p_{\mathrm{stop}} =
+\R{m4/p_stop}$, or after \R{m4/k_max} accepted attempts. It reaches \Rci{m4/stop_1_acc} after
+\R{m4/stop_1_attempts} accepted attempts on average, and it answers \R{m4/stop_1_coverage} of the sessions. Its
+aggregation scale is fitted in each fold on the training persons' sessions, but this scale was added after the
+held-out sessions had shown the problem, so the rule is post hoc and exploratory (\R{m4/n_configs_sessions}
+configurations; Appendix~\ref{app:prod:stopping}).
+
+\begin{figure}[htbp]
+\centering
+\genfig{m4/M4_08_timeline}
+\caption{Online decision on one synthetic session of the left hand, replayed sample by sample. Top: causal activity
+and the candidate segments with their P(approach). Bottom: the aggregated \pright{} after each accepted attempt
+(blue: a true approach; orange: a return; grey: another movement) and the stopping band. The session was not
+selected for success.}
+\label{fig:M4_08_timeline}
+\end{figure}
+
+\subsection{The calibrated output}\label{sec:production:calibration}
+For one touch, a calibrator chosen inside each fold among antisymmetric ones keeps the mirror property, P(mirror)
+$= 1 - P$; symmetrised isotonic regression won in \R{m4/prod_calibrator_isotonic_sym_folds} of \R{m4/prod_folds}
+folds. The calibrated one-touch output has ECE \R{m4/cal_nested_ece} (null band \R{m4/cal_nested_ece_null_lo} to
+\R{m4/cal_nested_ece_null_hi}), slope \Rcib{m4/cal_nested_slope} and intercept \Rcib{m4/cal_nested_intercept},
+consistent with calibration (Appendix~\ref{app:prod:calibration}). At the stop, the session-fitted scale gives ECE
+\R{m4/stopcal_scale_sessions_ece}, at the upper edge of its null band (up to
+\R{m4/stopcal_scale_sessions_ece_null_hi}), slope \Rcib{m4/stopcal_scale_sessions_slope} and intercept
+\R{m4/stopcal_scale_sessions_intercept}, whose CI was not saved: a borderline result that needs a prospective test.
+
+\subsection{Natural use: the main failure mode}\label{sec:production:natural}
+The detector fails more often on free choice (Table~\ref{tab:m4_natural}). It rejects \R{m4/nat_rejected} of
+\R{m4/nat_n} natural-use recordings (\R{m4/nat_rejection_rate}, against \R{m4/prim_rejection_rate} on the primary
+set; \R{m4/nat_expected_rejections} rejections expected from each person's own rate, Poisson-binomial
+$p$ = \R{m4/nat_p_poisson}, unadjusted, a single pre-planned test). The production pipeline accepts an approach in
+\R{m4/prod_nat_answered} of them, \R{m4/prod_nat_answered_tie} of which gets exactly 0.5, so it shows a hand for
+\R{derived/m4_prod_nat_n_shown} (\R{derived/m4_prod_nat_shown_coverage}). Its right-hand recall is
+\R{derived/m4_prod_nat_shown_acc} on the trials with a hand shown, \R{m4/prod_nat_acc_forced} forced-choice and
+\Rci{m4/prod_nat_acc} with half credit. All
+these trials are right-hand trials, so a constant right answer would score 100\,\%. Free-choice approaches look
+less like the instructed approaches the detector learned from, and the detector must learn them before production
+(Appendix~\ref{app:prod:natural}).
+
+\gentab{m4/m4_natural}
+
+\subsection{Instructions for the user}\label{sec:production:instructions}
+Three instructions follow from these results: hold the phone with the screen facing you, tilted slightly up; keep
+still for 1~s before the movement; and make several attempts. The decision comes a median \R{m4/lat_touch_ms}~ms
+after the first screen touch (Appendix~\ref{app:prod:abstain}).
+
+\subsection{The exported final model}\label{sec:production:export}
+The final model is exported for the inference page as a numpy-only reference implementation
+(Appendix~\ref{app:final:export}): \R{final/export_params} fitted numbers in \R{final/export_kb}~kB of JSON, about
+\R{final/export_ms}~ms per prediction. It reproduces the fitted pipeline to \R{final/export_maxdp} on all
+\R{final/export_rows} trials. The export carries the rest-pose check and the scale \tauk{} of
+equation~\eqref{eq:aggregate}. It has not yet run behind the cue-free detector.

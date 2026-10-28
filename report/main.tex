@@ -1,12 +1,15 @@
-%% NoseTouch final report: skeleton (plan: docs/09_STAGE2_3_PLAN.md, section 6).
+%% NoseTouch report: the driver. Each section is its own file under sections/ (see README.md).
 %%
-%% Build with `latexmk` in this folder (README.md). The skeleton compiles before any result exists:
-%%   \R{key}, \Rci{key}  generated numbers   -> red ??key until tables/numbers.tex defines them
-%%   \gentab{ID}{file}   generated tables    -> grey box until tables/<file>.tex exists
-%%   \genfig{ID}{file}   generated figures   -> grey box until figures/<file>.pdf (or .png) exists
-%% scripts/make_assets.py (to be written, docs/09 milestone M6) generates all three from analysis runs.
-%% Orange bullet lists (todolist) are content still to write; a final build refuses to compile them.
-%% Only packages installed in the student's MiKTeX 24.1 are used (README.md lists optional extras).
+%% Build with `latexmk` in this folder. latexmkrc first runs scripts/make_assets.py, which copies the saved Stage 2
+%% outputs (analysis/reports/stage2/) into figures/<unit>/, tables/<unit>/, tables/numbers.tex and
+%% tables/provenance.tex. Nothing in report/ fits a model.
+%%   \R{unit/key}      a generated number with its unit sign (.1% -> 89.3 %); never type a result by hand
+%%   \Rb{unit/key}     the same number without its unit sign (for "points" and inside brackets)
+%%   \Rci{unit/key}    value [key_lo, key_hi];  \Rcib{unit/key}: the same without the unit sign
+%%   \genfig[opts]{unit/NAME}  a generated figure (figures/<unit>/<NAME>.pdf|png); grey box when missing
+%%   \gentab{unit/name}        a generated table float (tables/<unit>/<name>.tex, with its own caption and
+%%                             label tab:<name>); grey box when missing
+%%   \pending{text}            content still to write: orange in a draft, an error in a final build
 \documentclass[paper=a4,fontsize=11pt,DIV=12,parskip=half-,headings=small,abstract=true,
   titlepage=false,bibliography=totoc]{scrartcl}
 
@@ -23,6 +26,14 @@
 \usepackage{caption,subcaption}
 \usepackage{float}
 \usepackage[section]{placeins} % floats stay in their section
+% Float placement: let large generated figures share a page with text instead of waiting for a float page.
+\renewcommand{\topfraction}{0.9}
+\renewcommand{\bottomfraction}{0.8}
+\renewcommand{\textfraction}{0.07}
+\renewcommand{\floatpagefraction}{0.75}
+\setcounter{topnumber}{3}
+\setcounter{bottomnumber}{2}
+\setcounter{totalnumber}{5}
 \usepackage{enumitem}
 \usepackage{tcolorbox}
 \usepackage{tikz}
@@ -34,53 +45,90 @@
 \addbibresource{references.bib}
 \usepackage[colorlinks=true,linkcolor=blue!45!black,citecolor=blue!45!black,
   urlcolor=blue!45!black]{hyperref}
-\hypersetup{pdftitle={NoseTouch: which hand brought the phone to the nose?},pdfauthor={Axel Fridman}}
+\hypersetup{pdftitle={Which hand? Detecting left- vs right-hand nose touches from smartphone motion sensors},
+  pdfauthor={Axel Fridman},pdfsubject={NoseTouch Stage 2 report (PI: Izhar Bar-Gad)},
+  pdfkeywords={smartphone, motion sensors, handedness, leave-one-person-out, calibration}}
 % Optional packages (README.md): used when installed, skipped otherwise. Without bookmark, KOMA-Script
 % logs a harmless "emergency fix for bookmark level gap" warning.
 \IfFileExists{bookmark.sty}{\usepackage{bookmark}}{}
 \setcounter{biburllcpenalty}{7000}\setcounter{biburlucpenalty}{8000}\setcounter{biburlnumpenalty}{9000}
 
+% Unicode symbols that may reach the text from generated strings (write LaTeX commands in the sections).
+\DeclareUnicodeCharacter{2265}{\ensuremath{\geq}}
+\DeclareUnicodeCharacter{2264}{\ensuremath{\leq}}
+\DeclareUnicodeCharacter{2212}{\ensuremath{-}}
+\DeclareUnicodeCharacter{2248}{\ensuremath{\approx}}
+\DeclareUnicodeCharacter{2192}{\ensuremath{\rightarrow}}
+\DeclareUnicodeCharacter{03C4}{\ensuremath{\tau}}
+\DeclareUnicodeCharacter{03C0}{\ensuremath{\pi}}
+\DeclareUnicodeCharacter{0394}{\ensuremath{\Delta}}
+\DeclareUnicodeCharacter{03C9}{\ensuremath{\omega}}
+
 % ------------------------------------------------------------------------------------------ colours
-% Hand colours are the same in every figure, table, slide and on the predictor's result screen.
+% Hand colours are the same in every figure, table, slide and on the predictor's result screen
+% (stage2.plotting.HAND_COLORS).
 \definecolor{handleft}{HTML}{D1495B}
-\definecolor{handright}{HTML}{00798C}
+\definecolor{handright}{HTML}{00739A}
 \definecolor{todo}{HTML}{C05A00}
 
 % ------------------------------------------------------------------------------------------ generated inputs
-% tables/provenance.tex may define \datakind (none|synthetic|real), \buildlabel, \provenanceline,
-% \predictorURL and set \finalbuildtrue; tables/numbers.tex defines the result keys used by \R.
+% tables/provenance.tex defines \datakind (none|synthetic|real), \buildlabel, \provenanceline,
+% \predictorURL and sets \finalbuildtrue in final mode; tables/numbers.tex defines the result keys.
 \newif\iffinalbuild
 \InputIfFileExists{tables/provenance.tex}{}{}
 \InputIfFileExists{tables/numbers.tex}{}{}
 \providecommand{\datakind}{none}
-\providecommand{\buildlabel}{skeleton, no results yet}
-\providecommand{\provenanceline}{git ? \textperiodcentered{} data ? \textperiodcentered{} model ?}
+\providecommand{\buildlabel}{no results yet}
+\providecommand{\provenanceline}{git ? \textperiodcentered{} data ?}
 \providecommand{\predictorURL}{https://axelfridman.github.io/nosetouch-study/?predict=1}
 \newcommand{\predictorlink}{\expandafter\url\expandafter{\predictorURL}}
 
-% \R{key}: a generated number; \Rci{key}: number plus [key_lo, key_hi]. Never use them in headings.
+% \R{unit/key}: a generated number with its unit sign; \Rb: the bare number; \Rci / \Rcib: with its CI.
+% Never use them in headings or captions of floats that move to the list of figures (none is printed here).
 \makeatletter
+\newcommand{\resmissing}[1]{\textcolor{red!70!black}{\textbf{??\texttt{\detokenize{#1}}}}%
+  \PackageWarning{results}{Undefined result `\detokenize{#1}'}}
 \NewDocumentCommand{\R}{m}{%
-  \ifcsname res@#1\endcsname\csname res@#1\endcsname
-  \else\textcolor{red!70!black}{\textbf{??\texttt{\detokenize{#1}}}}%
-    \PackageWarning{results}{Undefined result `\detokenize{#1}'}\fi}
+  \ifcsname res@#1\endcsname\csname res@#1\endcsname\else\resmissing{#1}\fi}
+\NewDocumentCommand{\Rb}{m}{%
+  \ifcsname resb@#1\endcsname\csname resb@#1\endcsname
+  \else\ifcsname res@#1\endcsname\csname res@#1\endcsname\else\resmissing{#1}\fi\fi}
 \makeatother
-\NewDocumentCommand{\Rci}{m}{\R{#1}\,{\small[\R{#1_lo}, \R{#1_hi}]}}
+\NewDocumentCommand{\Rci}{m}{\R{#1}~[\Rb{#1_lo}, \Rb{#1_hi}]}
+\NewDocumentCommand{\Rcib}{m}{\Rb{#1}~[\Rb{#1_lo}, \Rb{#1_hi}]}
 
-% Placeholders for generated assets (registry IDs in README.md).
+% Generated assets. A missing one is a grey box naming the file (a final build stops in the asset step).
 \newcommand{\missingasset}[2]{%
   \fcolorbox{black!45}{black!4}{\parbox[c][2.3cm][c]{0.9\linewidth}{\centering\sffamily\small
     \textbf{#1} not generated yet\\[3pt]\scriptsize\expandafter\nolinkurl\expandafter{\detokenize{#2}}}}}
-\newcommand{\genfig}[3][\linewidth]{% [width]{ID}{file stem in figures/}
-  \IfFileExists{figures/#3.pdf}{\includegraphics[width=#1]{figures/#3.pdf}}{%
-    \IfFileExists{figures/#3.png}{\includegraphics[width=#1]{figures/#3.png}}{%
-      \missingasset{#2}{report/figures/#3.pdf}}}}
-\newcommand{\gentab}[2]{% {ID}{file stem in tables/}: the generated file holds only the tabular
-  \IfFileExists{tables/#2.tex}{\input{tables/#2.tex}}{\missingasset{#1}{report/tables/#2.tex}}}
-\newcommand{\repoimage}[3][\linewidth]{% [width]{label}{path relative to report/}
+\newsavebox{\fitbox}
+% \fitwidth{content}: the content at its natural size, shrunk to the line width only when it is wider.
+\newcommand{\fitwidth}[1]{\sbox{\fitbox}{#1}%
+  \ifdim\wd\fitbox>\linewidth\resizebox{\linewidth}{!}{\usebox{\fitbox}}\else\usebox{\fitbox}\fi}
+% \genfig[includegraphics options]{unit/NAME}: figures are drawn at their final width (6.2 in = the text
+% width, or 3.0 in) with 8-pt text, so the default is the natural size, capped at the line width.
+\makeatletter
+\newcommand{\genfig}[2][]{%
+  \IfFileExists{figures/#2.pdf}{\genfig@inc{#1}{figures/#2.pdf}}{%
+    \IfFileExists{figures/#2.png}{\genfig@inc{#1}{figures/#2.png}}{%
+      \missingasset{#2}{report/figures/#2.pdf}}}}
+\newcommand{\genfig@inc}[2]{\ifstrempty{#1}{\fitwidth{\includegraphics{#2}}}{\includegraphics[#1]{#2}}}
+\makeatother
+% \gentab{unit/name}: the generated file is a complete table float (caption, label tab:<name>).
+\newcommand{\gentab}[1]{%
+  \IfFileExists{tables/#1.tex}{\input{tables/#1.tex}}{%
+    \begin{table}[htbp]\centering\missingasset{#1}{report/tables/#1.tex}\end{table}}}
+% \repoimage[width]{label}{path relative to report/}: a hand-placed image (figures/photo/, ../docs/img/).
+\newcommand{\repoimage}[3][\linewidth]{%
   \IfFileExists{#3}{\includegraphics[width=#1]{#3}}{\missingasset{#2}{#3}}}
+% \InputSection{file}: one section per file under sections/; a missing file does not break the build.
+\newcommand{\InputSection}[1]{\InputIfFileExists{sections/#1.tex}{}{%
+  \pending{sections/#1.tex does not exist yet.}}}
 
 % Content still to write. A final build stops at the first one left.
+\newcommand{\pending}[1]{\iffinalbuild
+  \PackageError{nosetouch}{Pending content left in a final build: #1}{Write it or delete it.}\fi
+  \par\noindent\textcolor{todo}{\small\sffamily\textbf{To write:} #1}\par}
 \newlist{todolist}{itemize}{2}
 \setlist[todolist]{label=\textcolor{todo}{\footnotesize$\blacktriangleright$},leftmargin=1.5em,
   itemsep=1pt,parsep=0pt,topsep=3pt,before={\small\color{black!80}}}
@@ -96,12 +144,13 @@
 % ------------------------------------------------------------------------------------------ layout
 \pagestyle{scrheadings}
 \clearpairofpagestyles
-\ihead{\small\sffamily NoseTouch \textperiodcentered{} lab admission report}
+\ihead{\small\sffamily NoseTouch \textperiodcentered{} Which hand?}
 \ohead{\small\sffamily\buildlabel}
 \ifoot{\footnotesize\sffamily\provenanceline}
 \ofoot{\pagemark}
 \captionsetup{font=small,labelfont=bf}
 \setcounter{tocdepth}{1}
+\makeatletter\renewcommand*{\@pnumwidth}{2.4em}\makeatother % three-digit page numbers in the contents
 \RedeclareSectionCommand[tocbeforeskip=0.15em plus 1pt,tocnumwidth=2.1em]{section} % contents on one page
 
 % ------------------------------------------------------------------------------------------ notation
@@ -113,598 +162,50 @@
 \newcommand{\Qmat}{\mathbf{Q}}
 \newcommand{\Rmat}{\mathbf{R}}
 \newcommand{\dd}{\,\mathrm{d}}
-\newcommand{\pright}{p_{\mathrm{right}}}
+\newcommand{\pright}{\ensuremath{P(\mathrm{right})}}
+\newcommand{\tauk}{\ensuremath{\tau_k}}
 \newcommand{\code}[1]{\texttt{\detokenize{#1}}}
 \newcommand{\handL}{\textcolor{handleft}{\textsf{\textbf{LEFT}}}}
 \newcommand{\handR}{\textcolor{handright}{\textsf{\textbf{RIGHT}}}}
 
-\title{NoseTouch: which hand brought the phone to the nose?}
-\subtitle{Left/right inference from 60\,Hz browser motion sensors, with calibrated probabilities}
+\title{Which hand?}
+\subtitle{Detecting left- vs right-hand nose touches from smartphone motion sensors}
 \author{Axel Fridman}
+\publishers{\normalsize Principal investigator: Izhar Bar-Gad}
 \date{\buildlabel{} \textperiodcentered{} \today}
 
 \begin{document}
 \maketitle
 \thispagestyle{scrheadings}
 
-\begin{abstract}
-A person holds a smartphone at arm's length and brings it to touch their nose. Using only the
-phone's motion sensors, as a web page receives them at about 60\,Hz, we infer which hand held the
-phone, for people, phones, grips and speeds the model has never seen, and we report a calibrated
-probability or say ``not sure''. The key is a symmetry argument: the left-hand movement is close to
-the mirror image of the right-hand one, and a small set of pseudoscalar features changes sign under
-the mirror but not under any change of grip. We collected \R{data/n_trials} trials from
-\R{data/n_people} adults on \R{data/n_ios} iPhones and \R{data/n_android} Android phones with a
-5-minute web app. On people outside the training data the selected model reaches \Rci{main/acc}\,\%
-accuracy (development cross-validation) and \Rci{locked/acc}\,\% on a locked test set opened once;
-its probabilities have an expected calibration error of \R{calib/ece}. The predictor runs offline in
-the browser at \predictorlink.
-\end{abstract}
-
-\begin{tcolorbox}[colback=black!3,colframe=black!45,boxrule=0.5pt,arc=1pt,left=4pt,right=4pt,
-  title={Key results (generated)},fonttitle=\sffamily\bfseries\small,coltitle=black,colbacktitle=black!10]
-\small
-\begin{tabularx}{\linewidth}{@{}>{\sffamily}lX@{}}
-Unseen people & \Rci{main/acc}\,\% accuracy, AUC \R{main/auc}; worst decile of people \R{main/pacc_p10}\,\% \\
-Locked test & \Rci{locked/acc}\,\% (\R{locked/n_people} people, opened once) \\
-Probability & ECE \R{calib/ece}; ``not sure'' below \R{calib/tau}; coverage \R{calib/coverage}\,\% \\
-Data & \R{data/n_people} people, \R{data/n_trials} trials, \R{data/ios_share}\,\% on iPhones \\
-Try it & \predictorlink \\
-\end{tabularx}
-\end{tcolorbox}
-
-\iffinalbuild\else
-\begin{tcolorbox}[colback=white,colframe=todo,boxrule=0.5pt,arc=1pt,left=4pt,right=4pt]
-\small\textbf{How to read this skeleton.} Orange bullets list the content still to write.
-Grey boxes are tables and figures that \code{scripts/make_assets.py} will generate from the
-analysis runs. Red \textbf{??}keys are generated numbers. The structure, the static tables and
-the equations are final drafts. Plan: \code{docs/09_STAGE2_3_PLAN.md}.
-\end{tcolorbox}
-\fi
+% Abstract and key-results box (written with the introduction).
+\InputSection{00_abstract}
 
 \clearpage
 \tableofcontents
 
-% ==================================================================================================
-\section{Introduction}\label{sec:intro}
-\begin{todolist}
-  \item The question and the use case: one movement, by a person who is not in the training data,
-        on an unknown phone, with an unknown grip and speed, under conditions the PI chooses
-        without telling us.
-  \item The output: a calibrated $\pright$ or ``not sure'' with its reason; a forced choice is
-        always available.
-  \item Why it is hard: the device frame changes with the grip; iPhones report the accelerometer
-        with the opposite sign; handedness confounds the hand; browsers deliver only about 60\,Hz.
-  \item Contributions (4--5 bullets): the street protocol and app; grip-invariant chiral features
-        and antisymmetric models; person-wise evaluation with a locked test; a calibrated, abstaining
-        predictor that runs offline in the browser and is parity-tested against Python.
-  \item One-paragraph answer with generated numbers (\R{main/acc}\,\%, \R{locked/acc}\,\%).
-\end{todolist}
-
-% ==================================================================================================
-\section{Related work}\label{sec:related}
-Table~\ref{tab:T01} summarises the closest work. None of it evaluates a phone-to-nose movement on
-unseen people across platforms and grips.
-
-\begin{table}[htbp]
-\centering
-\caption{Prior work on detecting the hand or the handedness from phone or wrist sensors (static
-table T01). Accuracies are as reported; most evaluations are not subject-wise.}\label{tab:T01}
-\footnotesize
-\begin{tabularx}{\linewidth}{@{}l>{\raggedright\arraybackslash}X r >{\raggedright\arraybackslash}X >{\raggedright\arraybackslash}X@{}}
-\toprule
-Study & Signal & N & Result & Caveat \\
-\midrule
-GripSense \cite{goel2012gripsense} & gyroscope, touch, vibration & 10 & 84.26\,\% hand posture & controlled study \\
-Löchtefeld et al.\ \cite{lochtefeld2015handedness} & sensors during the unlock gesture, $k$-NN & 12 & 98.51\,\% & all right-handed \\
-Guo et al.\ \cite{guo2016operating} & touch traces; acc + gyro for hand changes & 14 & $\approx$94\,\% precision & random 10-fold CV \\
-Nelavelli \& Ploetz \cite{nelavelli2018adaptive} & sign of the swipe-arc curvature & 12 & 99.53\,\% consistent & no held-out users \\
-Fernández et al.\ \cite{fernandez2021implicit} & touch features & 174 & up to 99.92\,\% TPR & oversampling before random splits \\
-Chen et al.\ \cite{chen2023handedness} & motion sensors, LSTM & n/r & 89.2--97.4\,\% & unclear if test users unseen \\
-Singh \& Singh \cite{singh2025dominant} & acc, gyro, orientation; XGBoost & n/r & 85.04\,\% (3 classes) & protocol not reported \\
-Mohammadi-Ghazi et al.\ \cite{mohammadighazi2022ataxia} & wrist IMU, finger-to-nose & 17 & opposite rotation sense & clinical, no classifier \\
-\bottomrule
-\end{tabularx}
-\end{table}
-
-\begin{todolist}
-  \item Mirror augmentation of IMU data: OREBA \cite{rouast2020oreba} and Kyritsis et al.\
-        \cite{kyritsis2021eating} use the correct transform (acceleration $x$, gyroscope $y,z$);
-        Wang et al.\ \cite{wang2026eating} derive the same matrices; OpenWatch
-        \cite{bonazzi2026openwatch} flips gyroscope $x$, which violates the pseudovector rule.
-  \item Evaluation pitfalls: record-wise splits leak identity
-        \cite{saeb2017usecase,little2017crossvalidation,chaibubneto2019subject}, and an arm movement
-        is itself a biometric \cite{conti2011mind}; small test sets have wide error bars
-        \cite{varoquaux2018cvfailure}; nested data need a hierarchical bootstrap
-        \cite{saravanan2020bootstrap}.
-  \item Calibration \cite{guo2017calibration,platt1999probabilistic}, selective prediction
-        \cite{geifman2017selective}, symmetry-constrained models
-        \cite{cohen2016group,puny2022frame}, sensor augmentation \cite{um2017augmentation}.
-  \item The gap: no benchmark that is person-wise, cross-platform and grip-independent.
-\end{todolist}
-
-% ==================================================================================================
-\section{Data collection: the app and the street protocol}\label{sec:collection}
-
-\begin{figure}[htbp]
-\centering
-\begin{subfigure}[t]{0.32\linewidth}\centering
-  \repoimage{F01a}{../docs/img/gesture/right_upright_natural_start.png}\caption{Arm extended, still}
-\end{subfigure}\hfill
-\begin{subfigure}[t]{0.32\linewidth}\centering
-  \repoimage{F01b}{../docs/img/gesture/right_upright_natural_halfway.png}\caption{Mid-reach}
-\end{subfigure}\hfill
-\begin{subfigure}[t]{0.32\linewidth}\centering
-  \repoimage{F01c}{../docs/img/gesture/right_upright_natural_touch.png}\caption{Nose touch and hold}
-\end{subfigure}
-\caption{The gesture (F01). To add: the cue track (ready, GO beep, move, hold, double beep,
-return) aligned with $\lVert\vomega\rVert$ of one real trial, and the W3C device axes with $\ghat$.}
-\label{fig:F01}
-\end{figure}
-
-\begin{figure}[htbp]
-\centering
-\begin{tikzpicture}[node distance=5mm and 7mm,>={Stealth[length=2mm]},
-  box/.style={draw=black!55,rounded corners=2pt,fill=black!3,align=center,
-              font=\sffamily\scriptsize,minimum height=11mm,text width=23mm}]
-  \node[box] (phone) {phone\\collector PWA\\uploads every trial};
-  \node[box,right=of phone] (heroku) {Heroku app (EU)\\validates records};
-  \node[box,right=of heroku] (pg) {Postgres\\one row per record};
-  \node[box,right=of pg] (ml) {motionlab\\pull, freeze, QA, CV};
-  \node[box,below=of ml] (model) {model JSON\\with its sha256};
-  \node[box,left=of model,text width=36mm] (pred) {predict mode: same PWA,\\offline, no network};
-  \draw[->] (phone) -- (heroku);
-  \draw[->] (heroku) -- (pg);
-  \draw[->] (pg) -- (ml);
-  \draw[->] (ml) -- (model);
-  \draw[->] (model) -- (pred);
-\end{tikzpicture}
-\caption{System overview (F03, static). The report and the deck are generated from the motionlab
-runs.}\label{fig:F03}
-\end{figure}
-
-\begin{table}[htbp]
-\centering
-\caption{The street protocol (protocol 2.0.0, static table T02). $A$ is the first hand, $B$ the
-other; within a block the order of trials is random. 29 planned trials, 39 with the optional bonus;
-the app estimates 4.5 minutes without the bonus.}\label{tab:T02}
-\footnotesize
-\begin{tabularx}{\linewidth}{@{}l l l >{\raggedright\arraybackslash}X@{}}
-\toprule
-Tier & Blocks & Grip (facing the person) & Trials \\
-\midrule
-0 choice & one & free & 1 natural; the participant picks the hand and reports it afterwards \\
-1 basics & $A$, $B$ & upright & 4 per hand: natural, natural, fast, slow \\
-2 sideways & $B$, $A$; $A$, $B$ & top left, top right & 3 per block: natural, natural, fast \\
-3 variety & $B$, $A$ & upright & 4 per hand: tilted touch + 3 drawn from start shoulder or centre,
-  curved, pause, twist, elbow high, bent start, lean in, jerky \\
-4 bonus & $A$, $B$, $B$, $A$ & upright & optional: natural, fast, natural per hand + 2 more variety cells \\
-\bottomrule
-\end{tabularx}
-\end{table}
-
-\begin{figure}[htbp]
-\centering
-\begin{subfigure}[t]{0.58\linewidth}\centering\genfig{F02}{F02_app_screens}\caption{The app (3 screens)}\end{subfigure}\hfill
-\begin{subfigure}[t]{0.38\linewidth}\centering\genfig{F04}{F04_tier_completion}\caption{Planned vs completed, per tier}\end{subfigure}
-\caption{Collection in practice (F02, F04).}\label{fig:F02F04}
-\end{figure}
-
-\begin{todolist}
-  \item The app: a PWA with nothing to install, on iOS and Android, in English and Hebrew;
-        hands-free trials (\code{review_mode = auto}); every attempt uploads at once to Heroku
-        Postgres (EU), so ending early (\code{ended_early}) loses nothing.
-  \item What is recorded: \code{acc}, \code{accg} and \code{rotationRate} at about 60\,Hz;
-        orientation; relative and absolute quaternions; touches; screen events; the magnetometer
-        where exposed; the return movement.
-  \item What the model may use: the motion streams and the segmentation only. Absolute heading,
-        compass and magnetometer are excluded: they cannot be mirrored and they reveal the place.
-  \item Randomisation within tiers, and the median minutes per tier from the stored plans (F04).
-\end{todolist}
-
-% ==================================================================================================
-\section{Sensors, conventions and implicit calibration}\label{sec:sensors}
-
-\begin{table}[htbp]
-\centering
-\caption{What a phone browser delivers (static table T03, condensed from
-\code{docs/03} \S2.2 and the W3C specification \cite{w3c2025deviceorientation}).}\label{tab:T03}
-\footnotesize
-\begin{tabularx}{\linewidth}{@{}l>{\raggedright\arraybackslash}X>{\raggedright\arraybackslash}X@{}}
-\toprule
- & iOS: WebKit (every iOS browser) & Android: Chromium (Chrome, Samsung Internet) \\
-\midrule
-Motion rate & $\approx$60\,Hz from a 1/60\,s timer; duplicated or skipped samples & 60\,Hz pump \\
-Value precision & unrounded doubles & rounded to 0.1\,m/s$^2$ and 0.1\,deg/s \\
-Accelerometer sign & all axes inverted (face up: $z \approx -9.81$) & W3C (face up: $z \approx +9.81$) \\
-\code{rotationRate} & deg/s; alpha, beta, gamma about $x, y, z$; not inverted & the same \\
-\code{event.interval} & $\approx$0.0167, in seconds & 16, in ms, constant \\
-Permission & \code{requestPermission()} inside a tap; a Cancel sticks & Chrome 151+ also has it; granted by default \\
-\bottomrule
-\end{tabularx}
-\end{table}
-
-\begin{todolist}
-  \item The W3C device frame; \code{rotationRate} alpha, beta, gamma are rates about $x, y, z$
-        (MDN is outdated); times come from the per-sample \code{t}, never from \code{interval};
-        Euler angles are metadata only (gimbal lock at the upright start pose).
-  \item The parity trap: WebKit negates the accelerometer but not the gyroscope. That is the
-        improper transformation $-\mathbf{I}$ on polar vectors, so an uncorrected iPhone right-hand
-        trial looks like an Android left-hand trial (Section~\ref{sec:chirality}).
-  \item \code{implicit_v1}: the sign comes from the first still upright trial and is cross-checked
-        against the trial votes and the engine prior; the axes are checked by the gravity closure.
-  \item T07 per platform: sign source, agreement with the engine, axis verdict, median rate, gaps,
-        clipping. F06: $\Psi$ before vs after normalisation, by platform.
-\end{todolist}
-
-\begin{table}[htbp]
-\centering
-\caption{Quality and calibration per platform (T07).}\label{tab:T07}
-\gentab{T07}{T07_qa_calibration}
-\end{table}
-
-% ==================================================================================================
-\section{Dataset}\label{sec:dataset}
-\begin{todolist}
-  \item T05: people by sex $\times$ dominant hand $\times$ platform, age, usual phone hand, number
-        of devices. Cells with fewer than 3 people are suppressed.
-  \item T06: the exclusion funnel (rules T1--T7), then the gates (retries and abstentions are not
-        exclusions).
-  \item F05: coverage of grip $\times$ speed $\times$ hand. Choice trials are counted separately.
-  \item The data snapshot: dates, sha256, the range of schema, protocol and app versions; the gaps
-        stated plainly (few left-handers, the iPhone share).
-\end{todolist}
-
-\begin{table}[htbp]
-\centering
-\caption{Participants (T05) and the exclusion funnel (T06).}\label{tab:T05}
-\gentab{T05}{T05_participants}\par\medskip
-\gentab{T06}{T06_exclusions}
-\end{table}
-
-\begin{figure}[htbp]
-\centering\genfig[0.8\linewidth]{F05}{F05_coverage}
-\caption{Accepted trials per grip, speed and hand (F05).}\label{fig:F05}
-\end{figure}
-
-% ==================================================================================================
-\section{Preprocessing and segmentation}\label{sec:preprocessing}
-\begin{todolist}
-  \item The versioned pipeline: \code{norm_v1} (sign, axes, units) $\to$ drop repeated samples
-        $\to$ linear resampling to 60\,Hz $\to$ gyroscope bias from the 400\,ms before GO $\to$
-        \code{gravity_v1} (gyro propagation from the rest windows, blended) $\to$
-        \code{offline_v1} segment $\to$ \code{feat_d1} features.
-  \item Why offline\_v1 for the deployed model: online\_v1 with predict-mode parameters cannot
-        re-segment the training trials, and one parameter set cannot keep slow movements whole
-        (pilot evidence in \code{docs/09} \S2.2).
-  \item Windows W0--W3; the return movement (W3) is never pooled with the approach, because time
-        reversal also flips every pseudoscalar.
-  \item Agreement of the Python and TypeScript segmentations; the share of trials where offline and
-        online differ by more than 100\,ms. F07: anatomy of one real trial.
-\end{todolist}
-
-\begin{figure}[htbp]
-\centering\genfig{F07}{F07_trial_anatomy}
-\caption{Anatomy of one trial (F07).}\label{fig:F07}
-\end{figure}
-
-% ==================================================================================================
-\section{Why the hand is visible: the mirror and chirality}\label{sec:chirality}
-Let $\Rmat(t)$ map device coordinates to body coordinates, with $\vf$ the specific force (the
-browser's acceleration including gravity), $\va$ the acceleration and $\vomega$ the angular
-velocity, all in device coordinates. Mirroring the body across its sagittal plane, $\mathbf{p}' = \mathbf{M}\mathbf{p}$,
-and relabelling the device's $x$ axis, $\Rmat' = \mathbf{M}\Rmat\Smat$ with
-$\mathbf{M} = \Smat = \operatorname{diag}(-1, 1, 1)$, gives for every grip and every movement
-\begin{equation}
-  \vf' = \Smat\vf, \qquad \va' = \Smat\va, \qquad \vomega' = -\Smat\vomega .
-  \label{eq:mirror}
-\end{equation}
-Acceleration is a polar vector; angular velocity is a pseudovector and picks up $\det\Smat = -1$.
-With $\ghat$ the unit vector pointing up, the yaw rate about gravity is a pseudoscalar:
-\begin{equation}
-  (-\Smat\vomega)\cdot(\Smat\ghat) = -\,\vomega\cdot\ghat
-  \quad\text{(mirror)}, \qquad
-  (\Qmat\vomega)\cdot(\Qmat\ghat) = \vomega\cdot\ghat
-  \quad\text{(any grip } \Qmat \in SO(3)\text{)} .
-  \label{eq:parity}
-\end{equation}
-Holding the phone with the screen facing away is the proper rotation
-$\Qmat = \mathbf{R}_y(180^\circ) = \operatorname{diag}(-1, 1, -1)$, so it leaves every chiral feature
-unchanged (Table~\ref{tab:T04}). An antisymmetric model, with logit
-$z(\mathbf{x}) = g(\mathbf{x}) - g(m(\mathbf{x}))$, then satisfies
-$\pright(m(\mathbf{x})) = 1 - \pright(\mathbf{x})$ exactly.
-
-\begin{table}[htbp]
-\centering
-\caption{The mirror and the screen-away flip in device coordinates (static table T04).}\label{tab:T04}
-\footnotesize
-\begin{tabular}{@{}lll@{}}
-\toprule
-Quantity & Mirror $m$ (left $\leftrightarrow$ right) & Screen away, $\Qmat = \mathbf{R}_y(180^\circ)$ \\
-\midrule
-$\vf$, $\va$, $\ghat$ (polar vectors) & $(-x, y, z)$ & $(-x, y, -z)$ \\
-$\vomega$ (pseudovector) & $(x, -y, -z)$ & $(-x, y, -z)$ \\
-$\vomega\cdot\ghat$, $\vomega\cdot\va$, $\det[\va(t), \va(t+\tau), \ghat]$ & sign flips & unchanged \\
-$\lVert\vomega\rVert$, $\va\cdot\ghat$, duration (mirror-even) & unchanged & unchanged \\
-Hand label & swapped & unchanged \\
-Grip label & top left $\leftrightarrow$ top right & toward $\leftrightarrow$ away \\
-\bottomrule
-\end{tabular}
-\end{table}
-
-\begin{todolist}
-  \item The mechanism: early in the reach the forearm swings toward the midline, so the phone turns
-        counter-clockwise seen from above in the right hand and clockwise in the left; the wrist
-        then turns it back to face the person, so the net yaw largely cancels and the evidence is in
-        the time course (F10). Pilot: first-half yaw AUC 0.95 vs net yaw 0.58 (one person);
-        replace with generated numbers.
-  \item F08: top-view schematic with the two identities; F09: first-half yaw by hand and platform;
-        F10: $\vomega\cdot\ghat$ over normalised time, left vs mirrored right.
-  \item The 64-sign-pattern check in one sentence (figure F11 in Appendix~\ref{app:results}).
-  \item Limits: the accelerometer mirror is approximate (the IMU sits off the centre line), and
-        dominant and non-dominant arms move differently \cite{sainburg2002dominance,przybyla2012dominance}.
-\end{todolist}
-
-\begin{figure}[htbp]
-\centering
-\begin{subfigure}[t]{0.32\linewidth}\centering\genfig{F08}{F08_chirality_schematic}\caption{Top view}\end{subfigure}\hfill
-\begin{subfigure}[t]{0.32\linewidth}\centering\genfig{F09}{F09_first_half_yaw}\caption{First-half yaw}\end{subfigure}\hfill
-\begin{subfigure}[t]{0.32\linewidth}\centering\genfig{F10}{F10_yaw_timecourse}\caption{Time course}\end{subfigure}
-\caption{The yaw about gravity separates the hands (F08--F10).}\label{fig:F08F10}
-\end{figure}
-
-% ==================================================================================================
-\section{Models}\label{sec:models}
-\begin{todolist}
-  \item The ladder: chance and the label-permutation control; \code{YawSignRule} on the first-half
-        yaw; the antisymmetric logistic regression on chiral features with odd $\times$ even
-        products (no intercept); the unconstrained logistic regression; gradient boosting,
-        augmented and mirror-symmetrised; optional MiniRocket \cite{dempster2021minirocket} and a
-        small siamese CNN.
-  \item Augmentation inside the estimator (mirror, grip tilt, time warp, magnitude, screen-away
-        flip); for antisymmetric models the mirror copy is redundant.
-  \item Calibration inside each training fold by inner cross-fitting: temperature scaling for
-        antisymmetric models \cite{guo2017calibration}, Platt scaling otherwise
-        \cite{platt1999probabilistic}.
-  \item Selection: the simplest model whose accuracy lies inside the CI of the best one. T08:
-        inputs, symmetry, parameters, export format, size, browser latency.
-\end{todolist}
-
-\begin{table}[htbp]
-\centering
-\caption{The model ladder (T08).}\label{tab:T08}
-\gentab{T08}{T08_models}
-\end{table}
-
-% ==================================================================================================
-\section{Evaluation protocol}\label{sec:evaluation}
-\begin{todolist}
-  \item Every split is by person: stratified group 5-fold $\times$ 5 seeds (strata dominant hand
-        $\times$ platform), leave one person out, leave one grip out (mirror pairs together), leave
-        one platform, speed or variant out, and a learning curve.
-  \item The locked test: about 25\,\% of people by a hash rule fixed before the data, the student
-        and the pilot excluded, opened once.
-  \item Controls: shuffled labels give $\approx$50\,\%; record-wise vs subject-wise gap; platform
-        probe; mirror consistency; retry and abstention rates by hand.
-  \item Metrics: accuracy (primary), balanced accuracy, AUC \cite{hanley1982roc}, log loss, Brier
-        score \cite{brier1950verification}, ECE; per-person accuracy. Person bootstrap with
-        $B \ge 2000$ \cite{saravanan2020bootstrap}; paired bootstrap for differences. F12: the
-        split design.
-\end{todolist}
-
-\begin{figure}[htbp]
-\centering\genfig[0.85\linewidth]{F12}{F12_split_design}
-\caption{Every split keeps a person's trials together (F12).}\label{fig:F12}
-\end{figure}
-
-% ==================================================================================================
-\section{Results}\label{sec:results}
-\begin{todolist}
-  \item Lead with the locked test (T10), then the development CV (T09) and the spread across
-        people (F13); robustness by held-out grip, platform, speed and variant (F14).
-  \item Compare the locked test with the expectation written before it was opened.
-  \item Accuracy on the choice trials, the ``natural use'' set.
-\end{todolist}
-
-\begin{table}[htbp]
-\centering
-\caption{Models $\times$ evaluation schemes with person-bootstrap 95\,\% CIs (T09); the selected
-model is marked.}\label{tab:T09}
-\gentab{T09}{T09_main_results}
-\end{table}
-
-\begin{table}[htbp]
-\centering
-\caption{The locked test, run once (T10).}\label{tab:T10}
-\gentab{T10}{T10_locked_test}
-\end{table}
-
-\begin{figure}[htbp]
-\centering
-\begin{subfigure}[t]{0.48\linewidth}\centering\genfig{F13}{F13_participant_accuracy}\caption{Per person}\end{subfigure}\hfill
-\begin{subfigure}[t]{0.48\linewidth}\centering\genfig{F14}{F14_robustness}\caption{Held-out conditions}\end{subfigure}
-\caption{Accuracy on unseen people (F13) and under held-out conditions (F14).}\label{fig:F13F14}
-\end{figure}
-
-% ==================================================================================================
-\section{Probability output: calibration and abstention}\label{sec:probability}
-$\pright$ is the probability that the movement was made with the right hand, for a new person from
-the training population, with both hands equally likely beforehand, given that the attempt passed
-the quality gates. If the share $\pi$ of right-hand attempts is known, $\ln(\pi/(1-\pi))$ is added
-to the logit.
-
-\begin{todolist}
-  \item F16: reliability diagram, overall and per platform, before and after temperature scaling
-        (10 equal-mass bins, person-bootstrap band); ECE and the Brier decomposition.
-  \item F17: accuracy vs coverage, with $\tau$ marked; $\tau$ comes from the development
-        out-of-fold predictions only, so its development accuracy is optimistic and labelled so
-        \cite{geifman2017selective}.
-  \item T12: ECE, Brier, log loss, $\tau$, coverage, accuracy on answered trials; mirror
-        consistency $\lvert \pright(\mathbf{x}) + \pright(m(\mathbf{x})) - 1\rvert$.
-\end{todolist}
-
-\begin{figure}[htbp]
-\centering
-\begin{subfigure}[t]{0.48\linewidth}\centering\genfig{F16}{F16_reliability}\caption{Reliability}\end{subfigure}\hfill
-\begin{subfigure}[t]{0.48\linewidth}\centering\genfig{F17}{F17_risk_coverage}\caption{Accuracy vs coverage}\end{subfigure}
-\caption{When the predictor says 90\,\%, how often is it right? (F16, F17)}\label{fig:F16F17}
-\end{figure}
-
-\begin{table}[htbp]
-\centering
-\caption{Calibration and abstention (T12).}\label{tab:T12}
-\gentab{T12}{T12_calibration}
-\end{table}
-
-% ==================================================================================================
-\section{Error analysis and ablations}\label{sec:errors}
-\begin{todolist}
-  \item T13: error rate by subgroup with person-bootstrap CIs. A mixed model
-        \cite{bates2015lme4} only with about 10 errors per degree of freedom
-        \cite{peduzzi1996epv}; otherwise say that the analysis is descriptive.
-  \item F18: grip $\times$ speed heatmap with $n$ per cell; F19: accuracy vs measured duration by
-        hand $\times$ dominant hand; the dominance probe.
-  \item Possible wrong-hand labels: trials the antisymmetric model gives $p < 0.05$.
-  \item T11 and F15: ablations A1--A14 as differences from the selected model with paired CIs
-        (\code{docs/09} \S4.7), including the cost of the deployable pipeline (A5).
-\end{todolist}
-
-\begin{table}[htbp]
-\centering
-\caption{Error rate by subgroup (T13) and ablations (T11).}\label{tab:T13}
-\gentab{T13}{T13_subgroups}\par\medskip
-\gentab{T11}{T11_ablations}
-\end{table}
-
-\begin{figure}[htbp]
-\centering
-\begin{subfigure}[t]{0.48\linewidth}\centering\genfig{F15}{F15_ablations}\caption{Ablations}\end{subfigure}\hfill
-\begin{subfigure}[t]{0.48\linewidth}\centering\genfig{F18}{F18_grip_speed}\caption{Grip $\times$ speed}\end{subfigure}
-\caption{What helped, and where the model struggles (F15, F18).}\label{fig:F15F18}
-\end{figure}
-
-% ==================================================================================================
-\section{The predictor and the PI evaluation}\label{sec:predictor}
-\begin{todolist}
-  \item F21: the in-browser pipeline (check $\to$ gates $\to$ normalisation $\to$ resampling $\to$
-        gravity $\to$ offline\_v1 $\to$ features $\to$ model $\to$ temperature $\to$ abstention) and
-        the result screen.
-  \item Parity with Python: maximum $\lvert\Delta\text{feature}\rvert$ and $\lvert\Delta p\rvert$
-        over the golden trials; model size, latency on a mid-range phone, offline behaviour, no
-        network requests.
-  \item The link \predictorlink{} and its QR code; the 2.5-s upright check.
-  \item T15: the expectation committed before the session, per platform and for standard vs odd
-        movements. T14 and F22: the PI session (forced-choice accuracy with a Clopper--Pearson
-        interval \cite{clopper1934confidence}, coverage, Brier score, log loss).
-\end{todolist}
-
-\begin{figure}[htbp]
-\centering\genfig[0.85\linewidth]{F21}{F21_predictor_pipeline}
-\caption{The predictor (F21).}\label{fig:F21}
-\end{figure}
-
-\begin{table}[htbp]
-\centering
-\caption{Expectation stated before the PI session (T15) and the session itself (T14).}\label{tab:T15}
-\gentab{T15}{T15_expectation}\par\medskip
-\gentab{T14}{T14_pi_session}
-\end{table}
-
-% ==================================================================================================
-\section{Limitations, ethics and reproducibility}\label{sec:limitations}
-\begin{todolist}
-  \item Limitations: the 60\,Hz browser cap; a sample of friends, mostly students, few
-        left-handers; screen-away grips only synthesised; \code{implicit_v1} needs a still upright
-        start; the accelerometer mirror is approximate and dominance is a confound
-        \cite{papadatoupastou2020handedness}; single-trial decisions; choice trials carry
-        self-reported labels; the PI's conditions are unknown.
-  \item Ethics and privacy: adult volunteers who consented in the app and could stop or ask for
-        deletion at any time; no ethics committee review, by the project's decision, so the data
-        are not for publication without approval; what is stored (name, age, sex, dominant hand,
-        usual phone hand, optional height) in Heroku Postgres (EU); the report and the deck use
-        pseudonymous P-codes only; predict mode makes no network requests.
-  \item Reproducibility: one-command builds; run manifests (commit, data sha256, seeds,
-        versions); \code{pip freeze}; the model JSON and its hash; the golden parity fixtures;
-        software \cite{pedregosa2011sklearn}.
-\end{todolist}
-
-% ==================================================================================================
-\section{Conclusion}\label{sec:conclusion}
-\begin{todolist}
-  \item The answer and the number, why it works (chirality and honest evaluation), and the next
-        step.
-\end{todolist}
+% ================================================================================================== main text
+\InputSection{01_introduction}  % sec:intro
+\InputSection{02_data}          % sec:data
+\InputSection{03_physics}       % sec:physics
+\InputSection{04_methods}       % sec:methods
+\InputSection{05_results}       % sec:results
+\InputSection{06_production}    % sec:production
+\InputSection{07_secondary}     % sec:secondary
+\InputSection{08_discussion}    % sec:discussion
 
 \printbibliography[heading=bibintoc]
 
-% ==================================================================================================
+% ================================================================================================== appendix
 \appendix
-\section{Protocol and instructions}\label{app:protocol}
-\begin{todolist}
-  \item The participant instructions verbatim (English; Hebrew as screenshots), the full street
-        plan, the cue timings and the segmentation parameters of protocol 2.0.0.
-\end{todolist}
-
-\section{Data schema 1.2 in brief}\label{app:schema}
-\begin{todolist}
-  \item Record types and the fields the analysis uses (from \code{docs/02}).
-\end{todolist}
-
-\section{Derivations}\label{app:derivations}
-\begin{todolist}
-  \item The mirror rule \eqref{eq:mirror} step by step; the parity rule for scalars; the
-        screen-away flip; gravity propagation $\dot{\mathbf{g}} = -\vomega\times\mathbf{g}$; why the
-        iOS sign cannot be recovered from gyroscope--accelerometer consistency; the minimum-jerk
-        model of the simulator \cite{flash1985coordination}.
-\end{todolist}
-
-\section{Feature dictionary}\label{app:features}
-\gentab{TD}{TD_feature_dictionary}
-
-\section{Segmentation parameters}\label{app:segmentation}
-\gentab{TE}{TE_segmentation_params}
-
-\section{Further results}\label{app:results}
-\begin{figure}[htbp]
-\centering
-\begin{subfigure}[t]{0.48\linewidth}\centering\genfig{F11}{F11_sign_patterns}\caption{64 sign patterns}\end{subfigure}\hfill
-\begin{subfigure}[t]{0.48\linewidth}\centering\genfig{F23}{F23_roc}\caption{ROC curves}\end{subfigure}
-\caption{The 64-sign-pattern check (F11) and ROC curves (F23).}\label{fig:F11F23}
-\end{figure}
-\begin{todolist}
-  \item Full metrics per scheme, per-condition tables, the failure gallery (F20 optional).
-\end{todolist}
-
-\section{Model card and datasheet}\label{app:modelcard}
-\gentab{TG}{TG_model_card}
-
-\section{PI scoring sheet and session log}\label{app:pisheet}
-\begin{todolist}
-  \item The one-page sheet (QR code, steps, scoring table, limits) and the exported session log.
-\end{todolist}
-
-\section{Software and provenance}\label{app:software}
-\begin{todolist}
-  \item Package versions, the git commit, the data snapshot hash, the model sha256, the build date.
-\end{todolist}
-
-\section{Notation}\label{app:notation}
-\begin{center}
-\footnotesize
-\begin{tabular}{@{}ll@{}}
-\toprule
-Symbol & Meaning \\
-\midrule
-$\vf$, $\va$ & specific force (\code{accg}) and acceleration, device frame, m/s$^2$ \\
-$\vomega$ & angular velocity (\code{rotationRate} as $x, y, z$), deg/s \\
-$\ghat$ & unit vector pointing up, estimated by gyro propagation (\code{gravity_v1}) \\
-$\Smat$, $\mathbf{M}$ & $\operatorname{diag}(-1, 1, 1)$ on the device and the body side \\
-$\Qmat$ & a grip: a constant proper rotation of the device frame \\
-$m(\cdot)$ & the left--right mirror of a trial or of a feature vector \\
-$\Psi$, $\Psi_n$ & net yaw $\int \vomega\cdot\ghat\dd t$ and its normalised form \\
-$\pright$, $\tau$, $T$ & calibrated probability of the right hand, abstention threshold, temperature \\
-\bottomrule
-\end{tabular}
-\end{center}
+\InputSection{A_data}           % app:data      data collection, curation, reproducibility, notation
+\InputSection{B_preprocessing}  % app:prep      preprocessing and data-treatment decisions (p1)
+\InputSection{C_interpretable}  % app:m1        interpretable models and the feature catalogue (m1)
+\InputSection{D_classical}      % app:m2        classical machine learning (m2)
+\InputSection{E_deep}           % app:m3        time-frequency and deep models (m3)
+\InputSection{F_final}          % app:final     final-model selection, calibration, export, model card
+\InputSection{G_production}     % app:prod      the cue-free production pipeline (m4)
+\InputSection{H_secondary}      % app:sec       speed, grip, handedness, demographics (sec, demo)
+\InputSection{I_case_study}     % app:pd01      the exploratory PD01 case study (x1)
 
 \end{document}

@@ -1,0 +1,537 @@
+% sections/D_classical.tex: Lane m2 (classical machine learning on engineered features), appendix.
+% Numbers only through \R / \Rci; figures through \genfig, tables through \gentab (report/README.md).
+% Sources: analysis/reports/stage2/m2_SUMMARY.md, figures/m2/captions.json, tables/m2/*, results/m2_numbers.json.
+\section{Classical machine learning on engineered features}\label{app:m2}
+
+Lane m2 asks how far classical (non-deep) models get on a rich set of hand-crafted per-trial features, and
+which data treatment and which features matter. Every result is leave-one-person-out over the
+\R{describe/n_persons} persons and \R{describe/primary_trials} primary trials. Every hyperparameter is tuned
+inside the outer fold, on \R{m2/inner_folds} inner person folds of the training persons. A paired difference
+compares two pipelines on the same trials, with a paired person-bootstrap CI. Its p-value is an exact sign-flip
+test over persons, Holm-adjusted within the comparison family named in the text (level \R{m2/alpha}). Two
+pipelines whose \pright{} differ by less than \R{m2/equiv_dp} on every trial are called identical (solver
+precision); they are not tested. The inputs are the oracle approach windows of the cache
+(Appendix~\ref{app:prep}); production sees detected windows instead (Appendix~\ref{app:prod}).
+Abbreviations used in this appendix: logistic regression (LR), support vector machine (SVM), radial basis
+function (RBF), k nearest neighbours (k-NN), LightGBM gradient-boosted trees (LGBM), calibration-in-the-large
+(CITL).
+
+% ------------------------------------------------------------------------------------------------------------
+\subsection{Features and their mirror parity}\label{app:m2:features}
+
+\paragraph{Representation.} One trial is described by \R{m2/lr_full_n_features} features computed from the
+17 channels of the cache. Nine are in the device frame: the three axes of the linear acceleration, of the
+rotation rate and of the unit up vector. Eight are in the gravity frame: magnitudes, vertical and horizontal
+components, the yaw rate about gravity $\vomega\cdot\ghat$, its running integral (the cumulative yaw) and the
+tilt from the start. The approach window is time-normalised to 64 samples from onset to end. Seven feature
+families describe it (Table~\ref{tab:m2_feature_families}): means in $k = 8$ equal time bins (\code{bins}),
+summary statistics (\code{stats}), log band powers and the lowest Fourier coefficients (\code{fft}), wavelet
+sub-band energies (\code{wavelet}), correlations of every channel pair within a frame group (\code{xcorr}),
+cumulative integrals at the quarters of the window (\code{cumint}) and the log approach duration
+(\code{global}).
+
+\paragraph{Mirror parity.} Every feature is even (unchanged), odd (sign flip) or one of a swapped pair under the
+left-right mirror $m(\cdot)$ of Eqs.~\eqref{eq:mirror} and~\eqref{eq:parity}. The feature registry gives the
+exact mirror map of every feature (unit-tested): the features of a mirrored trial are a signed permutation of
+the original ones. Of the default set, \R{m2/reg_odd} features are odd or swapped and \R{m2/reg_even} are even.
+The \code{wavelet} and \code{global} families are entirely even (\R{m2/reg_wavelet_odd} and
+\R{m2/reg_global_odd} odd features). This parity matters for the design: with mirror augmentation each even
+feature value enters the training set once with each label, so a linear model gives every even feature (and the
+intercept) zero weight. The augmented LR therefore uses only the mirror-sensitive features.
+
+\gentab{m2/m2_feature_families}
+
+% ------------------------------------------------------------------------------------------------------------
+\subsection{Models, tuning and the headline estimate}\label{app:m2:models}
+
+\paragraph{Options.} The lane compares \R{m2/n_models_compared} pipelines on the same features, all
+mirror-augmented: the pre-specified
+default, an L2-penalised LR; L1 and elastic-net LR; a linear SVM, an RBF SVM and a k-NN classifier, each with a
+Platt map \cite{platt1999probabilistic}; a random forest and extra trees with one fixed configuration
+(\R{m2/forest_n_estimators} trees, $\sqrt{p}$ of the $p$ features per split, leaves of at least
+\R{m2/forest_min_leaf} rows; not tuned); HistGradientBoosting; LGBM; and a soft vote and a stack of the L2 LR,
+the RBF SVM and LGBM. The models are those of scikit-learn \cite{pedregosa2011sklearn} and LightGBM. The L2
+and L1 LR and the linear SVM are tuned on a grid of their penalty. The other tuned models use a small seeded
+Bayesian search (Optuna) per outer fold: \R{m2/trials_svm_rbf} trials for the RBF SVM, \R{m2/trials_knn} for
+the k-NN, \R{m2/trials_lgbm} for LGBM, \R{m2/trials_lr_en} for the elastic net and \R{m2/trials_hgb} for
+HistGradientBoosting.
+
+\paragraph{Three estimates with three roles.} The \emph{nested selection} (\code{m2_select}) chooses, inside
+every outer fold, among the L2 LR, the RBF SVM, LGBM and their soft vote by inner cross-validated log loss,
+then refits the winner on all training persons. It is one procedure, so its leave-one-person-out estimate is
+selection-aware: it is the lane's headline. The \emph{default} (\code{m2_lr_full}) was fixed before any outer
+result. The best of the \R{m2/n_models_compared} pipelines by outer log loss (the stack) and the best tree
+pipeline (LGBM) are \emph{exploratory}: each is the best of \R{m2/ens_stack_configs} (stack) and
+\R{m2/lgbm_configs} (LGBM) configurations compared on the outer folds. The selection chose the soft vote in \R{m2/sel_choice_ens_soft} and LGBM in
+\R{m2/sel_choice_lgbm} of the \R{m2/sel_n_folds} outer folds. The median inner log-loss margin over the
+runner-up is \R{m2/sel_margin_median}, so the candidates are close. Every candidate's inner predictions are
+out of sample; the SVM's Platt map is cross-fitted across the inner folds, which corrects an in-sample map
+found by the audit.
+
+\paragraph{Results.} Figure~\ref{fig:M2_01_models} and Table~\ref{tab:m2_models} show every pipeline. The
+nested selection reaches an accuracy of \Rci{m2/select_accuracy}, an AUC of \Rci{m2/select_auc}, a log loss of
+\Rci{m2/select_log_loss} and a Brier score of \Rci{m2/select_brier}. The default LR reaches
+\Rci{m2/lr_full_accuracy} with a log loss of \Rci{m2/lr_full_log_loss}. The reference floor, a mirror-augmented
+LR on the cumulative yaw at 8 instants, reaches \Rci{m2/ref_accuracy}. The selection beats it by
+\Rcib{m2/select_ref_d_acc}~points (Holm $p = \R{m2/select_ref_p_holm}$) and the default by
+\Rcib{m2/lr_full_ref_d_acc}~points (Holm $p = \R{m2/lr_full_ref_p_holm}$). Both are adjusted over the
+\R{m2/fam_vs_reference_size} comparisons of m2 pipelines with the reference floor. Every pipeline of this family
+beats the floor after the adjustment. The smallest gain is that of the L1 LR (\Rcib{m2/lr_l1_ref_d_acc}~points,
+Holm $p = \R{m2/lr_l1_ref_p_holm}$), the largest that of the stack (\Rcib{m2/ens_stack_ref_d_acc}~points, Holm
+$p = \R{m2/ens_stack_ref_p_holm}$).
+
+\paragraph{Against the default.} The family is the \R{m2/fam_model_vs_default_size} comparisons of the other
+pipelines and the selection with the default. No pipeline differs from the default in accuracy after the Holm
+adjustment. The stack, the best pipeline by outer log loss, gains \Rcib{m2/ens_stack_d_acc}~points of accuracy
+(Holm $p = \R{m2/ens_stack_p_acc_holm}$) and changes the log loss by \Rcib{m2/ens_stack_d_ll} (Holm
+$p = \R{m2/ens_stack_p_ll_holm}$): not significant. The soft vote is the only pipeline with a lower log loss
+after the adjustment (\Rcib{m2/ens_soft_d_ll}, Holm $p = \R{m2/ens_soft_p_ll_holm}$), and no pipeline has a
+higher one. The nested selection changes the log loss by \Rcib{m2/select_d_ll} (Holm
+$p = \R{m2/select_p_ll_holm}$). With \R{describe/n_persons} persons, the spread of a few points between
+pipelines is not resolved.
+
+\paragraph{Natural use and abstentions.} The free-choice trials are all right-hand trials so far
+(\R{m2/nat_n_right} right, \R{m2/nat_n_left} left). Their score is therefore right-hand recall, not an accuracy
+over both hands, and a constant `right' answer would score 100\,\%. The nested selection recognises
+\R{m2/select_nat_correct} of \R{m2/select_nat_n} free-choice trials (right-hand recall \R{m2/select_nat_acc}
+[\Rb{m2/select_nat_lo}, \Rb{m2/select_nat_hi}]), against a right-hand recall of \R{m2/select_right_recall} on the
+primary trials. The k-NN and the RBF SVM recognise \R{m2/knn_nat_correct} (Table~\ref{tab:m2_models}). None of
+the four reported pipelines abstains: none returns $\pright = 0.5$ exactly on any primary or free-choice trial
+(free-choice coverage \R{m2/select_nat_coverage} for the selection, \R{m2/lr_full_nat_coverage} for the default,
+\R{m2/ens_stack_nat_coverage} for the stack and \R{m2/lgbm_nat_coverage} for LGBM). Their answered and
+forced-choice accuracies therefore equal the accuracies shown. The only abstaining configuration of the lane is
+an ablation (Appendix~\ref{app:m2:families}).
+
+\paragraph{Finalists.} Lane m2 hands three finalists to the cross-lane nested selection of lane final
+(Table~\ref{tab:m2_finalists}; Appendix~\ref{app:final}): the best linear, tree and ensemble pipelines by
+outer log loss. This choice is exploratory. For \code{m2_lr_full} the two records disagree: the finalists file
+counts \R{final/nconf_file_m2_lr} configurations compared on the outer folds, the saved result
+\R{final/nconf_result_m2_lr}. Lane final uses the finalists file's count, the role in which the model became a
+candidate, so in the cross-lane selection it counts as exploratory. Inside lane m2 it remains the pre-specified
+default.
+
+\begin{figure}[tbp]
+\centering
+\genfig{m2/M2_01_models}
+\caption{Classical pipelines on the same \R{m2/lr_full_n_features} features, leave-one-person-out over
+\R{describe/n_persons} persons, sorted by log loss (best at the top). Blue: the pre-specified default (L2 LR);
+orange: the nested selection, the selection-aware headline; dashed: the reference floor; * fixed
+hyperparameters. The best pipelines are each the best of \R{m2/ens_stack_configs} compared on the outer folds:
+exploratory.}
+\label{fig:M2_01_models}\label{fig:app:m2-models}
+\end{figure}
+
+\gentab{m2/m2_models}
+
+\gentab{m2/m2_finalists}
+
+\FloatBarrier
+% ------------------------------------------------------------------------------------------------------------
+\subsection{Data treatment}\label{app:m2:treatment}
+
+\paragraph{Design.} The default treatment was pre-specified: the time-normalised approach window, all 17
+channels, the seven families with $k = 8$ bins, a z-score fitted on the training rows, mirror augmentation and
+the L2 LR. Each of \R{m2/fam_data_treatment_size} alternatives is paired against it on the same trials and
+Holm-adjusted within this family of \R{m2/fam_data_treatment_size} comparisons. The rule: adopt an alternative
+only if its held-out log loss is lower after the adjustment. No alternative has a lower log loss after the
+adjustment (Figure~\ref{fig:M2_02_data_treatment}; Table~\ref{tab:m2_data_treatment}, upper rows), so the
+default stays.
+The mirror options are treated in Appendix~\ref{app:m2:mirror}.
+
+\paragraph{Window.} The alternatives are a fixed \R{m2/fixed_window_s}-s window in absolute time (from 0.5~s
+before to 2.5~s after the onset) and both windows side by side. Neither differs from the approach window (fixed:
+log loss \Rcib{m2/lr_win_fixed_d_ll}, Holm $p = \R{m2/lr_win_fixed_p_ll_holm}$; both:
+\Rcib{m2/lr_win_both_d_ll}, Holm $p = \R{m2/lr_win_both_p_ll_holm}$). The fixed window is also not
+onset-only. The cache freezes every channel from the app's end cue on, which happens in \R{m2/fixed_n_frozen}
+of \R{m2/fixed_n_trials} trials (median \R{m2/fixed_frozen_share} of the post-onset window frozen; Spearman
+correlation of the freeze point with the approach duration \R{m2/fixed_rho}). Its gravity reference also uses
+the rest after the end. Production has no end cue. Decision: keep the approach window.
+
+\paragraph{Channel frame.} Keeping only the device-frame channels worsens the log loss by
+\Rcib{m2/lr_frame_device_d_ll} (Holm $p$~\R{m2/lr_frame_device_p_ll_holm}) and the accuracy by \Rcib{m2/lr_frame_device_d_acc}~points
+(Holm $p = \R{m2/lr_frame_device_p_acc_holm}$). Keeping only the gravity-frame channels worsens the log loss by
+\Rcib{m2/lr_frame_gravity_d_ll} (Holm $p = \R{m2/lr_frame_gravity_p_ll_holm}$); its accuracy does not differ
+(Holm $p = \R{m2/lr_frame_gravity_p_acc_holm}$). Decision: keep both frames. The device-frame features do not
+transfer to unseen grips, however (Appendix~\ref{app:m2:importance}).
+
+\paragraph{Time bins.} With $k = 4$ or $k = 16$ bins instead of 8, the log loss does not differ (Holm
+$p = \R{m2/lr_bins4_p_ll_holm}$ and \R{m2/lr_bins16_p_ll_holm}). Decision: keep $k = 8$.
+
+\paragraph{Scaling.} Without scaling, the log loss worsens by \Rcib{m2/lr_scale_none_d_ll} (Holm $p$~\R{m2/lr_scale_none_p_ll_holm}).
+The unscaled fit does not converge: the feature standard deviations span \R{m2/feature_sd_orders} orders of
+magnitude, and with the solver capped at 300 iterations \R{m2/unscaled_inner_nonconverged} of
+\R{m2/unscaled_inner_fits} inner fits and \R{m2/unscaled_final_nonconverged} of \R{m2/sel_n_folds} outer-fold
+fits stopped at the cap. Robust scaling (median and interquartile range) worsens the log loss by
+\Rcib{m2/lr_scale_robust_d_ll} (Holm $p = \R{m2/lr_scale_robust_p_ll_holm}$). Winsorising at 3 standard
+deviations and per-trial amplitude normalisation do not differ (Holm $p = \R{m2/lr_winsor3_p_ll_holm}$ and
+\R{m2/lr_ampnorm_p_ll_holm}). Decision: keep the z-score. Trees are scale-free; the linear, kernel and k-NN
+models need the scaling.
+
+\paragraph{Inherited treatment.} Filtering, resampling and gap handling are the cache's: a 15~Hz zero-phase
+low-pass filter, a 60~Hz grid, interpolation of gaps up to 100~ms and exclusion of longer gaps near the
+movement (Appendix~\ref{app:prep}). This lane inherits them unchanged. Every feature is checked finite before a
+fit.
+
+\begin{figure}[tbp]
+\centering
+\genfig{m2/M2_02_data_treatment}
+\caption{Data-treatment alternatives of the default L2 LR, each paired against the default on the same trials:
+accuracy (left) and log loss (right) differences with paired 95\,\% CIs. Orange: Holm-adjusted $p < 0.05$ within
+the family of \R{m2/fam_data_treatment_size} comparisons; open marker: identical within solver precision (not a
+test). No alternative improves the log loss, so the pre-specified default stays.}
+\label{fig:M2_02_data_treatment}\label{fig:app:m2-treatment}
+\end{figure}
+
+\gentab{m2/m2_data_treatment}
+
+% ------------------------------------------------------------------------------------------------------------
+\subsection{Feature-family ablation}\label{app:m2:families}
+
+\paragraph{Design.} Each family is dropped in turn, or kept alone, in two designs
+(Figure~\ref{fig:M2_03_families}; Table~\ref{tab:m2_data_treatment}, lower rows). With mirror augmentation the
+family is the \R{m2/fam_families_aug_size} comparisons with all families. Augmentation zeroes the even
+features, so this design tests only the mirror-sensitive part of each family. Without mirroring every feature
+can carry weight; this family has \R{m2/fam_families_nomirror_size} comparisons with all families without
+mirroring.
+
+\paragraph{Results.} The \code{xcorr} family is the only one whose removal worsens the log loss after the
+adjustment, both with augmentation (\Rcib{m2/lr_drop_xcorr_d_ll}, Holm $p = \R{m2/lr_drop_xcorr_p_ll_holm}$)
+and without mirroring (\Rcib{m2/lrnm_drop_xcorr_d_ll}, Holm $p = \R{m2/lrnm_drop_xcorr_p_ll_holm}$). Alone, it
+almost matches all families: \R{m2/lr_only_xcorr_accuracy} against \R{m2/lr_full_accuracy}, log loss
+\Rcib{m2/lr_only_xcorr_d_ll} (Holm $p = \R{m2/lr_only_xcorr_p_ll_holm}$). Every other single family has a worse
+log loss than all families after the adjustment, in both designs. Dropping \code{wavelet} or \code{global}
+with augmentation is identical to the default, because both carry zero weight.
+
+\paragraph{Even families and an abstaining ablation.} The \code{wavelet} family alone with augmentation has no
+mirror-sensitive feature, so it returns $\pright = 0.5$ for every trial. It abstains on every trial: it has no
+answered trial and no forced choice, and its \R{m2/lr_only_wavelet_accuracy} is the half credit of the
+abstentions, not evidence about the family. Without mirroring the even families are tested properly: alone,
+\code{wavelet} reaches \Rci{m2/lrnm_only_wavelet_accuracy} and \code{global} \Rci{m2/lrnm_only_global_accuracy},
+both at chance (the CIs include one half).
+
+\paragraph{Decision.} Keep every family (the pre-specified default). The families overlap, \code{xcorr}
+carries the most information that the others do not, and the redundancy costs little in a penalised model. Its
+odd correlations pair a chiral channel with a mirror-even one.
+
+\begin{figure}[tbp]
+\centering
+\genfig{m2/M2_03_families}
+\caption{Feature-family ablation of the L2 LR with mirror augmentation (top; numbers: mirror-sensitive / all
+features of the family) and without mirroring (bottom). Left: log-loss change when one family is dropped
+(paired 95\,\% CI; orange: Holm-adjusted $p < 0.05$ within the design's family; open: identical within solver
+precision). Right: accuracy of each family alone; dashed: all families. Only dropping \code{xcorr} hurts; the
+\code{wavelet} family alone abstains under augmentation.}
+\label{fig:M2_03_families}\label{fig:app:m2-families}
+\end{figure}
+
+\FloatBarrier
+% ------------------------------------------------------------------------------------------------------------
+\subsection{Mirror handling}\label{app:m2:mirror}
+
+\paragraph{Options.} (i) None. (ii) Augmentation: every training trial also enters mirrored, through the exact
+feature map, with the opposite label \cite{um2017augmentation}. (iii) The antisymmetric wrapper, which forces
+$\pright$ of a mirrored trial to be one minus that of the original:
+\begin{equation}
+  p(\mathbf{x}) = \tfrac{1}{2}\bigl(f(\mathbf{x}) + 1 - f(m(\mathbf{x}))\bigr),
+  \label{eq:m2-antisym}
+\end{equation}
+where $f$ is the fitted model and $\mathbf{x}$ the feature vector. (iv) Both. The LR was run with all four,
+LGBM with none and augmentation. The comparisons belong to the data-treatment family of
+\R{m2/fam_data_treatment_size} (LR) and to a family of \R{m2/fam_mirror_lgbm_size} comparison (LGBM).
+
+\paragraph{Evidence.} Figure~\ref{fig:M2_04_mirror}. Without mirroring, the LR changes the log loss by
+\Rcib{m2/lr_mirror_none_d_ll} (Holm $p = \R{m2/lr_mirror_none_p_ll_holm}$) and the accuracy by
+\Rcib{m2/lr_mirror_none_d_acc}~points (Holm $p = \R{m2/lr_mirror_none_p_acc_holm}$): not different after the
+adjustment. The wrapper alone does not differ either (log loss \Rcib{m2/lr_mirror_anti_d_ll}, Holm
+$p = \R{m2/lr_mirror_anti_p_ll_holm}$). Augmentation plus the wrapper is identical to augmentation alone
+(largest $|\Delta\pright|$ \R{m2/lr_mirror_both_max_dp}; \R{m2/lr_mirror_both_class_changes} trials change
+hand): an augmented linear model is already antisymmetric. For LGBM, dropping the augmentation worsens the log
+loss by \Rcib{m2/lgbm_mirror_none_d_ll} (Holm $p = \R{m2/lgbm_mirror_none_p_ll_holm}$), with an accuracy change
+of \Rcib{m2/lgbm_mirror_none_d_acc}~points (Holm $p = \R{m2/lgbm_mirror_none_p_acc_holm}$).
+
+\paragraph{Left-handers.} Only \R{m2/mh_lr_full_left_persons} persons are left-handed, so they are shown
+individually. With augmentation, the LR scores \R{m2/mh_lr_full_p11} on P11 and \R{m2/mh_lr_full_p17} on P17;
+without mirroring, \R{m2/mh_lr_mirror_none_p11} and \R{m2/mh_lr_mirror_none_p17}. Two persons give no evidence
+either way. The \R{m2/mh_lr_full_right_persons} right-handers score \Rci{m2/mh_lr_full_right_acc} with
+augmentation and \Rci{m2/mh_lr_mirror_none_right_acc} without.
+
+\paragraph{Decision.} Keep augmentation (pre-specified). It builds in the symmetry that the physics predicts
+(Section~\ref{sec:physics}), no option beats it, and LGBM is worse without it.
+
+\begin{figure}[tbp]
+\centering
+\genfig{m2/M2_04_mirror}
+\caption{Mirror handling: none, augmentation, the antisymmetric wrapper (Eq.~\ref{eq:m2-antisym}) and both, for the
+L2 LR (blue) and LGBM (orange; none and augmentation only). Left and middle: accuracy and log loss with 95\,\%
+CIs. Right: accuracy of the \R{m2/mh_lr_full_right_persons} right-handed persons (with CI) and of each of the
+\R{m2/mh_lr_full_left_persons} left-handed persons (open squares, no CI). Augmentation is kept.}
+\label{fig:M2_04_mirror}\label{fig:app:m2-mirror}
+\end{figure}
+
+% ------------------------------------------------------------------------------------------------------------
+\subsection{Learning curve}\label{app:m2:learning}
+
+\paragraph{Design.} Inside every outer fold, the default LR is trained on a random subset of 4, 8, 12 or 16 of
+the training persons, with \R{m2/lc_reps_planned} seeded repetitions per size; the held-out person is always
+scored (Figure~\ref{fig:M2_05_learning_curve}, Table~\ref{tab:m2_learning_curve}).
+
+\paragraph{Result.} The mean accuracy is \R{m2/lc_n04_acc_mean} (range \R{m2/lc_n04_acc_min} to
+\R{m2/lc_n04_acc_max}) with 4 training persons, \R{m2/lc_n16_acc_mean} (range \R{m2/lc_n16_acc_min} to
+\R{m2/lc_n16_acc_max}) with 16 and \R{m2/lc_all_acc} with all \R{m2/lc_all_persons}. The mean log loss falls
+from \R{m2/lc_n04_ll_mean} to \R{m2/lc_n16_ll_mean} and \R{m2/lc_all_ll}. From 16 persons to all, the accuracy
+changes by \Rb{m2/lc_last_step_acc}~points, within the range of the 16-person repetitions, while the log loss
+changes by \R{m2/lc_last_step_ll}, outside their range. The accuracy has flattened while the probabilities
+still sharpen: more persons would mainly improve the log loss. This reading is tentative: the full size is a
+single run, and the subsets share persons.
+
+\begin{figure}[tbp]
+\centering
+\genfig{m2/M2_05_learning_curve}
+\caption{Learning curve of the default L2 LR: training persons subsampled inside every outer fold
+(\R{m2/lc_reps_planned} seeded repetitions per size; band: range; line: mean); the held-out person is always
+scored. The right-most point uses every training person (one run, 95\,\% CI). Accuracy flattens; the log loss
+still falls.}
+\label{fig:M2_05_learning_curve}\label{fig:app:m2-learning}
+\end{figure}
+
+\gentab{m2/m2_learning_curve}
+
+% ------------------------------------------------------------------------------------------------------------
+\subsection{What drives the predictions}\label{app:m2:importance}
+
+\paragraph{Method.} The importance of a feature group is its share of the mean absolute contribution to the
+logit on held-out persons, aggregated over the folds (Figure~\ref{fig:M2_06_importance}). For the LR the
+contribution is the coefficient times the scaled feature value; for LGBM it is the tree's additive contribution
+(TreeSHAP). A correlation feature is split equally between its two channels. These are associations on
+held-out persons, not causal effects.
+
+\paragraph{Result.} For the default LR, \code{xcorr} carries \R{m2/imp_lr_full_fam_xcorr}, \code{bins}
+\R{m2/imp_lr_full_fam_bins}, \code{stats} \R{m2/imp_lr_full_fam_stats}, \code{fft} \R{m2/imp_lr_full_fam_fft}
+and \code{cumint} \R{m2/imp_lr_full_fam_cumint}; \code{wavelet} and \code{global} carry
+\R{m2/imp_lr_full_fam_wavelet} and \R{m2/imp_lr_full_fam_global}, as augmentation implies. The leading channels are the yaw rate about gravity
+(\R{m2/imp_lr_full_ch_yaw_rate}), the cumulative yaw (\R{m2/imp_lr_full_ch_yaw_cum}), the device $x$
+acceleration (\R{m2/imp_lr_full_ch_acc_x}) and the device $z$ rotation rate (\R{m2/imp_lr_full_ch_gyro_z}). Odd
+features carry \R{m2/imp_lr_full_parity_odd}, swapped pairs \R{m2/imp_lr_full_parity_swap} and even features
+\R{m2/imp_lr_full_parity_even}. For LGBM, \code{bins} (\R{m2/imp_lgbm_fam_bins}) and \code{xcorr}
+(\R{m2/imp_lgbm_fam_xcorr}) lead, the cumulative yaw is the top channel (\R{m2/imp_lgbm_ch_yaw_cum}), and even
+features carry \R{m2/imp_lgbm_parity_even}: trees can use them in interaction with odd ones. The yaw about
+gravity leads, as the physics predicts (Section~\ref{sec:physics}; Appendix~\ref{app:m1}).
+
+\paragraph{Caveat: the device frame.} The device-frame channels carry \R{m2/imp_lr_full_frame_device} of the
+LR's contributions and \R{m2/imp_lgbm_frame_device} of LGBM's. They depend on the grip. Lane final tests this
+by training on upright grips only (Appendix~\ref{app:final}): on the rotated grips the default LR falls to
+\R{final/rob_m2_lr_grip} (\Rb{final/rob_m2_lr_grip_d}~points, Holm $p$~\R{final/rob_m2_lr_grip_holm}), LGBM changes by
+\Rb{final/rob_m2_lgbm_grip_d}~points (Holm $p = \R{final/rob_m2_lgbm_grip_holm}$) and the stack by
+\Rb{final/rob_m2_stack_grip_d}~points (Holm $p = \R{final/rob_m2_stack_grip_holm}$), each Holm-adjusted within
+lane final's robustness family. Lane final therefore excludes these models as not robust.
+
+\begin{figure}[tbp]
+\centering
+\genfig{m2/M2_06_importance}
+\caption{What drives the predictions on held-out persons: share of the mean absolute contribution to the logit
+(L2 LR: coefficient times scaled value; LGBM: TreeSHAP), by feature family (left) and by channel (right, top
+10; a correlation pair is split equally between its channels). The yaw about gravity leads; the device-frame
+channels carry a large share.}
+\label{fig:M2_06_importance}\label{fig:app:m2-importance}
+\end{figure}
+
+\FloatBarrier
+% ------------------------------------------------------------------------------------------------------------
+\subsection{Calibration}\label{app:m2:calibration}
+
+\paragraph{Method.} The expected calibration error (ECE) uses \R{m2/ece_bins} equal-mass bins. It is judged
+against its perfect-calibration null band: the ECE that outcomes drawn from Bernoulli(\pright) would give with
+the same predictions (trials independent, so a lower bound on the noise). No percentile bootstrap CI of the ECE
+is used, because resampling inflates the ECE. The calibration slope and the CITL of a logistic recalibration
+come with person-bootstrap 95\,\% CIs; perfect calibration gives 1 and 0.
+
+\paragraph{Detection.} The nested selection has an ECE of \R{m2/cal_select_none_ece} (null 97.5th percentile
+\R{m2/cal_select_none_ece_null_hi}), a slope of \Rci{m2/cal_select_none_slope} and a CITL of
+\Rci{m2/cal_select_none_citl}. The default LR has an ECE of \R{m2/cal_lr_full_none_ece} (null 97.5th
+percentile \R{m2/cal_lr_full_none_ece_null_hi}), a slope of \Rci{m2/cal_lr_full_none_slope} and a CITL of
+\Rci{m2/cal_lr_full_none_citl}. LGBM has an ECE of \R{m2/cal_lgbm_none_ece} (null 97.5th percentile
+\R{m2/cal_lgbm_none_ece_null_hi}), a slope of \Rci{m2/cal_lgbm_none_slope} and a CITL of
+\Rci{m2/cal_lgbm_none_citl}; the stack an ECE of \R{m2/cal_ens_stack_none_ece} (null 97.5th percentile
+\R{m2/cal_ens_stack_none_ece_null_hi}), a slope of \Rci{m2/cal_ens_stack_none_slope} and a CITL of
+\Rci{m2/cal_ens_stack_none_citl} (Table~\ref{tab:m2_calibration}; Figure~\ref{fig:M2_07_calibration}). No model
+shows detectable miscalibration: every slope CI includes 1, every CITL CI includes 0 and every ECE lies within
+its null band.
+
+\paragraph{Remedies.} Per model, \R{m2/cal_select_n_calibrators} calibrators were tried: Platt scaling \cite{platt1999probabilistic}, temperature
+scaling \cite{guo2017calibration}, isotonic regression, beta calibration and a Platt map per platform. Each is
+fitted inside every outer fold on cross-fitted predictions of the training persons and applied to the held-out
+person. They are compared with the uncalibrated model by paired log-loss and Brier differences, Holm-adjusted
+over the \R{m2/cal_select_n_calibrators} calibrators of a model (Figure~\ref{fig:M2_12_calibration_remedies}).
+None lowers the log loss after the adjustment. The best for the selection is beta calibration
+(\Rcib{m2/cal_select_beta_d_ll}, Holm $p = \R{m2/cal_select_beta_p_ll_holm}$), for the default LR beta
+calibration (\Rcib{m2/cal_lr_full_beta_d_ll}, Holm $p = \R{m2/cal_lr_full_beta_p_ll_holm}$) and for LGBM
+temperature scaling (\Rcib{m2/cal_lgbm_temperature_d_ll}, Holm $p = \R{m2/cal_lgbm_temperature_p_ll_holm}$).
+Decision: every model stays uncalibrated.
+
+\paragraph{Platforms.} For the selection, the Android persons (\R{m2/cal_select_none_android_n_persons}) have a
+slope of \Rci{m2/cal_select_none_android_slope}, a CITL of \Rci{m2/cal_select_none_android_citl} and an ECE of
+\R{m2/cal_select_none_android_ece} (null 97.5th percentile \R{m2/cal_select_none_android_ece_null_hi}). The iOS
+persons (\R{m2/cal_select_none_ios_n_persons}) have a slope of \Rci{m2/cal_select_none_ios_slope}, a CITL of
+\Rci{m2/cal_select_none_ios_citl} and an ECE of \R{m2/cal_select_none_ios_ece} (null 97.5th percentile
+\R{m2/cal_select_none_ios_ece_null_hi}). A platform-specific Platt map against one global map changes the log
+loss by \Rcib{m2/cal_select_platt_platform_vs_platt_d_ll} for the selection (Holm
+$p = \R{m2/cal_select_platt_platform_vs_platt_p_ll_holm}$) and by
+\Rcib{m2/cal_lr_full_platt_platform_vs_platt_d_ll} for the default LR (Holm
+$p = \R{m2/cal_lr_full_platt_platform_vs_platt_p_ll_holm}$), adjusted over the
+\R{m2/cal_select_platt_platform_vs_platt_family_size} analysed models (Figure~\ref{fig:M2_08_calibration_platform};
+Table~\ref{tab:m2_calibration_platform}). There is no evidence that the platforms need different maps, but the
+comparison is underpowered (\R{m2/cal_select_none_ios_n_persons} iOS persons).
+
+\begin{figure}[tbp]
+\centering
+\genfig{m2/M2_07_calibration}
+\caption{Reliability of the uncalibrated models on held-out persons (\R{m2/ece_bins} equal-mass bins; band: 95\,\% interval of
+the observed share; dashed: perfect calibration). Text: ECE with the 97.5th percentile of its perfect-calibration
+null, and the calibration slope with its 95\,\% CI. No model shows detectable miscalibration.}
+\label{fig:M2_07_calibration}\label{fig:app:m2-calibration}
+\end{figure}
+
+\begin{figure}[tbp]
+\centering
+\genfig{m2/M2_12_calibration_remedies}
+\caption{Post-hoc calibrators fitted inside every outer fold on cross-fitted predictions of the training
+persons: paired per-person differences against the uncalibrated model in log loss (left) and Brier score
+(right), 95\,\% CIs (below 0: better). Open markers: not significant after Holm over the
+\R{m2/cal_select_n_calibrators} calibrators of a model, which is every case. Every model stays uncalibrated.}
+\label{fig:M2_12_calibration_remedies}\label{fig:app:m2-remedies}
+\end{figure}
+
+\begin{figure}[tbp]
+\centering
+\genfig{m2/M2_08_calibration_platform}
+\caption{Calibration per platform (Android \R{m2/cal_select_none_android_n_persons} persons, iOS
+\R{m2/cal_select_none_ios_n_persons}): calibration slope with 95\,\% CI (left), ECE against its
+perfect-calibration null band (middle) and the paired log-loss difference of a per-platform Platt map against
+one global map (right; below 0: the per-platform map helps). No evidence for different maps; underpowered.}
+\label{fig:M2_08_calibration_platform}\label{fig:app:m2-platform}
+\end{figure}
+
+\gentab{m2/m2_calibration}
+
+\gentab{m2/m2_calibration_platform}
+
+\FloatBarrier
+% ------------------------------------------------------------------------------------------------------------
+\subsection{Breakdowns and persons}\label{app:m2:breakdown}
+
+\paragraph{Strata.} Conditions, handedness, flags and the predictor gates stratify the predictions only; they
+are never inputs. A stratum gets a CI only with at least 5 persons (Figure~\ref{fig:M2_09_breakdown};
+Table~\ref{tab:m2_breakdown}). The strata are descriptive, not tests of the conditions. Android
+(\R{m2/bd_select_platform_android_persons} persons) reaches \Rci{m2/bd_select_platform_android_acc} and iOS
+(\R{m2/bd_select_platform_ios_persons}) \Rci{m2/bd_select_platform_ios_acc}. The top-right grip reaches
+\Rci{m2/bd_select_orientation_top_right_toward_acc}, against \Rci{m2/bd_select_orientation_top_left_toward_acc}
+for the top-left grip and \Rci{m2/bd_select_orientation_upright_toward_acc} upright. The lowest stratum with at
+least 5 persons is the twist variant: \Rci{m2/bd_select_variant_twist_acc}
+(\R{m2/bd_select_variant_twist_n} trials, \R{m2/bd_select_variant_twist_persons} persons). Trials that fail the
+predictor gates (\R{m2/bd_select_gate_pass_fail_n} trials of \R{m2/bd_select_gate_pass_fail_persons} persons)
+reach \Rci{m2/bd_select_gate_pass_fail_acc}, against \Rci{m2/bd_select_gate_pass_pass_acc} for those that pass.
+
+\paragraph{Small strata, person by person.} The bent-start variant has \R{m2/bd_select_variant_bent_start_persons} persons: P01
+\R{m2/bdp_select_variant_bent_start_p01}, P09 \R{m2/bdp_select_variant_bent_start_p09}, P13
+\R{m2/bdp_select_variant_bent_start_p13} and P15 \R{m2/bdp_select_variant_bent_start_p15}. The left-handers
+score \R{m2/bdp_select_handedness_left_p11} (P11) and \R{m2/bdp_select_handedness_left_p17} (P17). The trials
+flagged for a grip mismatch score \R{m2/bdp_select_grip_mismatch_flagged_p05} (P05),
+\R{m2/bdp_select_grip_mismatch_flagged_p09} (P09) and \R{m2/bdp_select_grip_mismatch_flagged_p16} (P16); those
+flagged for possible clipping \R{m2/bdp_select_clip_candidate_flagged_p01} (P01) and
+\R{m2/bdp_select_clip_candidate_flagged_p20} (P20); the screen-rotated trials
+\R{m2/bdp_select_screen_rotated_flagged_p14} (P14).
+
+\paragraph{Persons.} Per-person accuracy, not the pooled mean, is what a new user experiences
+(Figure~\ref{fig:M2_10_persons}). Under the nested selection the median person scores
+\R{m2/pp_select_median}, the lowest \R{m2/pp_select_min} (\R{m2/pp_select_min_person}), and
+\R{m2/select_below80} of \R{m2/pp_select_n} persons score below 80\,\%. The same person is lowest under the
+default LR (\R{m2/pp_lr_full_min}, \R{m2/pp_lr_full_min_person}).
+
+\begin{figure}[tbp]
+\centering
+\genfig{m2/M2_09_breakdown}
+\caption{Accuracy of the nested selection by stratum (strata used after prediction only). 95\,\% CI only for
+strata with at least 5 persons; smaller strata show each person (open circles; an arrow marks a person below
+the axis) and the pooled value (diamond). Dashed: overall. Right: trials / persons.}
+\label{fig:M2_09_breakdown}\label{fig:app:m2-breakdown}
+\end{figure}
+
+\begin{figure}[tbp]
+\centering
+\genfig{m2/M2_10_persons}
+\caption{Accuracy of every held-out person, sorted by the nested selection (solid) with the default L2 LR
+(light); colour: platform; dashed: 80\,\%. \R{m2/select_below80} of \R{m2/pp_select_n} persons fall below 80\,\%
+under the nested selection.}
+\label{fig:M2_10_persons}\label{fig:app:m2-persons}
+\end{figure}
+
+\gentab{m2/m2_breakdown}
+
+\FloatBarrier
+% ------------------------------------------------------------------------------------------------------------
+\subsection{Several attempts and the displayed probability}\label{app:m2:attempts}
+
+\paragraph{Question.} Production may combine k attempts of one person and hand. Two choices follow: which
+aggregate decides the hand, and which probability is shown. Here k held-out primary trials of the same person
+and hand stand in for k attempts. The analysis uses the \R{m2/ka_select_n_persons} persons with at least 5
+trials of each hand (Figure~\ref{fig:M2_11_k_attempts}; Table~\ref{tab:m2_k_attempts}).
+
+\paragraph{Options.} Four aggregates of the k attempts: the mean \pright, the mean logit, the sum of logits
+(attempts as independent evidence) and the tempered sum $\sum_i z_i/\tauk$, where $z_i$ is the logit of attempt
+$i$. The scale \tauk{} is fitted inside each outer fold on cross-fitted predictions of the training persons, so
+the held-out person never informs its own \tauk.
+
+\paragraph{Decision accuracy.} Averaging \pright{} raises the per-person balanced accuracy of the nested
+selection. It is \Rci{m2/select_acc_k1} with one attempt, \Rci{m2/select_acc_k3} with three and
+\Rci{m2/select_acc_k5} with five.
+
+\paragraph{Displayed probability.} At $k = 5$ the log loss is \Rci{m2/ka_select_k5_meanp_ll} for the mean
+\pright, \Rci{m2/ka_select_k5_meanlogit_ll} for the mean logit, \Rci{m2/ka_select_k5_sum_ll} for the sum of
+logits and \Rci{m2/ka_select_k5_tempered_ll} for the tempered sum. The confidence gap (mean confidence minus
+share correct) is \Rci{m2/ka_select_k5_meanp_gap}, \Rci{m2/ka_select_k5_meanlogit_gap},
+\Rci{m2/ka_select_k5_sum_gap} and \Rci{m2/ka_select_k5_tempered_gap}, respectively: the mean \pright{} and the
+mean logit are under-confident, while the CIs of the two sums include 0. Over the three pairwise comparisons at
+$k = 5$ (Holm), the tempered sum has a lower log loss than the mean \pright{}
+(\Rcib{m2/ka_select_k5_tempered_vs_meanp_d_ll}, Holm $p = \R{m2/ka_select_k5_tempered_vs_meanp_p_holm}$), but not
+than the plain sum
+(\Rcib{m2/ka_select_k5_tempered_vs_sum_d_ll}, Holm $p = \R{m2/ka_select_k5_tempered_vs_sum_p_holm}$). The
+median $\tau_5$ is \R{m2/ka_select_tau_k5}: five attempts carry about \R{m2/ka_select_eff_k5} independent
+attempts' worth of evidence.
+
+\paragraph{Decision.} Decide with the mean \pright{} (the accuracy curve) and display the tempered sum, which
+has the lowest log loss. The aggregates were checked by the confidence gap only, without a slope, intercept or
+ECE null band, so this is weaker evidence than the single-attempt calibration above. Caveat: \tauk{} is fitted
+on inner predictions from models trained on fewer persons than the final ones. If those predictions are less
+confident, the tempered sum can be slightly over-confident on new persons. The production pipeline combines
+attempts with its own classifier and stopping rule (Appendix~\ref{app:prod}).
+
+\begin{figure}[tbp]
+\centering
+\genfig{m2/M2_11_k_attempts}
+\caption{k attempts of one person and hand (\R{m2/ka_select_n_persons} persons). Left: per-person balanced
+accuracy of the mean \pright{} (band: 95\,\% CI of the nested selection). Middle and right: log loss and
+confidence gap (above 0: over-confident) of four aggregates for the nested selection, with 95\,\% CIs. Decide
+with the mean \pright; display the tempered sum.}
+\label{fig:M2_11_k_attempts}\label{fig:app:m2-attempts}
+\end{figure}
+
+\gentab{m2/m2_k_attempts}
+
+% ------------------------------------------------------------------------------------------------------------
+\subsection{Caveats}\label{app:m2:caveats}
+
+\begin{itemize}
+  \item With \R{describe/n_persons} persons every CI is wide; differences of a point or two between pipelines are
+  not resolved.
+  \item Only the nested selection and the pre-specified default are headline-grade. The model comparison, the
+  calibrators and the ablations are exploratory; every result records its number of configurations compared.
+  \item The features use the oracle (app) segmentation. Production sees detected windows, and the approach
+  features inherit any segmentation error there.
+  \item The free-choice trials use one hand only: they give a right-hand recall, not a calibration or accuracy
+  check over both hands.
+  \item The experiments use \R{m2/n_boot} person resamples, the derived intervals (strata, platforms, slopes)
+  \R{m2/n_boot_derived} and the multi-attempt intervals \R{m2/n_boot_attempts}.
+  \item Open: does per-trial amplitude normalisation hold on detected windows?
+\end{itemize}
+
+\FloatBarrier
