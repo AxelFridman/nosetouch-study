@@ -1,0 +1,82 @@
+{
+ "M1_01_feature_catalogue": {
+  "caption": "Univariate leave-one-person-out AUC of every catalogue feature (71 features, 598 trials of 20 persons) with the direction-only rule P(right) = sigmoid(s x / RMS(x)): its direction s and scale are fitted on the training persons, with no intercept (an intercept would track the training class balance and bias the pooled AUC below 0.5), so for an odd feature the decision is its sign; bars give the share of persons whose own trials the feature orders correctly more often than not. Odd (chiral) features reach AUC up to 0.87 (latvel_q75); even features stay between 0.46 and 0.53. An AUC below 0.5 means that the direction learned on the other persons fails on the held-out person: for an uninformative feature the learned direction flips from fold to fold (12 features change direction across folds).",
+  "decision": "Only mirror-odd features carry the hand: models are built from chiral features, and even descriptors enter at most as modulators (57 odd, 14 even features).",
+  "file": "M1_01_feature_catalogue.pdf"
+ },
+ "M1_02_chiral_components": {
+  "caption": "Mean time course of the three chiral components of the movement, per hand (mean over persons of each person's mean; 20 persons; bands: person-bootstrap 95 % CI). Top: rates; bottom: their integrals over the approach. Dashed: the left-hand mean mirrored (sign flipped). Yaw is rotation about gravity, roll the rotation about the horizontal axis through the screen, lateral the acceleration towards the person's right.",
+  "decision": "The hand shows in three mirror-odd components with different timing: the right-minus-left difference of the mean rate peaks for roll at 16 %, yaw at 27 % and lateral at 49 %. The PHYS6 feature set takes each component at the half and at the end of the approach.",
+  "file": "M1_02_chiral_components.pdf"
+ },
+ "M1_03_key_distributions": {
+  "caption": "Per-hand distributions of key features (clipped at the 1th and 99th percentiles for display). Odd features shift in opposite directions for the two hands; even ones overlap. Titles: leave-one-person-out AUC of the feature alone (yaw_q50 0.85, yaw_q100 0.76, latvel_q75 0.87, roll_q25 0.67, duration_s 0.52 and peak_gyro 0.52).",
+  "decision": "Even descriptors (duration_s AUC 0.52 and peak_gyro AUC 0.52) cannot tell the hand alone; they are candidates only for modulating chiral slopes.",
+  "file": "M1_03_key_distributions.pdf"
+ },
+ "M1_04_channel_sets": {
+  "caption": "Antisymmetric logistic models (no intercept, odd features, L2 strength chosen on inner person splits) on one component (yaw, roll, lateral; each at the half and the end of the approach), on pairs, on all three (PHYS6), with the set chosen inside every fold, on every chiral approach feature, with features chosen in-fold, and on three windows: absolute time after the onset, the lead-in before the onset and the still hold before it (negative control, grey). PHYS6: 81.9 % [77.0, 87.1].",
+  "decision": "Which components to keep: adding roll to yaw and lateral changes nothing measurable (yaw + lateral against PHYS6: -0.2 points [-1.9, +1.7], p 0.96, Holm 1; log loss +0.005 [-0.017, +0.030], p 0.7, Holm 1); chosen inside the folds, the set is phys6 in 18 of 20 folds (-0.3 points [-1.4, +0.5], p 1, Holm 1; log loss +0.005 [-0.010, +0.026], p 1, Holm 1 against PHYS6); the still hold before the onset is not at chance (AUC 0.627 [0.576, 0.679]): the held phone already carries a weak chiral trace of the hand.",
+  "file": "M1_04_channel_sets.pdf"
+ },
+ "M1_05_model_ladder": {
+  "caption": "Accuracy and log loss of the interpretable models (grey: rules; blue: fitted models; black: the reference floor, dotted line). Every hyperparameter is chosen on inner person splits; the zero-parameter rule outputs 0 or 1 and has no finite log loss. Dashed: the log loss of a constant 0.5. Finalists are marked with a diamond.",
+  "decision": "Against the reference floor, 8 of the 16 models shown are more accurate beyond the unadjusted paired 95 % CI and 1 after the Holm correction over all 54 m1 models paired with it. Among the models shown the lowest log loss is PHYS6, data treatment chosen in-fold (0.423), tied with PHYS6, asinh-compressed tails.",
+  "file": "M1_05_model_ladder.pdf"
+ },
+ "M1_06_temporal_filter": {
+  "caption": "Coefficient profiles of antisymmetric logistic \"temporal filters\" on the binned chiral rates (16 bins of the time-normalised approach; one scale per channel, so weights compare across time): median over the 20 leave-one-person-out folds, band 10th to 90th percentile across folds. A positive weight means a positive (counter-clockwise, rightward) rate in that bin argues for the right hand.",
+  "decision": "Yaw-rate evidence: mean weight +0.28 in the first half of the approach and +0.02 in the second, where it turns negative from 78 % (the turn back): features must be time-resolved, not whole-movement integrals.",
+  "file": "M1_06_temporal_filter.pdf"
+ },
+ "M1_07_tree": {
+  "caption": "Left: the shallow tree with the hyperparameters chosen most often in the folds (10 of 20), refitted on every trial and its mirror image (for illustration; the reported accuracy comes from the per-fold trees, whose predictions are symmetrised); a leaf shows P(right) and its number of (augmented) training rows. Right: how often each feature is split on across the fold trees.",
+  "decision": "The tree splits mostly on chiral features (even features used: tilt_rate_mean); its first question (latvel_q75) is the same in 20 of 20 folds, so the rule is stable enough to be drawn and explained.",
+  "file": "M1_07_tree.pdf"
+ },
+ "M1_08_gam_shapes": {
+  "caption": "Shape functions of the GAM on PHYS6 (cubic splines, mirror-augmented and symmetrised; number of knots and L2 strength chosen on inner splits): median over the 20 folds and the range across folds (training 2-98 % range of each fold), in the units of each feature. Contributions are 0 at a zero feature value (odd shapes).",
+  "decision": "The median shapes are steepest around zero: the slope over the outer fifths of the range is smaller than the central slope for 6 of 6 features and reverses its sign for 4 (yaw_q50, yaw_q100, latvel_q50 and latvel_q100): beyond the bulk of the trials a larger value adds no further evidence (knots chosen: 7 in 7 folds and 9 in 13 folds). Against the linear PHYS6 model: log loss -0.030 [-0.089, +0.019], p 0.31, Holm 1, no difference after the Holm correction over its family.",
+  "file": "M1_08_gam_shapes.pdf"
+ },
+ "M1_09_per_person": {
+  "caption": "Leave-one-person-out accuracy of every person (20) with the small-model finalist (PHYS6, data treatment chosen in-fold; bars, coloured by platform) and per hand (ticks). * marks the left-handed persons.",
+  "decision": "Persons differ: from 65.6 % (P05) to 100.0 %; 3 persons are below 70 %.",
+  "file": "M1_09_per_person.pdf"
+ },
+ "M1_10_conditions": {
+  "caption": "Accuracy of the small-model finalist (PHYS6, data treatment chosen in-fold) by condition (strata after prediction; levels with at least 8 trials; person-bootstrap 95 % CIs only for levels with at least 5 persons). Conditions are never model inputs.",
+  "decision": "Where the model is weak: the lowest level with enough persons is variant curved (62.5 %, 16 trials).",
+  "file": "M1_10_conditions.pdf"
+ },
+ "M1_11_calibration": {
+  "caption": "Calibration of the PHYS6 antisymmetric logistic model and its remedies. Left, middle: reliability diagrams (10 equal-mass bins; band: person-bootstrap 95 % CI of the observed share; dashed: perfect calibration; circled: bins whose band misses the diagonal) of PHYS6 and of the small-model finalist (its data treatment chosen inside every fold). Right: the change of the log loss of each remedy against PHYS6 (paired person bootstrap; every post-hoc calibrator is fitted on the inner cross-fitted predictions of the training persons).",
+  "decision": "PHYS6 is miscalibrated: ECE 0.073 (null 95 % quantile 0.056, p 0.0015), 5 of 10 bins outside their band (4 under-, 1 over-confident; binomial p 6.4e-05); no post-hoc map lowers its log loss beyond the paired CI (Platt +0.005, temperature +0.003, isotonic +0.005 and beta +0.009); PHYS6, asinh-compressed tails: log loss -0.030 [-0.058, -0.005], ECE 0.047 (null 95 % quantile 0.053, p 0.14), 2 of 10 bins outside their band (2 under-, 0 over-confident; binomial p 0.086); PHYS6, data treatment chosen in-fold: log loss -0.030 [-0.058, -0.005], ECE 0.047 (null 95 % quantile 0.053, p 0.14), 2 of 10 bins outside their band (2 under-, 0 over-confident; binomial p 0.086).",
+  "file": "M1_11_calibration.pdf"
+ },
+ "M1_12_k_attempts": {
+  "caption": "Combining k attempts of one person and hand with PHYS6, data treatment chosen in-fold (19 persons with at least 5 trials per hand; 200 random draws per cell; bands: person-bootstrap 95 % CI; the ECE is shown without a band). The exponent alpha of k^(-alpha) x sum of logits is fitted on the inner cross-fitted predictions of the training persons (median over folds 0.25).",
+  "decision": "At k = 3: mean of P ECE 0.152 (under-confident), mean of logits ECE 0.115 (under-confident), sum of logits ECE 0.029 (over-confident) and k^(-alpha) x sum ECE 0.015 (no clear lean). Averaging P or logits of correlated attempts is under-confident here; fitted alpha minus the plain sum: log loss -0.008 [-0.031, +0.010], ECE -0.014 [-0.022, +0.017]: the two logit sums cannot be told apart, so the parameter-free sum of logits is preferred.",
+  "file": "M1_12_k_attempts.pdf"
+ },
+ "M1_13_data_treatment": {
+  "caption": "Each option against the PHYS6 antisymmetric logistic model on the same trials: scaling (none, robust), winsorising (clip at the training 99th percentile of |x|, asinh), per-trial amplitude normalisation, de-drifted lateral velocity, the treatment chosen inside every fold, mirror augmentation with an intercept, an unconstrained model with even descriptors, odd x even interactions, more features, in-fold selections, splines and the multi-channel temporal filter. Paired person bootstrap; text: Holm-adjusted p of the per-person log-loss difference over the 27 options paired with PHYS6.",
+  "decision": "No option lowers the log loss of PHYS6 after the Holm correction over the 27 options; beyond the unadjusted paired CI: PHYS6, asinh-compressed tails (log loss -0.030 [-0.058, -0.005], p 0.034, Holm 0.71) and PHYS6, data treatment chosen in-fold (log loss -0.030 [-0.058, -0.005], p 0.034, Holm 0.71). Worse after the correction: roll only, lead-in before the onset and negative control: still hold before the onset. Chosen inside every fold, the treatment is asinh in 20 of 20 folds (the nested model: +1.3 points [-0.4, +3.2], p 0.19, Holm 1; log loss -0.030 [-0.058, -0.005], p 0.034, Holm 0.71).",
+  "file": "M1_13_data_treatment.pdf"
+ },
+ "M1_14_failures": {
+  "caption": "Left: the mean yaw rate of correctly classified trials and of confident errors (P(true hand) < 0.2; 31 of 598 trials, PHYS6, data treatment chosen in-fold), by the instructed hand. Descriptive only: the errors are selected on this evidence, so their curves must look like the other hand. Right: share of confident errors over share of trials per condition, with the count of confident errors (1 = as often as among all trials).",
+  "decision": "Most over-represented: speed slow (6 of 31 confident errors against 7 % of the trials; Wilson [9, 36] %). Confident errors fall in 19 blocks against 27.5 expected within persons (p 0.0005): they cluster in blocks, as a hand swap for a whole block would make them.",
+  "file": "M1_14_failures.pdf"
+ },
+ "M1_15_finalist_calibration": {
+  "caption": "Reliability of the lane m1 finalists on the primary set (leave-one-person-out probabilities; equal-mass bins of P(right); band: person-bootstrap 95 % CI of the observed share of right hands; dashed: perfect calibration). Text: ECE with the 95th percentile of its perfect-calibration null, the calibration slope with its person-bootstrap CI, Brier score and log loss over all trials, and the ECE per platform. No calibration step is applied. The rule outputs its training hit rate q or 1 - q, with q fitted per fold, so equal-mass bins would only sort the folds by q; its panel shows the two decision groups instead (no band).",
+  "decision": "Fitted finalists: PHYS6, data treatment chosen in-fold: ECE 0.047 (null 95 % quantile 0.053, p 0.14), slope 1.04 [0.79, 1.43], 2 of 10 bins outside their band (2 under-, 0 over-confident; binomial p 0.086): consistent with calibration; GAM on PHYS6 (splines): ECE 0.028 (null 95 % quantile 0.052, p 0.84), slope 1.00 [0.77, 1.30], 0 of 10 bins outside their band (0 under-, 0 over-confident; binomial p 1): consistent with calibration.",
+  "file": "M1_15_finalist_calibration.pdf"
+ },
+ "M1_16_natural_transfer": {
+  "caption": "Natural use: does each component transfer to the free-choice trials? Left: for each chiral feature, the number of free-choice trials whose sign points to the reported hand (dot) against the number expected from the same persons' instructed trials of that hand (bar: 95 % range of the Poisson-binomial count; the direction of each person is learned on the other persons). Right: the mean logit contribution of each component of the small-model finalist towards the reported hand, on the free-choice trials and on the same persons' instructed trials of that hand (20 persons, one free-choice trial each).",
+  "decision": "Transfers worse than on the same persons' instructed trials (Holm over the 9 features): latvel_q75 10 of 20 against 16.4 expected (p 0.0031) and latvel_q100 11 of 20 against 16.3 expected (p 0.018). Yaw shows no such drop: yaw_q50 17 of 20 against 16.3 expected and yaw_q100 11 of 20 against 12.8 expected.",
+  "file": "M1_16_natural_transfer.pdf"
+ }
+}

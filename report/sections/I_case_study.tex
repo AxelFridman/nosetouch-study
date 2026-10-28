@@ -1,0 +1,416 @@
+% sections/I_case_study.tex: Lane x1 (descriptive only).
+% Numbers only through \R / \Rci; figures through \genfig, tables through \gentab (report/README.md).
+% One \subsection per decision group, so that each can be trimmed on its own.
+% Privacy (binding): PD01 only; an age range only; no sex or gendered pronouns, no height, device model,
+% dates, nationality or location; no model-performance number for PD01.
+\section{An exploratory case study: PD01}\label{app:pd01}
+
+This appendix describes how one participant with Parkinson's disease, PD01, performed the nose-touch task, compared with the \R{x1/n_ref_persons} modelling persons (the reference persons).
+It is descriptive and exploratory.
+PD01 never enters a model or a model comparison: no model was trained, tuned or scored on PD01's trials, and this appendix quotes no model output for PD01.
+Nothing here is a diagnostic claim.
+
+The main finding is that PD01 is \emph{unusual but not unique}.
+PD01 lies beyond every reference person in \R{x1/null_pre_lfl_case} of \R{x1/n_prespecified} pre-specified characteristics.
+A typical reference person, judged the same way against the other reference persons, lies beyond all of them in \R{x1/null_pre_lfl_ref_median}, and \R{x1/null_pre_lfl_n_ge} of the \R{x1/n_ref_persons} reach PD01's count (Appendix~\ref{app:pd01:null}).
+\R{x1/n_robust_prespecified} pre-specified differences survive every check that could overturn them; none survives the Benjamini--Hochberg adjustment over the pre-specified characteristics (Appendix~\ref{app:pd01:robust}).
+
+% -------------------------------------------------------------------------------------------------
+\subsection{The question, the participant and the quality-control caveats}\label{app:pd01:question}
+
+\textbf{Question.}
+The case study asks what PD01 does, when performing this task, that the reference persons do not.
+The comparison covers preparation and holding still, movement time and speed, amplitude, smoothness, band power of the angular velocity in the hold, the reach and at the nose, change across repeats, speed scaling, task behaviour, and the hand signature itself, read without a classifier.
+
+\textbf{The participant.}
+PD01 is in their fifties, decades older than every modelling person (reference ages \R{x1/ref_age_min} to \R{x1/ref_age_max} years).
+PD01 performed the task remotely and unsupervised, outside the group sessions, seated, with protocol version 2.0.0 and the app's street visit (Table~\ref{tab:protocol}).
+PD01 made \R{x1/case_n_sessions} short sessions of \R{x1/case_session1_minutes} and \R{x1/case_session2_minutes} minutes: the first ended early and the second was left in progress (reference sessions: \R{x1/ref_session_minutes_min} to \R{x1/ref_session_minutes_max} minutes, median \R{x1/ref_session_minutes_median}).
+PD01 therefore reached only protocol tiers \R{x1/case_tiers}, the start of a visit.
+No clinical score and no medication state were recorded.
+
+\textbf{The trials.}
+Of \R{x1/case_n_attempts} attempts, \R{x1/case_n_accepted} were accepted and analysable (Table~\ref{tab:x1_attempts}).
+The app rejected \R{x1/case_n_rejected}: \R{x1/case_rejected_no_movement} for no movement within the time limit after the GO cue and \R{x1/case_rejected_too_long} for still moving at the time limit.
+The accepted trials are \R{x1/case_n_free} free-choice trials, both with the right hand (reported), and \R{x1/case_n_primary} instructed left-hand trials with the upright grip, screen toward the face (\R{x1/case_n_primary_slow} slow, \R{x1/case_n_primary_natural} natural, \R{x1/case_n_primary_fast} fast).
+PD01's accepted trials carried \R{x1/case_false_starts} false starts in total.
+
+\gentab{x1/x1_attempts}
+
+\textbf{Same code path.}
+PD01's raw records live outside the main data snapshot.
+They were cached by the same loader, standardisation, flags, gates and exclusion cascade as the main data (Appendix~\ref{app:data:flags}), in a separate, git-ignored cache.
+A test checks that the builder code and parameters are identical, and that none of PD01's identifiers reaches the main curation or cache.
+
+\textbf{Quality-control caveats.}
+Six properties of the recording limit every statement below.
+\begin{itemize}[nosep]
+  \item \emph{Remote and unsupervised.} Nobody watched the visit; posture and grip are known only from the app's prompts and PD01's answers, and arm support was not recorded.
+  \item \emph{Clip flag.} The flag \code{clip_candidate} marks a raw specific force above \R{x1/clip_acc_g}\,g or an angular velocity above \R{x1/clip_gyro_dps}\,deg/s, where a sensor may have saturated. It is set on \R{x1/case_n_clip_accepted} of PD01's \R{x1/case_n_accepted} accepted trials (accelerometer \R{x1/case_n_clip_acc}, gyroscope \R{x1/case_n_clip_gyro}) and on \R{x1/case_n_clip_rejected} rejected attempt, against \R{x1/ref_n_clip_primary} of \R{x1/ref_n_primary} reference primary trials (\R{x1/ref_n_clip_persons} persons). PD01's acceleration magnitudes are therefore lower bounds, and every comparison is repeated without the flagged trials.
+  \item \emph{Rotation-rate mapping assumed, not verified.} In both of PD01's sessions the gyroscope axes use the assumed mapping of the W3C specification \cite{w3c2025deviceorientation}, not one verified by the app's gyro-gravity closure as in \R{x1/ref_n_rr_verified} of the \R{x1/ref_n_sessions} reference sessions (Appendix~\ref{app:data:conventions}). The closure still favours it: \R{x1/case_session1_rr_closure}\,deg against \R{x1/case_session1_rr_runner_up}\,deg for the next mapping in the first session, \R{x1/case_session2_rr_closure}\,deg against \R{x1/case_session2_rr_runner_up}\,deg in the second. The hand signature and the gravity-frame characteristics depend on this mapping.
+  \item \emph{Few trials.} PD01's values are means of \R{x1/case_min_trials} to \R{x1/case_max_trials} trials; the speed ratios rest on \R{x1/case_n_lua_slow} slow and \R{x1/case_n_lua_fast} fast trial.
+  \item \emph{Confounds.} Age, the phone (its sampling, noise floor and accelerometer range), phone mass, arm length, a seated posture with unknown arm support (reference: \R{x1/ref_sessions_sitting} sitting and \R{x1/ref_sessions_standing} standing sessions) and the hand all differ from the reference. Whether the instructed hand matched PD01's dominant or usual phone hand is not balanced against the reference. Nothing here separates the disease from these factors.
+  \item \emph{The first screen touch} is the first touch event after GO. It is recorded in \R{x1/case_touch_share} of PD01's left-hand upright natural trials and in \R{x1/touch_share_ref} of the reference trials, so the touch characteristics compare \R{x1/touch_acc_nref} reference persons. What touched the screen (face, finger or grip) is unknown.
+\end{itemize}
+
+% -------------------------------------------------------------------------------------------------
+\subsection{Windows, characteristics and phenomena}\label{app:pd01:characteristics}
+
+\textbf{Options.}
+PD01 could have been scored by the hand models of this report, or described by kinematic characteristics.
+Scoring was ruled out from the start: one case cannot support a performance claim, and a score invites a diagnostic reading.
+The lane therefore compares characteristics, each with a one-line kinematic rationale.
+
+\textbf{Windows.}
+Each trial gives three windows.
+The \emph{hold} is the \R{x1/pre_window_s}\,s before the movement onset; it lies inside the app's verified still window in \R{x1/pre_in_hold_share} of the reference trials, so it is a postural hold.
+The \emph{reach} is the stored approach (the oracle window; Appendix~\ref{app:data:segmentation}).
+\emph{At the nose} is the first \R{x1/nose_window_s}\,s after the approach ends, kept only when the return of the arm starts later; it exists in \R{x1/nose_window_share} of the reference trials.
+Two design limits follow.
+A hold that breaks the app's still gate restarts as a false start, so large hold movements never reach the hold window.
+The approach ends only after the phone is still, so the nose window describes only trials that became still (\R{x1/case_rejected_too_long} of PD01's rejections were still moving at the time limit).
+
+\textbf{Spectral resolution.}
+A window of $T$ seconds resolves $1/T$\,Hz: \R{x1/res_pre_resolution_hz}\,Hz in the hold, \R{x1/res_nose_resolution_hz}\,Hz at the nose and about \R{x1/res_approach_resolution_hz}\,Hz in a median reach of \R{x1/res_approach_median_duration_s}\,s.
+The Hann window spreads a tone over $\pm 2/T$\,Hz: a \R{x1/res_tone_hz}-Hz tone of RMS \R{x1/res_tone_rms}\,deg/s puts \R{x1/res_pre_leak_7_12}\,deg/s into the 7--12\,Hz band of the hold window and \R{x1/res_nose_leak_7_12}\,deg/s into that of the nose window.
+The 3--7 / 7--12\,Hz split of the short windows is therefore coarse.
+
+\textbf{Characteristics.}
+The lane compares \R{x1/n_characteristics} characteristics: \R{x1/n_prespecified} pre-specified and \R{x1/n_post_hoc} post hoc (marked * in every figure and table).
+They include:
+\begin{itemize}[nosep]
+  \item the band RMS (root mean square) of the angular-velocity vector in 3--7\,Hz (the band of parkinsonian rest tremor) and 7--12\,Hz (the band of physiological and action tremor), the spectral peak in 3--12\,Hz, and the 3--12\,Hz power relative to 0.5--3 and 12--15\,Hz in decibels. Band power is called a tremor only if the spectrum shows a peak, and nowhere in this appendix is it called one;
+  \item the reach as recorded and in a movement band (gyroscope low-passed at \R{x1/param_movement_lowpass_hz}\,Hz), which separates the voluntary reach from faster components; smoothness by the log dimensionless jerk and the spectral arc length (SPARC) \cite{melendezcalderon2021smoothness}; speed peaks and sub-movements; hesitations (at least \R{x1/param_hesitation_ms}\,ms below the app's still threshold of \R{x1/param_still_dps}\,deg/s);
+  \item the first screen touch: its time, its share of the approach, the rotation after it and the linear acceleration within \R{x1/param_contact_ms}\,ms of it;
+  \item the hand signature: the first-half and net yaw about gravity, mirror-normalised (Eq.~\ref{eq:mirror}) so that positive is the direction typical of the hand used. The hand label sets only this sign.
+\end{itemize}
+
+\textbf{Phenomena.}
+Characteristics that measure one thing count as one finding: for example the net rotation and the tilt change, or the time and the share of the approach of one touch.
+The \R{x1/n_phenomena} phenomena are declared by definition in the code, not by PD01's values.
+
+\textbf{Post hoc characteristics.}
+The first-touch characteristics, the active movement time, the settling time, the active-time ratio and the early yaw peak were defined after PD01's traces were inspected.
+The components of the hold power ratio, the 7--12\,Hz power per peak speed and the share of trials with the typical net-yaw sign were added after the audit, to test alternative explanations.
+They are hypotheses, not tests, and carry no $q$-value.
+
+% -------------------------------------------------------------------------------------------------
+\subsection{Matched comparisons and statistics}\label{app:pd01:statistics}
+
+\textbf{Strata.}
+Each characteristic is judged in one pre-declared stratum.
+The reach uses the left-hand upright natural-speed trials; the hold, the nose and the hand signature use all left-hand upright trials; the across-repeat measures use the first $k$ left-hand upright natural reaches in visit order, with $k = \R{x1/case_n_lua_natural}$, the number PD01 made; the speed scaling uses the slow and fast trials.
+Table~\ref{tab:x1_strata} gives every per-trial characteristic in every other stratum.
+
+\textbf{Statistics.}
+A person's value is the mean of their trials in the stratum.
+PD01's value $x$ is compared with the reference persons' values $r_1,\dots,r_n$ by the mid-rank percentile, the robust $z$ and the two-sided rank $p$:
+\begin{equation}
+  z = \frac{x - \operatorname{med}(r)}{1.4826\,\operatorname{MAD}(r)}, \qquad
+  p = \min\Bigl(1,\ \frac{2\min\{\#(r_j \ge x) + 1,\ \#(r_j \le x) + 1\}}{n+1}\Bigr),
+  \label{eq:pd01-z}
+\end{equation}
+where MAD is the median absolute deviation.
+The robust $z$ uses the characteristic's declared scale: log for strictly positive, right-skewed quantities, linear otherwise.
+With $n = \R{x1/n_ref_persons}$, the smallest possible rank $p$ is $2/(n+1) = \R{x1/p_floor}$: a rank test cannot reach $p < 0.05$ for one characteristic.
+The Crawford--Howell single-case $t$-test runs alongside, on the declared scale; it assumes normally distributed reference values.
+With fewer than \R{x1/min_ref} reference persons, no statistic is computed.
+This appendix gives no confidence intervals: with one case, every comparison is a rank among persons.
+
+\textbf{Multiplicity.}
+The comparison family is the \R{x1/n_prespecified} pre-specified characteristics, adjusted by Benjamini--Hochberg; the adjusted $p$ is called $q$.
+No pre-specified characteristic reaches $q < 0.05$ by either test: the smallest $q$ is \R{x1/min_q_rank} for the rank test and \R{x1/min_q_ch} for the Crawford--Howell test (smallest $p$ \R{x1/min_p_ch_prespecified}, \R{x1/min_p_ch_prespecified_label}).
+The smallest post hoc Crawford--Howell $p$ ($p < 0.001$ for the early yaw peak on the linear scale, \R{x1/posthoc_min_pch_alt} on the log scale) is not evidence: the characteristic was chosen after looking at PD01, and its $p$ depends on the scale.
+The rank $p$ of the count of differences (Appendix~\ref{app:pd01:null}) and of the Mahalanobis distance (Appendix~\ref{app:pd01:multivariate}) are single, unadjusted tests of the whole profile, outside the characteristic family.
+
+% -------------------------------------------------------------------------------------------------
+\subsection{Robustness: the checks that can overturn a difference}\label{app:pd01:robustness}
+
+\textbf{Options.}
+Five sensitivity analyses were run (Table~\ref{tab:x1_sensitivity}).
+Three recompute values and can overturn a ``beyond every reference person'' verdict:
+\emph{first k}, each reference person judged on their first $k$ matched trials, with $k$ PD01's count (equal averaging noise and practice);
+\emph{same protocol}, only reference trials of protocol 2.0.0 (\R{x1/ref_n_sessions_other_protocol} reference session with \R{x1/ref_n_trials_other_protocol} trials used the pilot protocol);
+and \emph{no clip}, PD01 and the reference without the clip-flagged trials.
+Two only drop reference persons: \emph{same posture} and \emph{same platform}.
+A value beyond all \R{x1/n_ref_persons} persons is beyond every subset of them, so these two can never overturn the verdict; they are marked (s).
+
+\textbf{Decision.}
+A ``beyond all'' verdict is \emph{robust} when it holds in every check that recomputes values and passes a size check: $|z| \ge \R{x1/z_clear}$ on the declared scale whichever reference person is left out.
+A check that cannot be run, because too few of PD01's trials remain, withholds the label.
+
+\textbf{Rationale.}
+The audit of the lane showed that an earlier definition, which counted the subset checks, called every ``beyond all'' verdict robust by construction.
+The size check guards against a value that is only just beyond the reference extreme.
+
+% -------------------------------------------------------------------------------------------------
+\subsection{The null reference of the count: unusual, not unique}\label{app:pd01:null}
+
+\textbf{Question.}
+PD01 lies beyond every reference person in \R{x1/null_pre_lfl_case} pre-specified characteristics (\R{x1/null_pre_lfl_case_phen} phenomena).
+The question is how many such characteristics a young reference person reaches by chance.
+If PD01 were exchangeable with the reference persons, \R{x1/null_pre_lfl_expected} would be expected.
+
+\textbf{Method.}
+Each reference person was compared with the other \R{x1/n_ref_minus_one}, like for like: on the mean of their first $k$ trials, as noisy as PD01's.
+PD01 was compared with all \R{x1/n_ref_persons}.
+PD01's rank among the \R{x1/n_ref_plus_one} persons gives a rank $p$; it is conservative, since PD01 faces one more person.
+
+\textbf{Result.}
+Reference persons lie beyond all others in a median of \R{x1/null_pre_lfl_ref_median} pre-specified characteristics, with a maximum of \R{x1/null_pre_lfl_ref_max} (Figure~\ref{fig:X1_08_zscore_summary}, bottom; Table~\ref{tab:x1_null_count}).
+\R{x1/null_pre_lfl_n_ge} reference persons (\R{x1/null_pre_lfl_ge_persons}) reach PD01's count, rank $p = \R{x1/null_pre_lfl_p}$.
+Counted in phenomena, \R{x1/null_pre_lfl_n_ge_phen} reference person reaches PD01's \R{x1/null_pre_lfl_case_phen}, rank $p = \R{x1/null_pre_lfl_p_phen}$.
+Against any \R{x1/n_ref_minus_one} of the reference persons, PD01's count is \R{x1/null_pre_lfl_subset_min} to \R{x1/null_pre_lfl_subset_max}.
+PD01 is thus among the most unusual persons of the group, but not alone.
+
+\textbf{Other versions.}
+When everyone is judged on all their trials, the reference median is \R{x1/null_pre_main_ref_median} and the maximum \R{x1/null_pre_main_ref_max} (rank $p = \R{x1/null_pre_main_p}$).
+This version is not like for like: PD01's values are means of few trials, and noisier means reach the extremes more often.
+With the post hoc characteristics, PD01 reaches \R{x1/null_all_lfl_case} (\R{x1/null_all_lfl_case_phen} phenomena) against a reference maximum of \R{x1/null_all_lfl_ref_max} (rank $p = \R{x1/null_all_lfl_p}$), but those characteristics were chosen after looking at PD01, which inflates PD01's count.
+The like-for-like count of pre-specified characteristics is the fair comparison.
+
+\begin{figure}[htbp]
+  \centering
+  \genfig{x1/X1_08_zscore_summary}
+  \caption{Overview of PD01 against the \R{x1/n_ref_persons} modelling persons.
+    Top: robust $z$ of every characteristic on its declared scale (grey band: $|z| < 2$) and PD01's percentile; diamonds mark characteristics beyond every reference person (filled: robust; open: not robust).
+    Bottom: the null reference of the count, the number of pre-specified characteristics (left) and phenomena (right) in which each reference person lies beyond all others, on as many trials as PD01 made.
+    \R{x1/null_pre_lfl_n_ge} reference persons reach PD01's count: unusual, not unique.}
+  \label{fig:X1_08_zscore_summary}\label{fig:app:pd01-overview}
+\end{figure}
+
+\gentab{x1/x1_null_count}
+
+\FloatBarrier
+% -------------------------------------------------------------------------------------------------
+\subsection{Robust differences}\label{app:pd01:robust}
+
+\R{x1/n_robust_prespecified} pre-specified characteristics in \R{x1/n_phen_robust_prespecified} phenomena, and \R{x1/n_robust_post_hoc} post hoc ones, are beyond every reference person and robust (Table~\ref{tab:x1_key_characteristics}, Table~\ref{tab:x1_sensitivity}).
+Each is listed with its checks; Table~\ref{tab:x1_checks} collects the checks of alternative explanations.
+Figure~\ref{fig:X1_04_movement} shows the reach characteristics, and Figure~\ref{fig:X1_01_example_traces} shows one of PD01's reaches next to a typical reference reach.
+
+\textbf{Hold power ratio: less slow sway, not tremor.}
+In the hold before the movement, PD01's power ratio of 3--12\,Hz to the rest is \R{x1/pre_ratio_db_pd}\,dB, against a reference median of \R{x1/pre_ratio_db_med}\,dB (range \R{x1/pre_ratio_db_min} to \R{x1/pre_ratio_db_max}; $z = \R{x1/pre_ratio_db_z}$; \R{x1/pre_ratio_db_ntrialsbeyond} of \R{x1/pre_ratio_db_ncase} trials beyond the reference range).
+It holds on the first $k$ trials, with the same protocol and without clip-flagged trials (\R{x1/pre_ratio_db_pdnoclip}\,dB against a reference extreme of \R{x1/pre_ratio_db_extnoclip}), and its smallest leave-one-out $z$ is \R{x1/pre_ratio_db_zloo}.
+The ratio is high because its denominator is small.
+PD01's 0.5--3\,Hz power is at percentile \R{x1/dec_pre_05_3_pct} and the 12--15\,Hz power at percentile \R{x1/dec_pre_12_15_pct}, while the 3--12\,Hz power is typical (percentile \R{x1/dec_pre_3_12_pct}).
+PD01's hold spectrum lies at \R{x1/spec_pre_05_3_min} to \R{x1/spec_pre_05_3_max} times the reference median in 0.5--3\,Hz (Figure~\ref{fig:X1_03_spectra}, left), and the hold 3--7 and 7--12\,Hz band RMS sit at percentiles \R{x1/pre_rms_3_7_pct} and \R{x1/pre_rms_7_12_pct} (Figure~\ref{fig:X1_02_preparation}).
+The finding is therefore less slow sway with typical tremor-band power.
+A supported forearm while seated, the phone's mass or its noise floor could explain it as well as the person.
+
+\textbf{Peak linear acceleration: a lower bound, and one event with the first touch.}
+PD01's peak linear acceleration in the reach is \R{x1/peak_acc_pd}\,m/s$^2$, against a reference median of \R{x1/peak_acc_med} and a maximum of \R{x1/peak_acc_max}\,m/s$^2$ ($z = \R{x1/peak_acc_z}$ on the log scale; \R{x1/peak_acc_ntrialsbeyond} of \R{x1/peak_acc_ncase} trials beyond).
+Without the clip-flagged trials it is \R{x1/peak_acc_pdnoclip}\,m/s$^2$ against a reference extreme of \R{x1/peak_acc_extnoclip}: still beyond, but only just.
+The magnitudes are lower bounds, since the accelerometer may have saturated.
+The first touch falls within \R{x1/chk_tap_window_ms}\,ms of the largest acceleration in \R{x1/chk_tap_case_k} of PD01's \R{x1/chk_tap_case_n} touched trials, against \R{x1/chk_tap_ref_share} of \R{x1/chk_tap_ref_n} reference touched trials.
+The acceleration at the first touch (post hoc) is \R{x1/touch_acc_pd}\,m/s$^2$ against a median of \R{x1/touch_acc_med} (\R{x1/touch_acc_nref} reference persons; without clip-flagged trials \R{x1/touch_acc_pdnoclip} against \R{x1/touch_acc_extnoclip}).
+The two characteristics measure one event and count as one finding: a large acceleration that coincides with an early screen touch.
+
+\textbf{Tilt change.}
+The phone's tilt changes by \R{x1/tilt_change_pd}\,deg over PD01's reach, against a reference median of \R{x1/tilt_change_med} and a minimum of \R{x1/tilt_change_min}\,deg ($z = \R{x1/tilt_change_z}$ on the log scale; leave-one-out $z = \R{x1/tilt_change_zloo}$).
+The net rotation measures the same change (Spearman $\rho = \R{x1/rho_rotation_net_tilt_change}$ across reference persons).
+It is also below every reference person (\R{x1/rotation_net_pd} against a minimum of \R{x1/rotation_net_min}\,deg) but not robust: it fails the same-protocol check (reference extreme \R{x1/rotation_net_extprotocol}\,deg) and the size check.
+PD01 thus ends the approach with a smaller net change of the phone's orientation than any reference person.
+
+\textbf{Reach 7--12\,Hz band power.}
+PD01's 7--12\,Hz band RMS during the reach is \R{x1/app_rms_7_12_pd}\,deg/s, against a reference median of \R{x1/app_rms_7_12_med} and a maximum of \R{x1/app_rms_7_12_max}\,deg/s ($z = \R{x1/app_rms_7_12_z}$ on the log scale; all \R{x1/app_rms_7_12_ncase} trials beyond).
+Four checks address two alternative explanations, a faster reach and the first touch (Table~\ref{tab:x1_checks}):
+\begin{itemize}[nosep]
+  \item \emph{speed-matched}: all \R{x1/chk_sm_n_ref_trials} reference reaches (\R{x1/chk_sm_n_ref_persons} persons) with a voluntary peak speed in PD01's range, \R{x1/chk_sm_lo} to \R{x1/chk_sm_hi}\,deg/s, stay below \R{x1/chk_sm_ref_max}\,deg/s; PD01's \R{x1/chk_sm_n_case} reaches give \R{x1/chk_sm_case_min} to \R{x1/chk_sm_case_max};
+  \item \emph{time-domain band-pass}: \R{x1/chk_bp_whole_pd}\,deg/s over the whole reach (reference maximum \R{x1/chk_bp_whole_max}); \R{x1/chk_bp_pretouch_pd} before the first touch (maximum \R{x1/chk_bp_pretouch_max}, \R{x1/chk_bp_pretouch_nref} persons); \R{x1/chk_bp_excltouch_pd} without the touch (maximum \R{x1/chk_bp_excltouch_max}). The band power is not only the contact;
+  \item \emph{spectral peak}: PD01's mean reach spectrum lies \R{x1/spec_reach_7_12_min} to \R{x1/spec_reach_7_12_max} times the reference median across 7--12\,Hz, and its 3--12\,Hz peak rises \R{x1/chk_peak_pd}\,dB above its surroundings (reference persons: median \R{x1/chk_peak_med}, maximum \R{x1/chk_peak_max}\,dB; Figure~\ref{fig:X1_03_spectra}, middle);
+  \item \emph{per peak speed} (post hoc): relative to the faster reach, the 7--12\,Hz RMS is at percentile \R{x1/app_7_12_per_speed_pct}, inside the reference range.
+\end{itemize}
+The checks disagree on one point: matched on speed, PD01's band power is beyond every reference reach; scaled by speed, it is not extreme.
+One person without a clinical examination cannot separate an action tremor from the dynamics of a fast reach that stops at the face.
+It is therefore reported as band power, not as tremor.
+
+\textbf{No return of the arm within the recording.}
+In all \R{x1/nose_no_return_ncase} of PD01's left-hand upright trials the arm did not start its return before the recording stopped, against a reference median share of \R{x1/nose_no_return_med} and a maximum of \R{x1/nose_no_return_max}.
+It is a share of trials, not a time: the recording stops a fixed time after the end cue, so the time at the nose of a phone kept there is censored.
+
+\textbf{Not robust.}
+The remaining characteristics beyond every reference person fail at least one check (Table~\ref{tab:x1_sensitivity}).
+The peak angular speed in the movement band (\R{x1/peak_speed_mv_pd} against a maximum of \R{x1/peak_speed_mv_max}\,deg/s) falls to \R{x1/peak_speed_mv_pdnoclip}\,deg/s without the clip-flagged trials and fails the size check.
+The time to the first screen touch (post hoc; \R{x1/touch_s_pd}\,s against a minimum of \R{x1/touch_s_min}\,s) fails the size check, and its share of the approach (post hoc) fails without the clip-flagged trials.
+After the touch, PD01 still performs a share of \R{x1/rot_after_touch_pd} of the voluntary rotation (reference median \R{x1/rot_after_touch_med}, percentile \R{x1/rot_after_touch_pct}): the touch comes during an ongoing movement.
+The reach power ratio fails the size check, and the net rotation fails as described above; the peak-speed change per repeat and the share of trials with the typical net-yaw sign are discussed in Appendices~\ref{app:pd01:speed} and~\ref{app:pd01:hand}.
+Across the reference persons, some findings of different phenomena go together: the peak linear acceleration with the time to the first touch ($\rho = \R{x1/redundant_1_rho}$) and with the peak angular speed ($\rho = \R{x1/redundant_2_rho}$).
+They may reflect one behaviour, for example a faster reach with a harder arrival.
+
+\begin{figure}[htbp]
+  \centering
+  \genfig{x1/X1_01_example_traces}
+  \caption{One left-hand upright natural reach of PD01 (left; the trial closest to PD01's medians) and the reference trial closest to the reference medians (right): angular speed, yaw rate about gravity and linear acceleration from the movement onset (shaded: the approach; dashed: the first screen touch).
+    PD01's touch comes early, at a peak of the linear acceleration, during a fast, oscillating reach.}
+  \label{fig:X1_01_example_traces}\label{fig:app:pd01-traces}
+\end{figure}
+
+\begin{figure}[htbp]
+  \centering
+  \genfig{x1/X1_02_preparation}
+  \caption{Preparation, hold, the phone at the nose and task behaviour.
+    Grey dots: the \R{x1/n_ref_persons} modelling persons (the mean of their left-hand upright trials), with median and interquartile box; diamond: PD01, ticks: PD01's trials; under each panel, PD01's percentile.
+    The hold power ratio is above every reference person because of less slow sway (0.5--3\,Hz), while the hold and nose 3--7 and 7--12\,Hz band RMS are typical.}
+  \label{fig:X1_02_preparation}\label{fig:app:pd01-preparation}
+\end{figure}
+
+\begin{figure}[htbp]
+  \centering
+  \genfig{x1/X1_03_spectra}
+  \caption{Power spectra of the angular velocity in the hold (\R{x1/pre_window_s}\,s, \R{x1/res_pre_resolution_hz}-Hz resolution), the reach (natural speed) and at the nose (\R{x1/nose_window_s}\,s, \R{x1/res_nose_resolution_hz}-Hz resolution): the reference persons' median and interquartile band, PD01's mean (thick) and trials (thin).
+    PD01's spectrum departs from the reference in the reach (7--12\,Hz) and, below 3\,Hz, in the hold; at the nose it is typical.}
+  \label{fig:X1_03_spectra}\label{fig:app:pd01-spectra}
+\end{figure}
+
+\begin{figure}[htbp]
+  \centering
+  \genfig{x1/X1_04_movement}
+  \caption{The reach (left hand, upright grip, natural speed): speed, first screen touch, amplitude, smoothness and band power, drawn as in Figure~\ref{fig:X1_02_preparation}; the first-touch panels show the \R{x1/touch_acc_nref} reference persons who touched the screen.
+    Accelerations of clip-flagged trials are lower bounds.
+    Robust: peak linear acceleration, acceleration at the first touch, tilt change and reach 7--12\,Hz band RMS; approach duration and smoothness are typical.}
+  \label{fig:X1_04_movement}\label{fig:app:pd01-movement}
+\end{figure}
+
+\gentab{x1/x1_key_characteristics}
+\gentab{x1/x1_checks}
+\gentab{x1/x1_sensitivity}
+
+\FloatBarrier
+% -------------------------------------------------------------------------------------------------
+\subsection{What does not stand out}\label{app:pd01:typical}
+
+PD01 lies inside the reference interquartile range in \R{x1/n_inside_iqr} characteristics.
+Several of them were expected to differ in a person with Parkinson's disease:
+the hold 3--7\,Hz band RMS (percentile \R{x1/pre_rms_3_7_pct}),
+the nose 3--7\,Hz band RMS (percentile \R{x1/nose_rms_3_7_pct}),
+the SPARC (percentile \R{x1/sparc_pct}),
+the hesitations (percentile \R{x1/hesitations_pct}),
+the approach duration (percentile \R{x1/duration_s_pct})
+and the hand-consistent first-half yaw (percentile \R{x1/fhy_hand_pct}).
+Outside the interquartile range, though not beyond every reference person, are the log dimensionless jerk (percentile \R{x1/ldlj_pct}), the reaction time (percentile \R{x1/rt_s_pct}) and the false starts (\R{x1/false_starts_pd} per trial against a median of \R{x1/false_starts_med}, percentile \R{x1/false_starts_pct}).
+
+Two design limits bound the typical tremor-band power in the hold and at the nose.
+The still gate before GO keeps large hold movements out of the hold window, and the nose window exists only for trials that became still.
+PD01's false starts are recorded without their cause.
+
+% -------------------------------------------------------------------------------------------------
+\subsection{Speed scaling and repeats}\label{app:pd01:speed}
+
+\textbf{Speed scaling.}
+Asked to move slowly, PD01 slows down less than the reference persons do (Figure~\ref{fig:X1_05_speed_scaling}).
+PD01's slow-to-fast duration ratio is \R{x1/speed_ratio_pd}, against a reference median of \R{x1/speed_ratio_med} (interquartile range \R{x1/speed_ratio_qone} to \R{x1/speed_ratio_qthree}; percentile \R{x1/speed_ratio_pct}; \R{x1/speed_ratio_nref} reference persons).
+The post hoc active-time ratio gives the same picture (\R{x1/active_speed_ratio_pd} against \R{x1/active_speed_ratio_med}).
+Both ratios rest on \R{x1/case_n_lua_slow} slow and \R{x1/case_n_lua_fast} fast trial, so a single trial can move them.
+
+\textbf{Repeats.}
+PD01's \R{x1/case_n_lua_natural} left-hand upright natural reaches come from \R{x1/case_repeat_sessions} sessions; \R{x1/seq_peak_speed_mv_nref} reference persons made at least as many (Figure~\ref{fig:X1_06_repeats}).
+PD01's voluntary peak speed changes by \R{x1/seq_peak_speed_mv_pd} per cent per repeat, against a reference median of \R{x1/seq_peak_speed_mv_med} (range \R{x1/seq_peak_speed_mv_min} to \R{x1/seq_peak_speed_mv_max}).
+It is below every reference person but not robust: it fails the size check, and the check without clip-flagged trials cannot be run.
+The duration change per repeat is at percentile \R{x1/seq_duration_pct}, and the variability of the duration and of the peak speed at percentiles \R{x1/cv_duration_pct} and \R{x1/cv_peak_speed_mv_pct}.
+With \R{x1/case_n_lua_natural} repeats across \R{x1/case_repeat_sessions} sessions, fatigue, practice and the break between sessions cannot be told apart; a trend can only be suggested.
+The reach 7--12\,Hz band RMS stays above every reference person in each repeat.
+
+\begin{figure}[htbp]
+  \centering
+  \genfig{x1/X1_05_speed_scaling}
+  \caption{Instructed speed (left hand, upright grip): approach duration, active movement time and voluntary peak angular speed at slow, natural and fast speed.
+    Grey lines: each modelling person's means; dark line: their median; diamonds: PD01 (\R{x1/case_n_lua_slow} slow, \R{x1/case_n_lua_natural} natural and \R{x1/case_n_lua_fast} fast trial).
+    PD01 changes speed less than most reference persons, from one trial per extreme speed.}
+  \label{fig:X1_05_speed_scaling}\label{fig:app:pd01-speed}
+\end{figure}
+
+\begin{figure}[htbp]
+  \centering
+  \genfig{x1/X1_06_repeats}
+  \caption{The first \R{x1/case_n_lua_natural} left-hand upright natural reaches in visit order: grey lines, the \R{x1/seq_peak_speed_mv_nref} modelling persons with at least as many; dark line, their median; diamonds, PD01 (reaches from \R{x1/case_repeat_sessions} sessions).
+    PD01's peak speed falls across repeats (not robust); the reach 7--12\,Hz band RMS stays high throughout.}
+  \label{fig:X1_06_repeats}\label{fig:app:pd01-repeats}
+\end{figure}
+
+\FloatBarrier
+% -------------------------------------------------------------------------------------------------
+\subsection{The hand signature without a classifier}\label{app:pd01:hand}
+
+The hand signature is the turn of the phone about gravity during the approach (Section~\ref{sec:physics}).
+It is read here directly, from the cumulative yaw, mirror-normalised so that positive is the direction typical of the hand used (Figure~\ref{fig:X1_07_hand_signature}).
+No classifier is applied and no \pright{} is computed for PD01.
+
+\textbf{The early turn is typical in direction and large.}
+PD01's hand-consistent first-half yaw is \R{x1/fhy_hand_pd}\,deg, at percentile \R{x1/fhy_hand_pct}.
+The early yaw peak (post hoc, defined after PD01's traces were inspected) is \R{x1/yaw_peak_hand_pd}\,deg, against a reference median of \R{x1/yaw_peak_hand_med} and a maximum of \R{x1/yaw_peak_hand_max}\,deg ($z = \R{x1/yaw_peak_hand_z}$; all \R{x1/yaw_peak_hand_ncase} trials beyond); it passes every check.
+It falls \R{x1/chk_yt_case_median}\,s (range \R{x1/chk_yt_case_min} to \R{x1/chk_yt_case_max}) from the first touch, against \R{x1/chk_yt_ref_median}\,s in reference touched trials: the early turn and the early touch go together.
+
+\textbf{The net turn comes back.}
+The hand-consistent net yaw is reversed, against the typical direction, in \R{x1/chk_ny_k} of PD01's \R{x1/chk_ny_n} accepted trials (\R{x1/chk_ny_k_minus2} below $-2$\,deg).
+Reference persons reverse a median of \R{x1/chk_ny_ref_median} and at most \R{x1/chk_ny_ref_max} of their trials.
+PD01's mean net yaw (\R{x1/net_yaw_hand_pd}\,deg) is at percentile \R{x1/net_yaw_hand_pct} in its stratum, and below every reference person in the first free-choice trial (right hand, a single trial; Table~\ref{tab:x1_strata}).
+The share of trials with the typical net-yaw sign (post hoc) is below every reference person but fails the first-$k$ check.
+
+\textbf{Reading.}
+For PD01, the hand evidence lies in the early part of the approach: the early turn has the typical direction, and the net turn does not.
+Why the yaw turns back after the early peak, and whether this holds with the dominant hand instructed and with more repeats, are open questions.
+This appendix does not test whether the classifiers of this report would generalise to such movements.
+
+\begin{figure}[htbp]
+  \centering
+  \genfig{x1/X1_07_hand_signature}
+  \caption{The hand signature without a classifier: cumulative yaw about gravity over the time-normalised approach, mirror-normalised so that positive is the direction typical of the hand used (dashed: half of the approach, where the first-half yaw is read).
+    Left: left-hand upright trials (grey: each modelling person's mean; band: interquartile range); middle: the first free-choice trial of each modelling person (\R{x1/n_ref_free} right-hand trials) and PD01's (solid; PD01's repeat-visit free trial dashed); right: first-half and net yaw per person, with PD01's percentile.
+    PD01's early turn is typical in direction and large; the net turn comes back.}
+  \label{fig:X1_07_hand_signature}\label{fig:app:pd01-hand}
+\end{figure}
+
+\FloatBarrier
+% -------------------------------------------------------------------------------------------------
+\subsection{The multivariate view}\label{app:pd01:multivariate}
+
+\textbf{Method.}
+\R{x1/mv_n_keys} pre-specified key characteristics (reaction time; hold 3--7\,Hz band RMS; approach duration; peak angular speed and rotation in the movement band; log dimensionless jerk; SPARC; reach 3--7 and 7--12\,Hz band RMS; hand-consistent first-half yaw) were taken on their declared scales (\R{x1/mv_n_log} on the log scale) and robust-standardised against the reference persons.
+A principal component analysis (PCA) was fitted on the reference persons, with PD01 projected.
+The Mahalanobis distance used a Ledoit--Wolf shrinkage covariance; each reference person was left out of the standardisation and covariance of their own distance.
+The analysis was repeated on linear scales and with each characteristic left out.
+
+\textbf{Result.}
+PD01's first principal component is \R{x1/mv_pc_one_case}, inside the reference range of \R{x1/mv_pc_one_ref_min} to \R{x1/mv_pc_one_ref_max} (the first two components explain \R{x1/mv_pc_one_var} and \R{x1/mv_pc_two_var} of the variance; Figure~\ref{fig:X1_09_multivariate}).
+PD01's Mahalanobis distance is \R{x1/mv_distance}; \R{x1/mv_n_beyond} of the \R{x1/n_ref_persons} reference persons are at least as far (rank $p = \R{x1/mv_p}$; the smallest possible is \R{x1/mv_p_floor}).
+With one characteristic left out, \R{x1/mv_loco_min_beyond} to \R{x1/mv_loco_max_beyond} are as far (Table~\ref{tab:x1_multivariate_loco}).
+On linear scales the distance is \R{x1/mv_lin_distance}, with \R{x1/mv_lin_n_beyond} reference person as far (rank $p = \R{x1/mv_lin_p}$); without the reach 7--12\,Hz band RMS, \R{x1/mv_lin_loco_max_beyond} are.
+The linear result depends on that one right-skewed characteristic.
+Taken together, PD01's profile is unusual but within the spread of the young reference persons.
+
+\begin{figure}[htbp]
+  \centering
+  \genfig{x1/X1_09_multivariate}
+  \caption{Multivariate view of the \R{x1/mv_n_keys} pre-specified key characteristics, robust-standardised against the \R{x1/n_ref_persons} modelling persons.
+    Left: the first two principal components (fitted on the reference persons; PD01 projected).
+    Middle: Mahalanobis distances (Ledoit--Wolf covariance, each reference person left out of their own standardisation); the line is PD01, and \R{x1/mv_n_beyond} reference persons are at least as far.
+    Right: reference persons at least as far as PD01 with each characteristic left out, on declared and on linear scales.}
+  \label{fig:X1_09_multivariate}\label{fig:app:pd01-multivariate}
+\end{figure}
+
+\gentab{x1/x1_multivariate_loco}
+
+\FloatBarrier
+% -------------------------------------------------------------------------------------------------
+\subsection{The full characteristic table}\label{app:pd01:table}
+
+Table~\ref{tab:x1_characteristics} lists all \R{x1/n_characteristics} characteristics in their matched strata, with PD01's value, the reference median and interquartile range, the percentile, the robust $z$, PD01's trials beyond the reference range, the rank $p$, the Benjamini--Hochberg $q$ over the \R{x1/n_prespecified} pre-specified characteristics, the Crawford--Howell $p$ and the robustness verdict.
+No $q$ is below 0.05.
+Table~\ref{tab:x1_strata} gives PD01's percentile for every per-trial characteristic in every stratum.
+
+\gentab{x1/x1_characteristics}
+\gentab{x1/x1_strata}
+
+\FloatBarrier
+% -------------------------------------------------------------------------------------------------
+\subsection{What a follow-up study would need}\label{app:pd01:followup}
+
+This single case generates hypotheses; it tests none.
+A follow-up study would need:
+\begin{itemize}[nosep]
+  \item several participants with Parkinson's disease and age-, sex- and device-matched controls, with clinical scores (for example the motor examination of the Movement Disorder Society Unified Parkinson's Disease Rating Scale, MDS-UPDRS, and its tremor items) and the medication state recorded at the visit;
+  \item supervised visits, both hands instructed, at least five repeats per speed, arm support recorded, and a longer still hold whose gate is logged rather than enforced, to measure rest tremor;
+  \item a small, pre-registered set of characteristics: the phenomena with a robust pre-specified difference here (hold steadiness, linear acceleration, net orientation change, reach band power, return of the arm) and, as hypotheses, the post hoc ones (the early hand-consistent yaw), analysed by a mixed model over trials instead of single-case ranks;
+  \item video or a contact sensor to establish what touches the screen first, and a verified rotation-rate mapping.
+\end{itemize}

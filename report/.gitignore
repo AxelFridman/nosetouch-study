@@ -1,6 +1,8 @@
 # LaTeX output: latexmk writes auxiliary files to build/ and the PDF next to main.tex.
+# The compiled report (main.pdf) is tracked so it can be read on GitHub; local copies such as preview_draft.pdf are not.
 /build/
 /*.pdf
+!/main.pdf
 *.aux
 *.bbl
 *.bcf
@@ -14,17 +16,10 @@
 *.toc
 *.xdv
 
-# Generated assets. They derive from participant data and this repository is public: keep them local.
-# Only the placeholders are tracked; hand-made figures go to figures/static/ (tracked).
-/figures/*
-!/figures/.gitkeep
-!/figures/static/
-/tables/*
-!/tables/.gitkeep
+# Generated assets (figures, tables, numbers) are tracked: the researcher approved publishing the report and
+# everything it shows (2026-10-28), so a clone can rebuild the PDF without the participant data.
+# The face-blurred spare photo is not used by the report.
+/figures/photo/data_collection_blurred.jpg
 
 # Python caches of scripts/
 __pycache__/
-
-# The PD01 case study (Appendix I) describes a health condition: keep its source local until the researcher
-# explicitly approves publishing it. main.tex loads it with \InputIfFileExists, so a clone without it still builds.
-/sections/I_case_study.tex

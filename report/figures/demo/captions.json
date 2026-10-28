@@ -1,0 +1,12 @@
+{
+ "DEMO_01_paired": {
+  "caption": "Adding the person covariates (age, sex, height, self-reported handedness, usual phone hand) to a second stage on the final model's logit, against the same second stage without them, on the same leave-one-person-out folds: mean per-person differences with paired person-bootstrap 95\\% CIs, Holm-adjusted sign-flip p over the add-on variants within each metric (filled red: below 0.05). Grey: the sensor-only second stage against the shipped model (a check that the stacking itself is neutral; unadjusted). Negative accuracy and positive log-loss differences mean the covariates hurt.",
+  "decision": "Demographics do not improve the hand prediction even if production knew them; nothing from this test enters the production model.",
+  "file": "DEMO_01_paired.pdf"
+ },
+ "DEMO_02_base_rate": {
+  "caption": "The base-rate effect. Balanced accuracy on the primary set (both hands for every person) and right-hand recall on the 20 natural-use trials (every reported free-choice hand so far is the right hand, so a constant 'right' answer is never wrong there). Fixed rules that answer the usual phone hand, or always right, look excellent on natural use and sit at chance on the primary set: a phone-hand prior gains nothing in discrimination. The covariates-only model is at chance on the primary set.",
+  "decision": "Natural-use recall is never read as a gain in discrimination; the add-on test is judged on the primary set.",
+  "file": "DEMO_02_base_rate.pdf"
+ }
+}

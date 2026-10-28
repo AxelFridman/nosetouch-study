@@ -1,0 +1,52 @@
+{
+ "P1_01_forest": {
+  "caption": "Every data-treatment option against the current pipeline, for each panel model: paired difference in leave-one-person-out accuracy (points) with its 95 % person-bootstrap CI (20 persons; 96 comparisons in one multiplicity family). Filled: the paired 95 % CI excludes 0 and the Benjamini-Hochberg q within the comparison family is below 0.05; light fill: the CI alone excludes 0 (not significant after the correction); open circle: no difference; open square: identical predictions (solver precision); hollow star: the current pipeline. The exclusion-rule rows add the excluded trials to training and score the primary trials only.",
+  "decision": "Which preprocessing and data-treatment defaults the evidence supports keeping or changing.",
+  "file": "P1_01_forest.pdf"
+ },
+ "P1_02_cutoff": {
+  "caption": "Low-pass filter of the stream. Left: cut-off of the zero-phase Butterworth filter (order 4); right: its order at 15 Hz, and the causal (one-pass) filter of the same design. Paired difference in leave-one-person-out accuracy against the current pipeline (*), per panel model (legend: its current accuracy), with 95 % person-bootstrap CIs; filled: the paired 95 % CI excludes 0 and the Benjamini-Hochberg q within the comparison family is below 0.05; light fill: the CI alone excludes 0 (not significant after the correction); open circle: no difference; open square: identical predictions (solver precision); hollow star: the current pipeline.",
+  "decision": "Keep or change the low-pass cut-off and order; whether a causal (production-friendly) filter costs accuracy.",
+  "file": "P1_02_cutoff.pdf"
+ },
+ "P1_03_segmentation": {
+  "caption": "Robustness to segmentation errors (a cost a production detector must stay within, not an option): paired accuracy difference of a model trained on the oracle bounds when the approach bounds it is given are moved by independent uniform errors of up to $\\pm J$ at the onset and at the end; triangles: the onset 100 ms late. Fills follow the robustness family (8 comparisons). Diamonds: the model trained with jittered copies too, tested at $\\pm 100$ ms; it is judged only against the oracle-trained model at the same bounds (the remedy pair), and its fill shows that verdict. 95 % person-bootstrap CIs; filled: the paired 95 % CI excludes 0 and the Benjamini-Hochberg q within the comparison family is below 0.05; light fill: the CI alone excludes 0 (not significant after the correction); open circle: no difference; open square: identical predictions (solver precision); hollow star: the current pipeline.",
+  "decision": "How precise a production detector must be, and whether training with bound jitter helps.",
+  "file": "P1_03_segmentation.pdf"
+ },
+ "P1_04_sampling": {
+  "caption": "Robustness to the recording: paired accuracy difference against the current pipeline (*) when every second or third raw sample is kept (30 and 20 Hz; the low-pass is capped at 0.4 times the rate) and when Gaussian noise is added to the raw sample times before resampling. 95 % person-bootstrap CIs; filled: the paired 95 % CI excludes 0 and the Benjamini-Hochberg q within the comparison family is below 0.05; light fill: the CI alone excludes 0 (not significant after the correction); open circle: no difference; open square: identical predictions (solver precision); hollow star: the current pipeline. A CI that includes 0 bounds the cost by its lower end; it does not show equivalence.",
+  "decision": "Whether the predictor needs the native rate and exact timestamps, or tolerates slower browsers.",
+  "file": "P1_04_sampling.pdf"
+ },
+ "P1_05_normalisation": {
+  "caption": "Normalisation of the input channels against none (physical units), per panel model: paired accuracy and mean per-person log-loss differences with 95 % person-bootstrap CIs. Scalers are fitted on the mirror-augmented training rows of each fold; the per-trial peak scaling divides each channel of a trial by its own peak. The logistic model standardises its own features, so a per-channel affine scaling leaves it unchanged (open squares). Filled: the paired 95 % CI excludes 0 and the Benjamini-Hochberg q within the comparison family is below 0.05; light fill: the CI alone excludes 0 (not significant after the correction); open circle: no difference; open square: identical predictions (solver precision); hollow star: the current pipeline.",
+  "decision": "Which input normalisation the pipeline uses.",
+  "file": "P1_05_normalisation.pdf"
+ },
+ "P1_06_reliability": {
+  "caption": "Reliability of P(right) (10 equal-mass bins; bars: 95 % person-bootstrap band of the observed share of right hands) before calibration and after the calibrator chosen inside every training fold (nested: none, temperature, Platt, beta; strictly increasing maps, so the ranking within a fold is kept; chosen by grouped cross-validation on the training persons' cross-fitted predictions); leave-one-person-out predictions. Legend: calibration slope (logistic regression of the hand on logit P; 1 = calibrated, below 1 = over-confident) with its person-bootstrap 95 % CI, and the ECE with the 95th percentile of the ECE that perfectly calibrated predictions would show on the same bins (null 95th pct.).",
+  "decision": "Whether the panel models need a calibration step, and which one.",
+  "file": "P1_06_reliability.pdf"
+ },
+ "P1_07_aggregates": {
+  "caption": "Calibration of the P(right) of k attempts of one person and hand combined (random k-subsets): mean of the probabilities, mean of the logits, sum of the logits (the rule for independent attempts) and that sum divided by a temperature $T_k$ fitted on the training persons of each fold. The same 19 persons at every k (those with at least 5 trials of each hand); every person and hand weighs the same (also at k = 1, so k = 1 differs slightly from the trial-level metrics). Log loss with 95 % person-bootstrap CIs; the ECE has no CI (its percentile bootstrap is biased). Paired differences between the rules are in the aggregates table.",
+  "decision": "How the inference app should combine several attempts into one calibrated probability.",
+  "file": "P1_07_aggregates.pdf"
+ },
+ "P1_08_platform": {
+  "caption": "Platform transfer: accuracy on the persons of each platform when the model is trained on all other persons (pooled), on the other persons of the same platform only, or on the persons of the other platform only, each next to its size-matched control (open markers: as many training persons drawn at random from both platforms). Training on one platform also shrinks the training set, so only the difference from the control isolates the platform; the paired option-against-control comparisons are in the pairs table (leave-one-person-out; 95 % person-bootstrap CIs).",
+  "decision": "Whether one platform can train the other, i.e. whether pooling platforms is safe.",
+  "file": "P1_08_platform.pdf"
+ },
+ "P1_09_exclusions": {
+  "caption": "Accuracy on the trials that an exclusion rule removes, scored by the current models (trained on exactly the primary training set) unless stated: E4d (an unbridged sampling gap near the movement) split by where the gap falls, with three imputations for the gaps inside the approach; E4b/E4c (too short or too little rotation); trials that thresholds twice as strict would remove; flagged trials; the swap-signature blocks. Dotted lines: all primary trials. 95 % person-bootstrap CIs only for subsets of at least 5 persons (open markers: fewer, no CI); n = trials, p. = persons.",
+  "decision": "Whether the exclusion thresholds and flags remove trials the models cannot score.",
+  "file": "P1_09_exclusions.pdf"
+ },
+ "P1_10_filter_delay": {
+  "caption": "Group delay of causal Butterworth low-pass filters (order 4) at the stream rate of 60 Hz; the zero-phase filter of the pipeline has none. The causal version of the current filter (15 Hz, *) delays a 1-Hz movement by about 22 ms.",
+  "decision": "What a causal (online) filter would cost in latency.",
+  "file": "P1_10_filter_delay.pdf"
+ }
+}

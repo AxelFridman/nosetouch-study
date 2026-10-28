@@ -1,0 +1,72 @@
+{
+ "FINAL_01_master_forest": {
+  "caption": "The 17 candidates of the cross-lane selection as their lanes deliver them (leave-one-person-out, 95 % person-bootstrap CIs), coloured by lane; open markers: chosen on the outer folds in their lane (exploratory, 7 of 17); diamonds: log loss after the calibration remedy chosen inside each fold (shown where it moves by more than 0.001); dashed: the reference floor. Lowest log loss as delivered: m3 1D CNN, body frame (0.291).",
+  "decision": "Which candidates are worth a nested selection and a robustness check; the forest is exploratory, the nested estimate (FINAL_03) is the honest number.",
+  "file": "FINAL_01_master_forest.pdf"
+ },
+ "FINAL_02_overview": {
+  "caption": "Every experiment of the model lanes' registries, the reference and this lane's own models (361 with a log loss below 1.2; this lane's stress tests are left out), accuracy against log loss; open markers: compared on the outer folds before being kept (n_configs_tried > 1, exploratory; 127); squares: lane m4, whose unit is a cue-free recording and whose abstentions score one half. Points near 50 % and a log loss of 0.69 are ablations that cannot see the hand by design (for example magnitude-only inputs).",
+  "decision": "Context for the selection: the finalists sit on the accuracy / log-loss frontier of their lanes.",
+  "file": "FINAL_02_overview.pdf"
+ },
+ "FINAL_03_nested_selection": {
+  "caption": "Nested cross-lane selection among 17 candidates: (left) how often each was chosen by the lowest inner log loss on the training persons, over 20 outer folds; (right) the selection-aware estimate against the best candidate picked on the outer folds (m3 1D CNN, body frame; 95 % person-bootstrap CIs). Optimism of the naive pick: accuracy +0.8 points [-0.2, +2.3], log loss -0.015.",
+  "decision": "The honest headline of the selection procedure is the nested number, not the best of the forest.",
+  "file": "FINAL_03_nested_selection.pdf"
+ },
+ "FINAL_04_paired": {
+  "caption": "Every candidate against the lowest-log-loss candidate (m3 1D CNN, body frame) on the same trials, each in its production form (its own pipeline plus the calibration remedy chosen inside every fold): mean per-person differences with paired person-bootstrap 95 % CIs; filled red: Holm-adjusted sign-flip p below 0.05 within the family (11 of 16 differ in accuracy or log loss).",
+  "decision": "Which candidates the data cannot separate from the best: the leaders among which simplicity, robustness and portability decide.",
+  "file": "FINAL_04_paired.pdf"
+ },
+ "FINAL_05_input_vs_class": {
+  "caption": "Input against model class (task 2b): paired accuracy differences (mean per person, 95 % person-bootstrap CI; filled red: Holm p below 0.05 over these comparisons) between models given the same channels.",
+  "decision": "Whether the deep model's advantage needs the network or only the body-frame input.",
+  "file": "FINAL_05_input_vs_class.pdf"
+ },
+ "FINAL_06_robustness": {
+  "caption": "Robustness of every candidate to test conditions the PI may choose (rows sorted by recorded accuracy; bold: the final model). Left: accuracy on the rotated-grip trials when trained on every grip (dot) or on upright grips only (square; 5 of 17 candidates drop with a Holm-adjusted p below 0.05). Middle: accuracy as recorded (dot) and on the same trials synthesised as held with the screen away, without (down triangle; 11 of 11 candidates whose inputs change drop significantly) and with the rest-pose screen check (up triangle; 11 of 11 back within 5 points of the recorded accuracy). Gravity-frame-only inputs are unchanged by the flip (dot only). Right: accuracy change when trained on the persons of the other platform only and when trained without the suspect wrong-hand blocks.",
+  "decision": "A model that is not robust to plausible test conditions is not the final model: device-frame models fail an unseen grip, and every model that reads the screen-relative frame needs the rest-pose check.",
+  "file": "FINAL_06_robustness.pdf"
+ },
+ "FINAL_07_natural_transfer": {
+  "caption": "Person-matched natural-use test: correct free-choice trials (dots; all reported hands are the right hand, so this is right-hand recall) against the count expected from the same persons' right-hand accuracy on the instructed trials (tick, 95 % Poisson-binomial range in grey); red: a shortfall after Holm over the candidates.",
+  "decision": "A model whose evidence does not transfer to natural use relies on protocol-specific motion.",
+  "file": "FINAL_07_natural_transfer.pdf"
+ },
+ "FINAL_08_calibration": {
+  "caption": "Reliability of the final model (m3 1D CNN, body frame), equal-mass bins with person-bootstrap 95 % bands, overall and per platform; shipped remedy: none. ECE 0.026 (perfect-calibration 95 % band up to 0.042), slope 0.97 [0.69, 1.50].",
+  "decision": "Whether the percentage shown to the user is honest, overall and on each platform.",
+  "file": "FINAL_08_calibration.pdf"
+ },
+ "FINAL_09_remedies": {
+  "caption": "Calibration remedies of the final model fitted on the training persons' inner cross-fitted predictions: paired per-person log-loss difference against no remedy (95 % CI; red: Holm p below 0.05 over the remedies). Shipped: none.",
+  "decision": "Ship a remedy only if it measurably lowers the log loss; prefer none or one parameter.",
+  "file": "FINAL_09_remedies.pdf"
+ },
+ "FINAL_10_attempts": {
+  "caption": "Several attempts of one person and hand (19 persons with at least 5 trials of each hand; random k-subsets within person and hand, the same persons for every k): over-confidence of four aggregates (left; mean confidence minus accuracy per person and hand, person-bootstrap 95 % bands; above 0: over-confident) and their log loss (right). The aggregates give nearly the same answers (accuracy at k = 3 between 96.3 and 96.3 %) and differ in the percentage shown. tau_k is fitted in every outer fold on the training persons' inner cross-fitted logits (median tau_3 1.54).",
+  "decision": "Which aggregate the page displays: a calibrated one; the mean P(right) is not shown.",
+  "file": "FINAL_10_attempts.pdf"
+ },
+ "FINAL_11_persons": {
+  "caption": "Final model by person (left; sorted; colour: platform; L: the 2 left-handed persons) and by grip x speed cell (right; the instructed conditions only stratify the predictions; person-bootstrap 95 % CI for cells with at least 5 persons; open markers: fewer persons, no CI, their persons' values are in the breakdown table).",
+  "decision": "Which persons and conditions the final model fails on.",
+  "file": "FINAL_11_persons.pdf"
+ },
+ "FINAL_12_learning_curve": {
+  "caption": "Learning curves: training persons drawn at random inside every outer fold (dots: repetitions; line: their mean; dashed: inverse power law with a 95 % bootstrap band). The inverse power law fitted to m3 1D CNN, body frame extrapolates to 89.6 % at 40 persons [88.8, 90.8] (bootstrap over repetitions; an extrapolation).",
+  "decision": "Whether recording more participants looks worthwhile.",
+  "file": "FINAL_12_learning_curve.pdf"
+ },
+ "FINAL_13_segmentation": {
+  "caption": "Final model trained on the oracle bounds and tested on windows cut with segmentation errors or a causal filter (lane p1's variant arrays, the same canonical code path): paired accuracy change with 95 % CIs (red: Holm p below 0.05).",
+  "decision": "What the production detector must achieve: the bound accuracy the model tolerates.",
+  "file": "FINAL_13_segmentation.pdf"
+ },
+ "FINAL_14_prior": {
+  "caption": "A deployment prior pi of the right hand adds log(pi / (1 - pi)) to every logit: right-hand recall rises, left-hand recall falls and the balanced accuracy drops (primary trials). The shipped default is pi = 0.5 (the PI chooses the hand).",
+  "decision": "Keep the prior at 0.5 for the PI's evaluation.",
+  "file": "FINAL_14_prior.pdf"
+ }
+}

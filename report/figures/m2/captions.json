@@ -1,0 +1,62 @@
+{
+ "M2_01_models": {
+  "caption": "Classical models on the same 691 per-trial features (approach window), leave-one-person-out over 20 persons; hyperparameters tuned inside every outer fold on 3 inner person folds (* fixed hyperparameters, not tuned), mirror-augmented. Blue: the pre-specified default; orange: the nested selection among L2 LR / RBF SVM / LightGBM / their soft vote; dashed: the reference floor (yaw logistic regression). Sorted by log loss (best at the top).",
+  "decision": "Lowest outer log loss: Stack (LR + SVM + LGBM) (88.1%, log loss 0.323); against the default its log loss differs by -0.042 [-0.071, -0.015], not different, Holm p = 0.080 over the 12 comparisons with the default. Accuracies span 83.9% to 88.1% over 12 pipelines plus the selection. The honest headline is the nested selection: 86.5% [80.9%, 91.7%], log loss 0.334 (one procedure, no outer-fold choice); picking the best of the pipelines on the outer folds is exploratory.",
+  "file": "M2_01_models.pdf"
+ },
+ "M2_02_data_treatment": {
+  "caption": "Data-treatment choices for the L2 logistic regression, each paired against the default (approach window, 17 channels, k = 8 bins, z-score, mirror augmentation; 85.5%) on the same trials: window: fixed 3-s window (absolute time), approach + fixed windows; frame: gravity frame only, device frame only; bins: k = 4 time bins, k = 16 time bins; scaling: z-score + winsorising at 3 SD, robust (median / IQR), none (raw features; lbfgs capped at 300 iterations), per-trial amplitude normalisation (RMS); mirror: none, augmentation + wrapper, antisymmetric wrapper. Differences with paired person-bootstrap 95 % CIs; orange: Holm-adjusted sign-flip p < 0.05 within the family; open marker: identical to the default within solver precision (not a test).",
+  "decision": "Within the family of 12 data-treatment comparisons (Holm), worse log loss than the default: scaling: robust (median / IQR) (+0.027 [+0.013, +0.041], Holm p = 0.010); scaling: none (raw features; lbfgs capped at 300 iterations) (+0.119 [+0.085, +0.155], Holm p < 0.001); channels: gravity frame only (+0.107 [+0.067, +0.146], Holm p = 0.001); channels: device frame only (+0.126 [+0.077, +0.176], Holm p < 0.001). None is better. Accuracy differs for: channels: device frame only. Identical to the default within solver precision: mirror: augmentation + wrapper. The default treatment is kept unless a variant is better after the adjustment.",
+  "file": "M2_02_data_treatment.pdf"
+ },
+ "M2_03_families": {
+  "caption": "Feature-family ablation of the L2 logistic regression (leave-one-person-out), with mirror augmentation (top; numbers: mirror-odd or swapped features / all features of the family) and without mirroring (bottom; all features of the family). Left: log-loss change when one family is removed (paired 95 % CI; orange: Holm-adjusted p < 0.05 within the row's family of comparisons; open: identical within solver precision). Right: accuracy of each family alone; dashed: all families. Mirror augmentation forces the weights of mirror-even features to zero in a linear model, so the top row tests only the odd part of each family; the bottom row lets every family carry weight.",
+  "decision": "With mirror augmentation: dropping xcorr costs most (+0.102 [+0.044, +0.146] log loss, worse, Holm p = 0.014); removals that worsen the log loss after Holm: xcorr; best single family xcorr (84.9%); alone, wavelet predicts P = 0.5 for every trial (an abstention: no mirror-odd feature). Without mirroring: dropping xcorr costs most (+0.084 [+0.049, +0.113] log loss, worse, Holm p = 0.004); removals that worsen the log loss after Holm: xcorr; best single family xcorr (84.8%). All families stay in the pre-specified default.",
+  "file": "M2_03_families.pdf"
+ },
+ "M2_04_mirror": {
+  "caption": "Mirror handling: none, mirror augmentation of the training rows (flipped labels), the antisymmetric wrapper p(x) = (f(x) + 1 - f(m(x)))/2, and both; variants computed: L2 logistic regression: none, augment, antisym., both; LightGBM: none, augment. Right: accuracy of left- and right-handed persons (handedness stratifies only; a person-bootstrap CI only for groups of at least 5 persons, otherwise each person is shown).",
+  "decision": "Mirror augmentation is kept (pre-specified). L2 logistic regression without mirroring: log loss +0.045 [+0.007, +0.080] against augmentation (not different, Holm p = 0.242), accuracy -2.7 [-5.1, -0.2] points; LightGBM without mirroring: log loss +0.046 [+0.021, +0.075] against augmentation (worse, Holm p = 0.002), accuracy +1.2 [-0.6, +2.9] points. For the logistic regression augmentation plus the wrapper is identical (max |dP| 1.8e-04) against augmentation alone, as expected: an augmented linear model is already antisymmetric. With 2 left-handed persons the handedness panel is descriptive only (each person shown, no CI).",
+  "file": "M2_04_mirror.pdf"
+ },
+ "M2_05_learning_curve": {
+  "caption": "Learning curve of the default L2 logistic regression: inside every outer fold only a random subset of the training persons is used (seeded; 5 repetitions per size; band: range over repetitions); the held-out person is always scored. The right-most point uses every training person (one run, 95 % person-bootstrap CI).",
+  "decision": "Mean accuracy 82.1% (range 79.3% to 84.4%) with 4 training persons, 85.1% (range 84.3% to 86.0%) with 16 and 85.5% with all 19; mean log loss 0.458, 0.391 and 0.365. From 16 to all persons the accuracy changes by +0.3 points (within the range of the 5 subsets) and the log loss by -0.025 (outside their range). Accuracy has flattened while the probabilities still sharpen: more participants would mainly improve the log loss (tentative, one run at the full size).",
+  "file": "M2_05_learning_curve.pdf"
+ },
+ "M2_06_importance": {
+  "caption": "What drives the predictions on held-out persons: share of the mean absolute contribution to the logit (L2 logistic regression: coefficient x scaled value; LightGBM: TreeSHAP pred_contrib), aggregated over the leave-one-person-out folds, by feature family (left) and by channel (right; a correlation pair is split equally between its two channels).",
+  "decision": "Largest shares: L2 logistic regression (default): family xcorr 40%, channel yaw_rate 18%, gravity-frame channels 40%; LightGBM: family bins 24%, channel yaw_cum 21%, gravity-frame channels 45%. Both frames contribute: keeping only one frame worsens the held-out log loss either way (M2_02).",
+  "file": "M2_06_importance.pdf"
+ },
+ "M2_07_calibration": {
+  "caption": "Reliability on held-out persons of the uncalibrated models (10 equal-mass bins; band: 95 % person-bootstrap interval of the observed share; dashed: perfect calibration). Text: ECE and the 97.5th percentile of the ECE that perfectly calibrated outcomes (y drawn from Bernoulli(p)) would give with the same predictions; calibration slope of the logistic recalibration with its person-bootstrap 95 % CI (1 = calibrated, above 1 = under-confident).",
+  "decision": "No detectable miscalibration: every slope CI includes 1, every calibration-in-the-large CI includes 0 and every ECE lies within the band that perfectly calibrated outcomes give. Per model: nested selection slope 1.13 [0.84, 1.62], ECE 0.031 (null mean 0.033); L2 logistic regression (default) slope 1.07 [0.79, 1.51], ECE 0.048 (null mean 0.033); LightGBM slope 1.05 [0.80, 1.48], ECE 0.022 (null mean 0.032); stack (LR + SVM + LGBM) slope 1.00 [0.75, 1.45], ECE 0.025 (null mean 0.030).",
+  "file": "M2_07_calibration.pdf"
+ },
+ "M2_08_calibration_platform": {
+  "caption": "Calibration per platform of the uncalibrated models on held-out persons: calibration slope with person-bootstrap 95 % CI (left; 1 = calibrated), ECE against the 95 % band of the ECE that perfectly calibrated outcomes would give with the same predictions (middle), and the paired log-loss difference of a platform-specific Platt map against one global Platt map, both fitted inside the outer folds (right; below 0 = the per-platform map helps).",
+  "decision": "Nested selection per platform: slope Android 1.27 [0.88, 1.98], iOS 0.94 [0.57, 1.75]. No platform shows detectable miscalibration. A platform-specific Platt map against one global map changes the log loss by nested selection +0.005 [-0.009, +0.020] (Holm p = 1.000, not different); L2 logistic regression (default) +0.013 [+0.002, +0.024] (Holm p = 0.085, not different); LightGBM +0.001 [-0.013, +0.016] (Holm p = 1.000, not different); Holm over the 3 models. No evidence that the platforms need different calibration maps: a per-platform map is never better than one global map; underpowered (iOS: 8 persons).",
+  "file": "M2_08_calibration_platform.pdf"
+ },
+ "M2_09_breakdown": {
+  "caption": "Accuracy of the headline model (nested selection) by stratum: platform, instructed grip, speed and movement variant, self-reported handedness and the predictor gates (strata are used only after prediction, never as inputs). A person-bootstrap 95 % CI only for strata with at least 5 persons; smaller strata show each person (open circles; an arrow at the left edge, labelled with its value, for a person below the axis) and the pooled accuracy (diamond). Dashed: overall (86.5%).",
+  "decision": "Lowest stratum with at least 5 persons: Variant = twist (66.7% [33.3%, 93.8%], 15 trials, 8 persons); the strata with fewer persons are descriptive only. Descriptive: the strata are not a test of the conditions.",
+  "file": "M2_09_breakdown.pdf"
+ },
+ "M2_10_persons": {
+  "caption": "Accuracy of every held-out person (leave-one-person-out), sorted by the first model; colour: the person's platform; solid: nested selection; light: L2 logistic regression (default). Dashed: 80 %.",
+  "decision": "4 of 20 persons are below 80 % with the nested selection (lowest: P05, 56.2%; median 91.6%): per-person accuracy, not the pooled mean, is what a new user experiences.",
+  "file": "M2_10_persons.pdf"
+ },
+ "M2_11_k_attempts": {
+  "caption": "Several attempts of one person and hand. Left: per-person balanced accuracy when the P(right) of k attempts are averaged (the harness's k-attempt curve; 19 persons with at least 5 trials of each hand). Middle and right: log loss and confidence gap (mean max(P, 1 - P) minus the share correct: above 0 over-confident, below 0 under-confident) of four aggregates of k attempts for the nested selection: mean P, mean logit, sum of logits (independent evidence) and the sum divided by tau_k, fitted inside each outer fold on the training persons' cross-fitted predictions (nested); person-bootstrap 95 % CIs.",
+  "decision": "Displayed probability: the sum of logits / nested tau_k (lowest log loss at k = 5: 0.142 [0.032, 0.286]; calibrated within its CI (confidence minus share correct +0.017 [-0.019, +0.066])). Against the plain sum of logits its log loss differs by -0.060 [-0.172, +0.017] (Holm p = 0.531). Decision rule: the mean P(right) (the accuracy curve, 94.5% at k = 5), whose probability is under-confident (confidence minus share correct -0.149 [-0.183, -0.100]); the plain sum of logits is calibrated within its CI (confidence minus share correct +0.041 [-0.002, +0.100]); the nested tau_5 (median 1.83) implies about 2.7 independent attempts out of 5.",
+  "file": "M2_11_k_attempts.pdf"
+ },
+ "M2_12_calibration_remedies": {
+  "caption": "Post-hoc calibration remedies, each fitted inside every outer fold on cross-fitted predictions of the training persons (inner person folds) and applied to the held-out person: paired per-person differences against the uncalibrated model in log loss (left) and Brier score (right), person-bootstrap 95 % CIs (below 0 = better). Filled: Holm-adjusted sign-flip p < 0.05 over the calibrators of the model.",
+  "decision": "No post-hoc calibrator improves the held-out log loss after the Holm adjustment over the calibrators of a model, so every model stays uncalibrated. nested selection: best beta -0.006 [-0.021, +0.008] (Holm p = 1.000), adopted: uncalibrated; L2 logistic regression (default): best beta +0.000 [-0.015, +0.016] (Holm p = 1.000), adopted: uncalibrated; LightGBM: best temperature -0.004 [-0.016, +0.007] (Holm p = 1.000), adopted: uncalibrated.",
+  "file": "M2_12_calibration_remedies.pdf"
+ }
+}

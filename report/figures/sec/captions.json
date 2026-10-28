@@ -1,0 +1,47 @@
+{
+ "SEC_01_speed_manipulation": {
+  "caption": "Manipulation check of the speed instruction: every standard-variant trial (small dots) and the per-person median (large dots) of the approach duration (a) and the peak angular speed (b) per instructed speed, for each of the 20 persons; the counts are persons whose medians follow the instruction (Wilcoxon signed-rank over persons, Holm over the contrasts). Oracle windows: the app ended slow trials with a stricter criterion, so the slow durations are partly the criterion (in brackets: the count on label-blind windows; SEC_09).",
+  "decision": "Fast reaches were faster at the peak for 18/20 persons; their shortening (natural/fast duration ratio 1.12 [1.00, 1.23]) is uncertain (order-confounded, see the position-adjusted contrasts).",
+  "file": "SEC_01_speed_manipulation.pdf"
+ },
+ "SEC_02_speed_confusion": {
+  "caption": "Confusion matrices of the instructed speed on label-blind windows (the app's detector re-run with one parameter set for every trial; leave-one-person-out; counts and row shares; rows = instructed speed) for the duration-only baseline, the headline kinematic logistic regression and LightGBM on the rich features; balanced accuracy with its person-bootstrap 95% CI and the macro-F1. Per-class precision and F1: table sec_speed_classes.",
+  "decision": "From the sensors alone the headline reaches balanced accuracy 50.1% (macro-F1 0.391; label-informed oracle windows 67.8%); its best F1 is natural's (0.521), and the class-balanced LR over-predicts slow (precision 13.0%).",
+  "file": "SEC_02_speed_confusion.pdf"
+ },
+ "SEC_03_speed_features": {
+  "caption": "Which kinematic features carry the instructed speed, on label-blind windows. a: per person the difference of the medians between two instructed speeds in units of the feature's SD (median and IQR over persons; standard-variant trials). b: the log-odds contrasts of the headline logistic regression per SD of each feature (mean and range over the outer folds; conditional on the other, correlated features). Features ordered by the slow effect.",
+  "decision": "Fast differs from natural most in peak linear speed and mean angular speed, slow in peak linear speed and angular-speed peaks (within-person, model-free, label-blind windows).",
+  "file": "SEC_03_speed_features.pdf"
+ },
+ "SEC_04_grip_confusion": {
+  "caption": "Confusion matrices of the instructed grip (leave-one-person-out; counts and row shares; rows = instructed grip): the up vector before the onset alone, the headline orientation logistic regression and LightGBM on the rich features; balanced accuracy with its person-bootstrap 95% CI.",
+  "decision": "The grip is recognised with balanced accuracy 95.2% against the instruction; its 18 errors (14 sideways swaps) look like trials held in another grip than instructed (physics and consistency checks; no independent record).",
+  "file": "SEC_04_grip_confusion.pdf"
+ },
+ "SEC_05_grip_physics": {
+  "caption": "Why the grip is recognised and where it fails: the unit up vector in the device frame during the still hold before the onset, per trial, coloured by the instructed grip (a: x against y; b: x per instructed grip and hand). Upright puts the top edge (+y) up, top left the right edge (+x), top right the left edge (-x). Ringed: the trials the headline grip model misclassifies; in 18 of the 18 the up vector lies closer to the median of the predicted grip than to that of the instructed one (the phone was held in the predicted grip).",
+  "decision": "The up vector of the still hold separates the three grips; every misclassified trial (18) sits in the cluster of the predicted grip.",
+  "file": "SEC_05_grip_physics.pdf"
+ },
+ "SEC_06_dominance_auc": {
+  "caption": "Can mirror-invariant kinematics tell a dominant-hand trial (leave-one-person-out, nested logistic regression)? a: the pooled AUC against its label-permutation null (200 permutations within person, the whole nested pipeline re-run; dashed: AUC 0.5, which is not the reference). b: the AUC within each person (dashed: 0.5); diamonds: the left-handed persons, shown individually (for the right-handed the dominant hand is the right hand).",
+  "decision": "No dominant-hand signal detected with the pre-specified model: pooled AUC 0.491 [0.453, 0.533] against a permutation null mean of 0.495 (p 0.582); an exploratory LightGBM reached 0.536 without a permutation baseline.",
+  "file": "SEC_06_dominance_auc.pdf"
+ },
+ "SEC_07_dominance_paired": {
+  "caption": "Dominant vs non-dominant movements within each person: per person the difference of the medians (dominant - non-dominant; a percent change for the duration, the peak angular speed and the path lengths), the bar is the median over persons; Wilcoxon signed-rank over persons, Holm over the 6 features. Diamonds: the left-handed persons (their dominant hand is the left).",
+  "decision": "No detectable difference between the hands within persons (Holm); the CIs still allow e.g. duration -12.1% to +8.6% and angular path -19.1% to +1.2%.",
+  "file": "SEC_07_dominance_paired.pdf"
+ },
+ "SEC_08_speed_followers": {
+  "caption": "Description, not evidence: per person, how much shorter the fast reaches were than the natural ones (median duration ratio, standard-variant trials, label-blind windows; right of the dashed line = shorter) against how well the headline speed model tells that person's fast trials from the natural ones on the same trials (the class decided between fast and natural only, mean of the two recalls; dotted line = chance 0.5). Partly circular: the duration is an input of the model. The persons whose fast reaches were not shorter are named.",
+  "decision": "Descriptive: two-class fast-vs-natural balanced accuracy 71.4% for the 14 persons whose fast reaches were shorter, 52.2% for the other 6 (partly circular).",
+  "file": "SEC_08_speed_followers.pdf"
+ },
+ "SEC_09_segmentation": {
+  "caption": "The app chose its segmentation parameters per instructed speed. a: per trial, the approach duration of the app's stored segment (the oracle window; a slow trial ends only after a stricter, longer stillness) against that of the app's own detector re-run with one parameter set for every trial (label-blind; dashed: equal). b: recall per instructed speed of the headline kinematic logistic regression fitted on each kind of window (leave-one-person-out, person-bootstrap 95% CIs; dotted: chance).",
+  "decision": "With one parameter set a slow reach ends as early as a natural one (1.63 s against 1.60 s), and the headline model falls from 67.8% to 50.1% balanced accuracy: the oracle-window speed results are optimistic (the segmentation used the label).",
+  "file": "SEC_09_segmentation.pdf"
+ }
+}

@@ -1,0 +1,47 @@
+{
+ "X1_01_example_traces": {
+  "caption": "One left-hand upright natural reach of PD01 (left; the most median-like of the case's matched trials) next to the reference trial closest to the reference persons' medians (right): angular speed, yaw rate about gravity and linear acceleration over time from the onset (shaded: the segmented approach; dashed: the first screen touch). All 7 accepted trials of the case are in the figure data.",
+  "decision": "The raw signals behind the compared characteristics: the angular speed, the hand-relevant yaw rate and the linear acceleration of the reach, its first screen touch and the wait before its end. The case is beyond every reference person in reach 7-12 Hz band RMS (above); acceleration at first touch * (above); and time to first screen touch * (below, not robust). Outside the reference interquartile range: settling before the end *.",
+  "file": "X1_01_example_traces.pdf"
+ },
+ "X1_02_preparation": {
+  "caption": "Preparation, hold, the phone at the nose and task behaviour: each grey dot is one of the 20 modelling persons (the mean of their left-hand upright trials; attempts per accepted trial over all their attempts), with their median and interquartile box; the diamond is PD01 (its trials as ticks). Under the case: its percentile, or above / below all when it lies beyond every reference person. \"No return within the recording\" is a share of trials, because the time at the nose is censored when the recording stops first. *: post hoc.",
+  "decision": "Preparation, hold and task behaviour. The case is beyond every reference person in hold power ratio, 3-12 Hz vs rest (above); and no return within the recording (above). Outside the reference interquartile range: time to a valid hold; false starts; reaction time; hold 0.5-3 Hz band RMS (slow sway) *; hold sway, rotation; and attempts per accepted trial. Inside it: hold 3-7 Hz band RMS, hold 7-12 Hz band RMS, nose 3-7 Hz band RMS and nose 7-12 Hz band RMS. The hold power ratio comes from less power outside 3-12 Hz, not from more inside it (3-12 Hz power at the 45th percentile, 0.5-3 Hz at the 5th and 12-15 Hz at the 15th).",
+  "file": "X1_02_preparation.pdf"
+ },
+ "X1_03_spectra": {
+  "caption": "Power spectra of the angular velocity (three axes summed) in the hold before the movement (1.0 s, 1.00-Hz resolution; left-hand upright trials), during the reach (left-hand upright natural trials) and at the nose (0.6 s, 1.67-Hz resolution; left-hand upright trials): median and interquartile band of the modelling persons' person-mean spectra and PD01's mean and trials. Shaded: the 3-7 and 7-12 Hz bands; in the short windows a tone leaks across their border (a 6.5-Hz tone puts 3.5 deg/s RMS into 7-12 Hz in the hold window).",
+  "decision": "Where in the trial the case's spectrum departs from the reference. 7-12 Hz band RMS: hold at the 40th percentile, reach above every reference person, nose at the 45th percentile; 3-7 Hz band RMS: hold at the 55th percentile, reach at the 85th percentile, nose at the 30th percentile. The case's mean reach spectrum lies 3.3-14.9 times the reference median across 7-12 Hz, and its 3-12 Hz spectral peak rises 13.5 dB above its surroundings (mean over trials; reference persons: median 6.2 dB, maximum 11.3 dB): per trial, a more prominent peak than in any reference person's reaches. The hold spectrum lies at 0.1-0.3 times the reference median in 0.5-3 Hz. The hold power ratio comes from less power outside 3-12 Hz, not from more inside it (3-12 Hz power at the 45th percentile, 0.5-3 Hz at the 5th and 12-15 Hz at the 15th).",
+  "file": "X1_03_spectra.pdf"
+ },
+ "X1_04_movement": {
+  "caption": "The reach (left hand, upright, natural speed): each grey dot is one of the modelling persons (up to 20; the first-touch panels only the 14 who touched the screen in these trials), with their median and interquartile box; the diamond is PD01 and the ticks its trials. Under the case: its percentile, or above / below all when it lies beyond every reference person. Accelerations of clip-flagged trials are lower bounds. *: post hoc.",
+  "decision": "Speed, first screen touch, amplitude, smoothness and band power of the reach. The case is beyond every reference person in peak angular speed, movement band (above, not robust); peak linear acceleration (above); acceleration at first touch * (above); time to first screen touch * (below, not robust); tilt change (below); and reach 7-12 Hz band RMS (above). Outside the reference interquartile range: settling before the end *; rotation after the first touch *; rotation, movement band; and log dimensionless jerk. Inside it: approach duration and active movement time *.",
+  "file": "X1_04_movement.pdf"
+ },
+ "X1_05_speed_scaling": {
+  "caption": "Instructed speed (left hand, upright): each grey line is one of the modelling persons (their mean per speed), the dark line their median, the diamonds PD01 (1 slow, 3 natural and 1 fast trial(s)).",
+  "decision": "How much the reach changes with the instructed speed: PD01's slow-to-fast duration ratio is at the 6th percentile (1.28 against a median of 2.25), from 1 slow and 1 fast trial(s), so a single trial can move it.",
+  "file": "X1_05_speed_scaling.pdf"
+ },
+ "X1_06_repeats": {
+  "caption": "The first 3 left-hand upright natural reaches in visit order: each grey line is one of the 8 modelling persons with at least as many, the dark line their median, the diamonds PD01 (whose reaches come from 2 sessions).",
+  "decision": "Change across repeats (sequence effect): PD01's change of the voluntary peak speed per repeat is below every reference person (-38 % per repeat) and of the duration at the 12th percentile; with 3 repeats and 8 reference persons a trend can only be suggested.",
+  "file": "X1_06_repeats.pdf"
+ },
+ "X1_07_hand_signature": {
+  "caption": "The hand signature without a classifier: cumulative yaw about gravity over the time-normalised approach, mirror-normalised so that positive is the direction typical of the hand used (its value at half of the approach, dashed line, is the first-half yaw; at the end, the net yaw). Left: left-hand upright trials (grey: each modelling person's mean; band: interquartile range); middle: the first free-choice trial of each modelling person (20 trials); PD01's repeat-visit free trial dashed, left out of its mean; right: the first-half and the net yaw per person, with PD01's percentile under each group.",
+  "decision": "Whether the chiral hand evidence is typical for the hand used: PD01's hand-consistent first-half yaw is at the 55th percentile and its early yaw peak above every reference person *, but the net yaw turns back: at the 5th percentile, reversed in 6 of 7 accepted trials (reference persons: median 35%, maximum 68%).",
+  "file": "X1_07_hand_signature.pdf"
+ },
+ "X1_08_zscore_summary": {
+  "caption": "Top: every characteristic of PD01 in its matched comparison, robust z against the 20 modelling persons' person-level values on the characteristic's declared scale (grey band: |z| < 2), percentile at the right. Diamonds: beyond every reference person (filled: robust to every check; open: not robust); circles: inside the reference range; shares of binary outcomes have no z (percentile only). *: post hoc. Bottom: the null reference of the count: for each reference person, the number of pre-specified characteristics (left) and phenomena (right) in which they lie beyond all other reference persons, judged on as many trials as PD01 made; the diamond is PD01 against all of them.",
+  "decision": "The overview, and how unusual the count of differences is: PD01 lies beyond every reference person in 9 pre-specified characteristics (7 phenomena); 2 of the 20 reference persons reach that count (rank p 0.143) and 1 reaches the number of phenomena (rank p 0.095): not unique.",
+  "file": "X1_08_zscore_summary.pdf"
+ },
+ "X1_09_multivariate": {
+  "caption": "Multivariate view of the pre-specified key characteristics (reaction time; hold 3-7 Hz band RMS; approach duration; peak angular speed, movement band; rotation, movement band; log dimensionless jerk; spectral arc length (SPARC); reach 3-7 Hz band RMS; reach 7-12 Hz band RMS; first-half yaw, hand-consistent) on their declared scales, robust-standardised against the 20 modelling persons. Left: their first two principal components (fitted on the reference persons; PD01 projected). Middle: Mahalanobis distances with a Ledoit-Wolf covariance, each reference person left out of its own standardisation and covariance; the line is PD01. Right: the number of reference persons at least as far as PD01 with each characteristic left out, on declared and on linear scales.",
+  "decision": "Taken together: 4 of the 20 reference persons are at least as far from the reference centre as PD01 (rank p 0.238, floor 0.048); with one characteristic left out, 1 to 9. On linear scales 1 is (rank p 0.095), and without reach 7-12 Hz band RMS 5 are: the linear result depends on reach 7-12 Hz band RMS.",
+  "file": "X1_09_multivariate.pdf"
+ }
+}

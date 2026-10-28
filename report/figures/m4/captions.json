@@ -1,0 +1,62 @@
+{
+ "M4_01_detection_outcomes": {
+  "caption": "What each cue-free detector hands to the hand classifier on the 598 recordings (one approach each, full recording: rest, approach, hold, return), scored against the app's stored events (numbers are percentages). v0 takes the first movement after a fixed stillness; the learned detectors pick the candidate with the highest leave-one-person-out P(approach) and reject it when that probability is below the threshold.",
+  "decision": "Production detector against v0: the scored segment is the approach in 67 % against 53 %, an earlier movement in 5 % against 28 % and the return in 2 % against 2 %; the production detector rejects 17 % (no answer) instead of scoring them.",
+  "file": "M4_01_detection_outcomes.pdf"
+ },
+ "M4_02_accuracy_ladder": {
+  "caption": "Hand accuracy of the cue-free pipelines on the full recordings (no GO cue, no stored bounds), against the same hand model on the stored (oracle) approach window (dashed line; grey: oracle-window models). An abstention (no approach accepted, P = 0.5) scores half a correct answer. Every pipeline is fitted on the training persons only; leave-one-person-out, person-bootstrap 95 % CIs.",
+  "decision": "The detection loss (oracle minus cue-free) and the choice of detector, training windows, activity filter, low-pass and return use (paired comparisons with Holm-adjusted p in the table m4_paired).",
+  "file": "M4_02_accuracy_ladder.pdf"
+ },
+ "M4_03_stress": {
+  "caption": "Stress test: the stillness before each approach, enforced by the collection app, is cut to the given number of seconds (rec. = as recorded) and the pipelines run again on the full recording (each fitted without the person). Left: hand accuracy, an abstention scoring half a correct answer (band: person-bootstrap 95 % CI). Right: share answered (an approach accepted; solid) and share where the scored segment is the return (dotted). \"context capped at 3 s\" is the detector whose stillness feature sees up to 3 s; the production detector sees at most the instructed 1 s.",
+  "decision": "Cap the stillness feature at the instructed 1 s and ask for that stillness on the page: with 1 s the production pipeline scores 73 % (context capped at 3 s: 66 %); with no stillness it answers 33 % of the recordings and scores the return in 2 %, while v0 scores the return in 23 % (paired differences with Holm-adjusted p in the table m4_stress).",
+  "file": "M4_03_stress.pdf"
+ },
+ "M4_04_attempts": {
+  "caption": "Synthetic multi-attempt sessions (134 per stillness setting; 8 recordings of one person and hand concatenated, the stillness at every junction cut to the given seconds). Left: accuracy when the first k accepted attempts are aggregated (the sign of their mean logit; sessions with fewer attempts use all they have; band: person-bootstrap 95 % CI at 1 s; % = sessions with at least k attempts); dark dashed: only the attempts that are true approaches (the attainable curve); grey dotted: the other attempt rule. Right: the sequential stopping rule at 1 s, one point per threshold p_stop, for three aggregations of the attempts.",
+  "decision": "From 1 to 5 accepted attempts (1 s junctions) the accuracy goes from 78 % to 84 %, against 81 % to 93 % when only the true approaches are kept: 23 % of the accepted attempts are not approaches (arm settling, returns), and rejecting them is what more touches need. Production: the no pairing attempt rule and the stopping rule with s_k fitted on sessions.",
+  "file": "M4_04_attempts.pdf"
+ },
+ "M4_05_calibration": {
+  "caption": "Calibration of the cue-free production detector for one touch (10 equal-mass bins; band: person-bootstrap 95 % CI of the observed share; text: ECE with the 95 % range a perfectly calibrated P of the same values would show, and the calibration slope with its CI). Every calibrator is fitted on cross-fitted predictions of the training persons and applied to the held-out person; abstentions (P = 0.5) included. Right: paired log-loss difference to the uncalibrated pipeline (person bootstrap).",
+  "decision": "Production calibrator chosen inside each fold among the antisymmetric ones (folds: isotonic sym in 20); uncalibrated not consistent with calibration, production consistent.",
+  "file": "M4_05_calibration.pdf"
+ },
+ "M4_06_k3_calibration": {
+  "caption": "Calibration of multi-attempt aggregates on the synthetic sessions (1 s of stillness at each junction, production attempt rule; equal-mass bins, person-bootstrap 95 % bands). Top: P(right) of the first three accepted attempts under four aggregations of their calibrated logits: the mean, the sum (as if independent), the scale s_k fitted on random recordings of the training persons, and s_k = s_1 k^b fitted on cross-fitted synthetic sessions of the training persons. Bottom: the answer of the stopping rule (p_stop 0.90, what the user sees) under three of them, and its ECE against the 95 % range of a perfectly calibrated answer (persons resampled, outcomes redrawn). * production.",
+  "decision": "Production aggregation by the declared rule (calibrated, then fewest fitted parameters): s_k fitted on sessions; consistent with calibration at the stop: s_k fitted on sessions.",
+  "file": "M4_06_k3_calibration.pdf"
+ },
+ "M4_07_coverage": {
+  "caption": "Abstain rule for one touch (cue-free production pipeline, full recordings): answer only when max(P, 1 - P) >= tau (blue; the detector also needs P(approach) >= its threshold) or only when the best candidate has P(approach) >= t (orange; always the best candidate); grey: the same confidence rule on the stored approach windows. Accuracy on the answered recordings against the share answered.",
+  "decision": "The \"please repeat\" rule for a single touch: which threshold buys accuracy at what coverage.",
+  "file": "M4_07_coverage.pdf"
+ },
+ "M4_08_timeline": {
+  "caption": "Online decision on one synthetic session of the left hand (1 s of stillness at each junction), replayed sample by sample. Top: causal activity with the hysteresis thresholds; bars: candidate segments coloured by their most likely class, with P(approach) in %; shading: the true approaches. Bottom: the aggregated P(right) after each accepted attempt (s_k fitted on sessions; dots coloured by what the attempt really was: blue a true approach, orange a return, grey another movement); the pipeline stops when it leaves the band between 1 - p_stop and p_stop, else answers with the P reached after 5 attempts or when the stream ends. The session was not selected for success: it is the first one in person order with at least three attempts; 9 attempts were accepted, 3 of them not an approach; its final answer is wrong.",
+  "decision": "How the online pipeline trims the stream, which bouts it accepts as attempts and when it stops.",
+  "file": "M4_08_timeline.pdf"
+ },
+ "M4_09_latency": {
+  "caption": "When the online pipeline decides an approach is over: median 451 ms after the stored end of the approach (90th percentile 666 ms) and 754 ms after the first screen touch (90th percentile 2002 ms); recordings whose approach was found; values beyond the axis are drawn at its edge.",
+  "decision": "The end-of-approach criterion (stillness at the face plus the look-ahead) decides a median 754 ms after the touch.",
+  "file": "M4_09_latency.pdf"
+ },
+ "M4_10_return": {
+  "caption": "The return as evidence. Top three: stored windows of the trials with a clean return: the approach model, a separate return head (same model fitted on returns) and the sum of their logits. Bottom two: the cue-free production detector (uncalibrated) without and with the return head added when the segment after the chosen approach is classified as a return (all recordings).",
+  "decision": "Whether the production pipeline should also score the return (paired, table m4_paired).",
+  "file": "M4_10_return.pdf"
+ },
+ "M4_11_segment_features": {
+  "caption": "Hand-agnostic features of the 1623 candidate segments of the recordings, by their label from the app's events (densities; AUC: approach against return / other). Medians (displacement along the screen normal (m): approach 0.28, return -0.34, other -0.02; change of up_z (end - start): approach -0.14, return 0.16, other -0.04; vertical displacement (m): approach 0.03, return -0.04, other 0.00; stillness before (s, capped): approach 1.00, return 0.78, other 0.43). The screen-normal features are in the device frame, so they change sign when the phone is held with the screen away from the face (figure M4_12).",
+  "decision": "Features that separate the approach from the return without any hand information: the basis of the segment classifier.",
+  "file": "M4_11_segment_features.pdf"
+ },
+ "M4_12_screen_flip": {
+  "caption": "Every held-out recording scored as recorded (screen towards the face) and as its screen-away twin (the phone turned 180 deg about its long axis: the device x and z axes change sign), by the pipeline of its fold; bars: accuracy (abstention = half credit) with person-bootstrap 95 % CI. Hatched: with the inference page's rest-pose grip check (model-free: the screen-normal component of the up vector while the phone rests before the first movement must be at least 0; otherwise the page asks to turn the screen towards the face and does not answer, scored as an abstention).",
+  "decision": "Screen away, the production pipeline falls from 73 % to 42 % (it scores the return in 39 %). The rest-pose grip check stops 96 % of the screen-away recordings, so the share answered wrongly falls from 39 % to 2 % (they are asked to turn the phone instead), and 4 % of the screen-toward ones (accuracy 72 % against 73 %). The first remedy, a check of the chosen segment's own start pose, stopped 44 % of the screen-away recordings and left their accuracy at 43 %. The grip-normalised alternative is invariant (68 % and 68 %) but less accurate on the recordings (paired with the production detector on the recordings: -4.9 points, [-8.7, -1.8]).",
+  "file": "M4_12_screen_flip.pdf"
+ }
+}

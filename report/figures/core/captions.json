@@ -1,0 +1,107 @@
+{
+ "S2_01_demographics": {
+  "caption": "The 20 persons of the analysis: age 25.1 ± 2.9 years (range 19-29), 12 women and 8 men, 2 left-handers, 8 on iPhone and 12 on Android.",
+  "decision": "Who the model is evaluated on; with 2 left-handers, handedness effects can only be exploratory.",
+  "file": "S2_01_demographics.pdf"
+ },
+ "S2_02_exclusion_flow": {
+  "caption": "Exclusion cascade, applied in order (an attempt is charged to the first rule it fails). E3 moves the tier-0 free-choice trials, whose hand is self-reported, to the separate natural-use set, which then passes the same quality rules; N1 keeps one natural-use trial per person (the earliest) and moves the free trials of repeat visits to a separate repeat set.",
+  "decision": "Primary training/evaluation set and natural-use set; every rule and its count.",
+  "file": "S2_02_exclusion_flow.pdf"
+ },
+ "S2_03_completion_durations": {
+  "caption": "Left: accepted attempts per tier and street session (19 completed, 4 ended early; the bonus tier 4 was taken in 7/19 completed visits). Right: wall-clock durations of the completed visits (median 9.7 min).",
+  "decision": "Partial sessions still give balanced tier-1 data (both hands per tier), so they are kept.",
+  "file": "S2_03_completion_durations.pdf"
+ },
+ "S2_04_conditions": {
+  "caption": "Primary trials per instructed condition (grip · speed · movement variant; 19 conditions), left vs right hand. Upright natural-speed standard reaches dominate; every condition has both hands.",
+  "decision": "Conditions are balanced between hands, so a condition cannot stand in for the label; rare variants are too few for per-condition accuracy.",
+  "file": "S2_04_conditions.pdf"
+ },
+ "S2_05_sampling_gaps": {
+  "caption": "Left: distribution of sample intervals (120 Android and 120 iOS trials). Right: every interval longer than 50 ms in the complete attempts, by platform and by where it falls relative to the movement ([onset - 0.5 s, end + 0.5 s] is \"near\"). The long iOS gaps (> 0.2 s; median 318 ms) start a median 4.2 s into the recording and only 25 % of them follow an audio cue within 0.4 s.",
+  "decision": "60 Hz grid; gaps up to 100 ms are interpolated, a longer gap near the movement excludes the trial (E4d), gaps elsewhere stay NaN in the full stream.",
+  "file": "S2_05_sampling_gaps.pdf"
+ },
+ "S2_06_noise_vs_quantisation": {
+  "caption": "Hand-held noise in the still window before GO, per trial and platform (bar = median), against the noise that Chrome's 0.1-unit rounding adds (SD 0.1/sqrt(12) = 0.029). Medians: specific force 0.152 m/s^2, angular velocity 2.61 deg/s.",
+  "decision": "Native precision is kept on both platforms: the rounding step is far below the physiological noise floor (iOS quantisation stays an ablation, A3).",
+  "file": "S2_06_noise_vs_quantisation.pdf"
+ },
+ "S2_07_spectrum": {
+  "caption": "Cumulative power spectrum of the approach (onset - 0.25 s to end + 0.25 s, raw values resampled to 60 Hz, Hann-tapered over the whole window and zero-padded to 1024 points so that no window is cropped; median over 598 primary trials): 99.2 % of the gyroscope power and 98.4 % of the accelerometer power lie below 15 Hz.",
+  "decision": "Zero-phase 15 Hz low-pass after resampling: removes sensor noise, keeps the movement.",
+  "file": "S2_07_spectrum.pdf"
+ },
+ "S2_08_durations_peaks": {
+  "caption": "Left: oracle approach duration (stored online_v1 segment) of the complete attempts by instructed speed and platform (bar = median; primary median 1.65 s). Right: peak angular speed within the approach. The solid lines mark the E4b and E4c thresholds (the bounds of gate G2 of docs/09); the dashed line is the upper duration bound of G2 (8 s): longer approaches stay in the primary set and are scored apart (gated metrics).",
+  "decision": "Absurd segments (< 0.25 s, or a phone that does not turn) are excluded; instructed speed separates durations only loosely, so models should not rely on it.",
+  "file": "S2_08_durations_peaks.pdf"
+ },
+ "S2_09_segmentation_contact": {
+  "caption": "Left: where the analysis segmentation offline_v1 and the app's stored online_v1 disagree (the oracle is online_v1, which exists for every complete attempt). Right: the first screen touch after GO (nose contact) falls at a median 73 % of the oracle window: the last part of the window is the phone settling against the nose.",
+  "decision": "Oracle approach = stored online_v1 bounds; offline_v1 bounds are kept for ablations.",
+  "file": "S2_09_segmentation_contact.pdf"
+ },
+ "S2_10_example_traces": {
+  "caption": "One left and one right trial of P15 (same phone, grip (upright) and speed (natural)), standardised: device-frame angular velocity and linear acceleration (top two rows) and heading-free gravity-frame channels (bottom). Grey band: oracle approach; beige band: the return of the arm. The yaw rate about gravity has opposite signs early in the reach for the two hands.",
+  "decision": "What the canonical channels look like; why the return must be kept apart from the approach.",
+  "file": "S2_10_example_traces.pdf"
+ },
+ "S2_11_class_means": {
+  "caption": "Time-normalised oracle approach, gravity frame: mean over persons of each person's mean trace (band = ± SE across the 20 persons), left vs right hand. Dashed: the left-hand mean mirrored (chiral channels change sign); it should lie on the right-hand mean if the movement is mirror-symmetric.",
+  "decision": "The chiral channels carry the hand early in the reach; the mirror augmentation is plausible for them, while the even channels show the two hands are not exact mirror images.",
+  "file": "S2_11_class_means.pdf"
+ },
+ "S2_12_sign_patterns": {
+  "caption": "For each of the 64 sign patterns of (a_x, a_y, a_z, w_x, w_y, w_z), the distance between every person's mean left-hand waveform and the sign-flipped mean right-hand waveform of the mirrored grip (device frame, channels scaled to unit RMS). The mirror predicted by the conventions, sigma* = (-,+,+;+,-,-), is circled (rank 1 on Android, 1 on iOS).",
+  "decision": "Checks axes, signs and the iOS sign normalisation on real data: the theoretical mirror ranks first.",
+  "file": "S2_12_sign_patterns.pdf"
+ },
+ "S2_13_first_half_yaw": {
+  "caption": "The pilot finding re-checked on all 20 persons: the yaw about gravity accumulated over the first half of the approach separates the hands better than the net yaw over the whole approach (pooled AUC 0.85 against 0.77; second half 0.49; within-person median 0.90, above 0.5 for 20 of 20 persons). Left: within-person AUC per person; right: pooled distribution.",
+  "decision": "Hand evidence is in the time course of the chiral channels, so models get time-resolved gravity-frame inputs, not only whole-movement integrals.",
+  "file": "S2_13_first_half_yaw.pdf"
+ },
+ "S2_14_platforms": {
+  "caption": "iOS vs Android after standardisation: class-mean yaw rate about gravity (± SE across persons) and the first-half yaw per trial (bar = median). The hands separate with the same sign on both platforms, which confirms the platform sign normalisation.",
+  "decision": "One model for both platforms; platform stays a reporting stratum (and a leave-one-platform-out check).",
+  "file": "S2_14_platforms.pdf"
+ },
+ "S2_15_return_vs_approach": {
+  "caption": "Class-mean yaw rate in the approach and in the return of the same 288 trials. The sign rule fitted on approaches (right iff first-half yaw > 0) is 76 % correct on the approaches and 17 % on the returns (net yaw of the return: 18 %).",
+  "decision": "The return is a time-reversed approach; a cue-free detector that picks it up would feed the model a movement whose chiral evidence is scrambled or reversed, so returns are never pooled with approaches and the detector must reject them.",
+  "file": "S2_15_return_vs_approach.pdf"
+ },
+ "S2_16_cuefree_v0": {
+  "caption": "Baseline cue-free detector v0 (first sustained movement after ≥ 1 s of stillness, no GO time) on the 598 primary recordings: it finds the approach in 53 % (IoU ≥ 0.5), an earlier movement in 28 % and the return in 2 %; right: how long the phone was still before the approach (measured in v0's own signal). That stillness was enforced by the collection app (hold-still gate, foreperiod, reaction time), so these shares are upper bounds for production (see S2_19).",
+  "decision": "Baseline and evaluation contract for the cue-free lane: the main failure is an earlier movement (28 %), not the return.",
+  "file": "S2_16_cuefree_v0.pdf"
+ },
+ "S2_17_gravity_closure": {
+  "caption": "Angle between the rest gravity before the approach, carried through the movement by the gyroscope, and the rest gravity at the nose (no gyro-bias correction). Small closures validate the axis mapping and the gyro-propagated gravity of the gravity-frame channels.",
+  "decision": "gravity_v1 without bias subtraction is good enough for the heading-free channels.",
+  "file": "S2_17_gravity_closure.pdf"
+ },
+ "S2_18_flags_gates": {
+  "caption": "Flags of docs/02 T8-T12 (kept in every analysis) and the predictor gates G1 and G2 of docs/09 D5 (trials that fail a gate stay in training and in the headline metrics, and every result also reports the metrics on the trials that pass both gates, as the predictor will see them).",
+  "decision": "No new exclusions: grip mismatches keep their hand label (T8); gate failures are scored apart.",
+  "file": "S2_18_flags_gates.pdf"
+ },
+ "S2_19_cuefree_stress": {
+  "caption": "Stress test of the cue-free baseline v0: the stillness before each approach, which the collection app enforced, is cut to the given number of seconds (the samples right after the preceding activity are removed, the rest of the recording moves back), and v0 is run again. Below v0's own 1 s stillness rule it can no longer separate the approach from what came before.",
+  "decision": "The v0 shares on the recorded data are upper bounds; a production detector must not rely on a long stillness (or the inference app must ask for one and check it).",
+  "file": "S2_19_cuefree_stress.pdf"
+ },
+ "S2_20_label_consistency": {
+  "caption": "Every planned block of every session (dot size = trials, fill = share of trials whose first-half yaw sign agrees with the instructed hand; text = agreeing/total). Ringed: the swap signature, two adjacent blocks of opposite hands in which every trial contradicts its label, as a hand swap at the start of a session would produce. The labels are never changed automatically; the D6 screen removes flagged trials from training only, and a sensitivity analysis drops the ringed blocks.",
+  "decision": "Raise the ringed blocks with the researcher; keep the labels; report results with and without them.",
+  "file": "S2_20_label_consistency.pdf"
+ },
+ "S2_21_reference_sensitivity": {
+  "caption": "Left: accuracy of the reference floor (logistic regression on the cumulative yaw at 8 instants, mirror-augmented, leave-one-person-out) when the P(right) of k attempts of one person and hand are averaged; every k uses the same 19 persons (those with at least 5 trials per hand). Right: the reference without the swap-signature blocks (P08-s1 block 1, P08-s1 block 2) or with the docs/09 D6 screen, paired against the reference on the same trials.",
+  "decision": "Averaging attempts is worth asking for in the inference app. No label-noise variant differs from the reference beyond its paired 95 % CI, so the labels stay as instructed and the D6 screen stays optional.",
+  "file": "S2_21_reference_sensitivity.pdf"
+ }
+}

@@ -1,0 +1,52 @@
+{
+ "M3_01_model_overview": {
+  "caption": "Every lane-m3 model, leave-one-person-out over 20 persons: accuracy with its 95 % person-cluster bootstrap CI (left; dashed line and band: the reference yaw logistic regression) and the training cost of one LOSO run (right, CPU-minutes, log scale; for a nested choice, of all its candidates). Grey points: the magnitude-only physics demonstrations. Open markers: grip-dependent device-frame input (for a nested choice: grip-dependent configurations among its candidates). Diamonds: configurations designed after outer-fold results had been seen (post hoc).",
+  "decision": "Representation learning is compared with the engineered-feature reference at equal footing; the cost column shows what each point of accuracy costs.",
+  "file": "M3_01_model_overview.pdf"
+ },
+ "M3_02_tf_sign": {
+  "caption": "Why magnitude-only time-frequency inputs cannot see the hand. (a) the yaw rate of the median right-hand approach by first-half yaw (standard variant, natural speed) and its mirror image; (b) their STFT magnitudes are identical (largest difference over every chiral channel (yaw_rate, yaw_cum) of all 598 trials: 0; CWT 0); (c, d) the real parts change sign. (e) LOSO ROC AUC of signed and magnitude-only models: with mirror augmentation a magnitude-only model sees every input twice with opposite labels and sits at chance; without it, it can only use what is not mirror-symmetric between the hands.",
+  "decision": "Time-frequency models of lane m3 keep the sign (real and imaginary parts), never the magnitude alone.",
+  "file": "M3_02_tf_sign.pdf"
+ },
+ "M3_03_treatments": {
+  "caption": "Data treatment and model choices of lane m3, each paired against its family default on the same trials; the body-frame re-checks against the body-frame CNN; the grip-transfer comparisons on the rotated grips (never seen by upright-only training); the nested estimates against the 1D CNN default. Mean per-person accuracy difference with its paired person-bootstrap 95 % CI; right: the option's accuracy on those trials and the sign-flip p Holm-adjusted within its family (family sizes in the m3 summary; rows shown: treatment 16, treatment_body 3, grip 4, nested 3). Colour: the Holm-adjusted verdict. Rows whose CI reaches beyond +-20 points are drawn off scale (arrow at the edge, values printed).",
+  "decision": "Each choice is kept or dropped on this evidence: better after adjustment: gravity + body frame (12, grip-invariant); all 17; worse: CWT (Morlet); every other difference is not detectable. Grip transfer on the rotated grips: better after adjustment: none; worse: device frame (17): upright-only vs all-grip training (rotated grips); every other difference is not detectable.",
+  "file": "M3_03_treatments.pdf"
+ },
+ "M3_04_calibration": {
+  "caption": "Calibration of each role's best lane-m3 model (leave-one-person-out). Top: reliability with 10 equal-mass bins and 95 % person-bootstrap bands (bins held fixed), uncalibrated (grey) and with the shipped remedy, fitted inside every outer fold on the cross-fitted logits of the training persons; ringed points: bins off the diagonal (the person-bootstrap band excludes the bin's mean prediction and the observed share lies outside the 95 % consistency band of a perfectly calibrated model). Bottom: ECE of every remedy (points) against the 95th percentile of its distribution under perfect calibration (grey bars); dashed: the docs/09 target (0.05); * pre-specified (docs/09 D19), (s) shipped; LL = log loss.",
+  "decision": "Shipped remedies, decided by paired, Holm-adjusted log-loss comparisons: deep finalist: Platt (meets the target); minirocket finalist: Platt (meets the target); time-frequency finalist: Platt (misses the target).",
+  "file": "M3_04_calibration.pdf"
+ },
+ "M3_05_saliency": {
+  "caption": "Integrated gradients of the deep finalist's network (1D CNN, gravity + body frame (12)), out of fold: every held-out trial is attributed by its own fold's ensemble (baseline: the normalised zero, which is mirror-invariant). Left, middle: mean attribution per channel and time toward P(right) for right- and left-hand trials (teal pushes toward right, red toward left). Right: the time profile of |IG| of the channels that are odd under the mirror and grip-invariant (yaw_rate, yaw_cum, roll_rate, acc_lat; together 57 % of all |IG|, against 33 % if every channel weighed the same) and of the other (even) channels; grey: the first half. The odd channels are more front-loaded by +3.3 points [+2.0, +4.6] (person bootstrap). Mirror consistency: corr(IG(mirror x), -IG(x)) = 0.81.",
+  "decision": "Whether the network uses the evidence of the engineered features (early, hand-signed motion), which channels carry it, and how much of its early timing is generic.",
+  "file": "M3_05_saliency.pdf"
+ },
+ "M3_06_breakdown": {
+  "caption": "Shipped deep finalist (m3_cal_deep_platt) by platform and by instructed condition (dashed: overall accuracy). Levels with fewer than 5 persons carry no CI (open markers). Conditions only stratify the results; they are never model inputs. The levels are compared without a multiplicity adjustment (exploratory).",
+  "decision": "Which platforms and movement conditions the model is weak on (the PI chooses speed and grip freely).",
+  "file": "M3_06_breakdown.pdf"
+ },
+ "M3_07_attempts": {
+  "caption": "Left: per-person balanced accuracy when k attempts of one person and hand are combined, for the shipped lane-m3 finalists (solid: the mean of P(right), the harness definition, with its 95 % person-bootstrap band; dashed: the recommended aggregator, sum of logits x c_k) and the reference. Right: over-confidence (mean confidence minus accuracy; > 0 = over-confident) of the 4 ways to aggregate k attempts with the shipped deep finalist: the mean P(right), the mean logit, the sum of logits (attempts treated as independent) and the sum of raw logits scaled by c_k fitted on the training persons of each fold. The aggregator was chosen among 4 on these outer folds (exploratory).",
+  "decision": "Ask for several attempts and combine them with an aggregator whose confidence stays calibrated (over-confidence CI containing 0 at k = 3, deep finalist): sum of logits, sum of logits x c_k; under-confident: mean P(right), mean logit; recommended (rule over every role): sum of logits x c_k.",
+  "file": "M3_07_attempts.pdf"
+ },
+ "M3_08_per_person": {
+  "caption": "Accuracy of each of the 20 held-out persons for the shipped lane-m3 finalists (calibrated) and the reference (sorted by the deep finalist). Persons are pseudonymous (P01..).",
+  "decision": "Whether the deep and time-frequency models fail on the same persons as the engineered features.",
+  "file": "M3_08_per_person.pdf"
+ },
+ "M3_09_grip_transfer": {
+  "caption": "(a) Accuracy per instructed grip (leave-one-person-out; the grip only stratifies the result). Models \"trained on upright grips only\" saw no rotated grip in training (training rows chosen by the grip detected from the pre-onset up vector); orange: grips they never saw. (b) Paired mean per-person accuracy differences on the rotated and on the upright grips, Holm-adjusted within the grip family (colour: verdict; right: the Holm-adjusted p, and the per-person log-loss verdict when it is significant after the same adjustment). Device-frame channels (all 17) carry evidence tied to phone coordinates; the heading-following body frame (gravity + body, 12 channels) is unchanged by a rotation of the phone about its screen normal.",
+  "decision": "Grips absent from training, rotated grips: device frame (17): upright-only vs all-grip training: -35.1 points (accuracy worse; log loss higher log loss); body frame (12): upright-only vs all-grip training: -3.5 points (accuracy no detectable difference; log loss higher log loss); body frame upright-only vs gravity frame all-grip: -1.0 points (accuracy no detectable difference; log loss no detectable difference). Training data must cover the production grips.",
+  "file": "M3_09_grip_transfer.pdf"
+ },
+ "M3_10_vs_engineered": {
+  "caption": "Lane-m3 models against linear and engineered-feature models on the same trials. Top: deep against linear models on matched information (lane m1's PHYS6 logistic uses the yaw about gravity plus body-frame roll and lateral motion). Below: the shipped m3 finalists (calibrated) and the nested deep estimates against the reference floor, lane m1's pre-specified physics logistic and lane m2's best engineered-feature model. Mean per-person accuracy difference with its paired person-bootstrap 95 % CI; right: the m3 model's accuracy and the Holm-adjusted sign-flip p (families equal_input and engineered). Colour: the Holm-adjusted verdict.",
+  "decision": "Whether representation learning beats engineered features on new persons: better after adjustment: gravity + body frame: CNN on 12 channels vs logistic on yaw, roll and lateral features; best deep sequence model vs reference (yaw logreg); deep, grip-invariant configuration chosen in every fold vs reference (yaw logreg); deep, configuration chosen in every fold vs reference (yaw logreg); best time-frequency model vs reference (yaw logreg); best deep sequence model vs m1 physics logistic (pre-specified); deep, grip-invariant configuration chosen in every fold vs m1 physics logistic (pre-specified); worse: deep, architecture chosen in every fold vs m2 engineered-feature stack (best of lane m2); every other difference is not detectable.",
+  "file": "M3_10_vs_engineered.pdf"
+ }
+}
