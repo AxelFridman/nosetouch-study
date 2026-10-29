@@ -1,0 +1,177 @@
+%% NoseTouch report: the shared preamble of the three versions (see README.md).
+%%   main.tex   the full report (main text and appendices A-I)     sections/*.tex
+%%   short.tex  the short version (about 15 pages)                  short/*.tex
+%%   brief.tex  the brief version (3-4 pages, two columns)          brief/*.tex
+%% Each driver sets its own \documentclass options, then \input{preamble}, then its title block. Everything that
+%% the section files rely on lives here, so a change here changes all three PDFs.
+%%
+%% Generated inputs (latexmkrc runs scripts/make_assets.py first): figures/<unit>/, tables/<unit>/,
+%% tables/numbers.tex and tables/provenance.tex. Nothing in report/ fits a model.
+%%   \R{unit/key}      a generated number with its unit sign (.1% -> 89.3 %); never type a result by hand
+%%   \Rb{unit/key}     the same number without its unit sign (for "points" and inside brackets)
+%%   \Rci{unit/key}    value [key_lo, key_hi];  \Rcib{unit/key}: the same without the unit sign
+%%   \genfig[opts]{unit/NAME}  a generated figure (figures/<unit>/<NAME>.pdf|png); grey box when missing
+%%   \gentab{unit/name}        a generated table float (tables/<unit>/<name>.tex, with its own caption and
+%%                             label tab:<name>); grey box when missing
+%%   \pending{text}            content still to write: orange in a draft, an error in a final build
+%%   \InputSection{file}       \sectiondir/<file>.tex (\sectiondir: sections, short or brief; set by the driver)
+%% Switch, defined by a driver BEFORE \input{preamble}:
+%%   \nosectionbarrier         floats may move past the next \section (placeins without [section]; brief.tex)
+
+% ------------------------------------------------------------------------------------------ packages
+\usepackage[T1]{fontenc}
+\usepackage{lmodern}
+\usepackage[english]{babel}
+\usepackage{microtype}
+\usepackage{amsmath,amssymb,mathtools,bm}
+\usepackage{graphicx}
+\usepackage{xcolor}
+\usepackage{etoolbox}
+\usepackage{booktabs,multirow,tabularx,longtable,array}
+\usepackage{caption,subcaption}
+\usepackage{float}
+% Floats stay in their section, unless the driver defined \nosectionbarrier (two-column brief).
+\ifdefined\nosectionbarrier\usepackage{placeins}\else\usepackage[section]{placeins}\fi
+% Float placement: let large generated figures share a page with text instead of waiting for a float page.
+\renewcommand{\topfraction}{0.9}
+\renewcommand{\bottomfraction}{0.8}
+\renewcommand{\textfraction}{0.07}
+\renewcommand{\floatpagefraction}{0.75}
+\setcounter{topnumber}{3}
+\setcounter{bottomnumber}{2}
+\setcounter{totalnumber}{5}
+\usepackage{enumitem}
+\usepackage{tcolorbox}
+\usepackage{tikz}
+\usetikzlibrary{positioning,arrows.meta}
+\usepackage{scrlayer-scrpage}
+\IfFileExists{csquotes.sty}{\usepackage{csquotes}}{} % recommended by biblatex; optional here
+\usepackage[backend=biber,style=numeric-comp,sorting=none,maxbibnames=6,minbibnames=3,
+  giveninits=true,doi=true,url=true,eprint=true]{biblatex}
+\addbibresource{references.bib}
+\usepackage[colorlinks=true,linkcolor=blue!45!black,citecolor=blue!45!black,
+  urlcolor=blue!45!black]{hyperref}
+\hypersetup{pdftitle={Which hand? Detecting left- vs right-hand nose touches from smartphone motion sensors},
+  pdfauthor={Axel Fridman},pdfsubject={NoseTouch Stage 2 report (PI: Izhar Bar-Gad)},
+  pdfkeywords={smartphone, motion sensors, handedness, leave-one-person-out, calibration}}
+% Optional packages (README.md): used when installed, skipped otherwise. Without bookmark, KOMA-Script
+% logs a harmless "emergency fix for bookmark level gap" warning.
+\IfFileExists{bookmark.sty}{\usepackage{bookmark}}{}
+\setcounter{biburllcpenalty}{7000}\setcounter{biburlucpenalty}{8000}\setcounter{biburlnumpenalty}{9000}
+
+% Unicode symbols that may reach the text from generated strings (write LaTeX commands in the sections).
+\DeclareUnicodeCharacter{2265}{\ensuremath{\geq}}
+\DeclareUnicodeCharacter{2264}{\ensuremath{\leq}}
+\DeclareUnicodeCharacter{2212}{\ensuremath{-}}
+\DeclareUnicodeCharacter{2248}{\ensuremath{\approx}}
+\DeclareUnicodeCharacter{2192}{\ensuremath{\rightarrow}}
+\DeclareUnicodeCharacter{03C4}{\ensuremath{\tau}}
+\DeclareUnicodeCharacter{03C0}{\ensuremath{\pi}}
+\DeclareUnicodeCharacter{0394}{\ensuremath{\Delta}}
+\DeclareUnicodeCharacter{03C9}{\ensuremath{\omega}}
+
+% ------------------------------------------------------------------------------------------ colours
+% Hand colours are the same in every figure, table, slide and on the predictor's result screen
+% (stage2.plotting.HAND_COLORS).
+\definecolor{handleft}{HTML}{D1495B}
+\definecolor{handright}{HTML}{00739A}
+\definecolor{todo}{HTML}{C05A00}
+
+% ------------------------------------------------------------------------------------------ generated inputs
+% tables/provenance.tex defines \datakind (none|synthetic|real), \buildlabel, \provenanceline,
+% \predictorURL and sets \finalbuildtrue in final mode; tables/numbers.tex defines the result keys.
+\newif\iffinalbuild
+\InputIfFileExists{tables/provenance.tex}{}{}
+\InputIfFileExists{tables/numbers.tex}{}{}
+\providecommand{\datakind}{none}
+\providecommand{\buildlabel}{no results yet}
+\providecommand{\provenanceline}{git ? \textperiodcentered{} data ?}
+\providecommand{\predictorURL}{https://axelfridman.github.io/nosetouch-study/?predict=1}
+\newcommand{\predictorlink}{\expandafter\url\expandafter{\predictorURL}}
+
+% \R{unit/key}: a generated number with its unit sign; \Rb: the bare number; \Rci / \Rcib: with its CI.
+% Never use them in headings or captions of floats that move to the list of figures (none is printed here).
+\makeatletter
+\newcommand{\resmissing}[1]{\textcolor{red!70!black}{\textbf{??\texttt{\detokenize{#1}}}}%
+  \PackageWarning{results}{Undefined result `\detokenize{#1}'}}
+\NewDocumentCommand{\R}{m}{%
+  \ifcsname res@#1\endcsname\csname res@#1\endcsname\else\resmissing{#1}\fi}
+\NewDocumentCommand{\Rb}{m}{%
+  \ifcsname resb@#1\endcsname\csname resb@#1\endcsname
+  \else\ifcsname res@#1\endcsname\csname res@#1\endcsname\else\resmissing{#1}\fi\fi}
+\makeatother
+\NewDocumentCommand{\Rci}{m}{\R{#1}~[\Rb{#1_lo}, \Rb{#1_hi}]}
+\NewDocumentCommand{\Rcib}{m}{\Rb{#1}~[\Rb{#1_lo}, \Rb{#1_hi}]}
+
+% Generated assets. A missing one is a grey box naming the file (a final build stops in the asset step).
+\newcommand{\missingasset}[2]{%
+  \fcolorbox{black!45}{black!4}{\parbox[c][2.3cm][c]{0.9\linewidth}{\centering\sffamily\small
+    \textbf{#1} not generated yet\\[3pt]\scriptsize\expandafter\nolinkurl\expandafter{\detokenize{#2}}}}}
+\newsavebox{\fitbox}
+% \fitwidth{content}: the content at its natural size, shrunk to the line width only when it is wider.
+\newcommand{\fitwidth}[1]{\sbox{\fitbox}{#1}%
+  \ifdim\wd\fitbox>\linewidth\resizebox{\linewidth}{!}{\usebox{\fitbox}}\else\usebox{\fitbox}\fi}
+% \genfig[includegraphics options]{unit/NAME}: figures are drawn at their final width (6.2 in = the text
+% width, or 3.0 in) with 8-pt text, so the default is the natural size, capped at the line width.
+\makeatletter
+\newcommand{\genfig}[2][]{%
+  \IfFileExists{figures/#2.pdf}{\genfig@inc{#1}{figures/#2.pdf}}{%
+    \IfFileExists{figures/#2.png}{\genfig@inc{#1}{figures/#2.png}}{%
+      \missingasset{#2}{report/figures/#2.pdf}}}}
+\newcommand{\genfig@inc}[2]{\ifstrempty{#1}{\fitwidth{\includegraphics{#2}}}{\includegraphics[#1]{#2}}}
+\makeatother
+% \gentab{unit/name}: the generated file is a complete table float (caption, label tab:<name>).
+\newcommand{\gentab}[1]{%
+  \IfFileExists{tables/#1.tex}{\input{tables/#1.tex}}{%
+    \begin{table}[htbp]\centering\missingasset{#1}{report/tables/#1.tex}\end{table}}}
+% \repoimage[width]{label}{path relative to report/}: a hand-placed image (figures/photo/, ../docs/img/).
+\newcommand{\repoimage}[3][\linewidth]{%
+  \IfFileExists{#3}{\includegraphics[width=#1]{#3}}{\missingasset{#2}{#3}}}
+% \InputSection{file}: one section per file under \sectiondir (sections/ for the full report; short.tex and
+% brief.tex redefine it to short or brief); a missing file does not break the build.
+\newcommand{\sectiondir}{sections}
+\newcommand{\InputSection}[1]{\InputIfFileExists{\sectiondir/#1.tex}{}{%
+  \pending{\sectiondir/#1.tex does not exist yet.}}}
+
+% Content still to write. A final build stops at the first one left.
+\newcommand{\pending}[1]{\iffinalbuild
+  \PackageError{nosetouch}{Pending content left in a final build: #1}{Write it or delete it.}\fi
+  \par\noindent\textcolor{todo}{\small\sffamily\textbf{To write:} #1}\par}
+\newlist{todolist}{itemize}{2}
+\setlist[todolist]{label=\textcolor{todo}{\footnotesize$\blacktriangleright$},leftmargin=1.5em,
+  itemsep=1pt,parsep=0pt,topsep=3pt,before={\small\color{black!80}}}
+\AtBeginEnvironment{todolist}{\iffinalbuild
+  \PackageError{nosetouch}{A TODO list is left in a final build}{Write the section or delete the list.}\fi}
+
+% Watermark on every page until the data are real.
+\ifdefstring{\datakind}{real}{}{%
+  \AddToHook{shipout/background}{%
+    \put(80,-650){\rotatebox{52}{\scalebox{3.4}{\textcolor{red!12}{\sffamily\bfseries
+      \ifdefstring{\datakind}{synthetic}{SYNTHETIC DATA}{NO RESULTS YET}}}}}}}
+
+% ------------------------------------------------------------------------------------------ layout
+\pagestyle{scrheadings}
+\clearpairofpagestyles
+\ihead{\small\sffamily NoseTouch \textperiodcentered{} Which hand?}
+\ohead{\small\sffamily\buildlabel}
+\ifoot{\footnotesize\sffamily\provenanceline}
+\ofoot{\pagemark}
+\captionsetup{font=small,labelfont=bf}
+\setcounter{tocdepth}{1}
+\makeatletter\renewcommand*{\@pnumwidth}{2.4em}\makeatother % three-digit page numbers in the contents
+\RedeclareSectionCommand[tocbeforeskip=0.15em plus 1pt,tocnumwidth=2.1em]{section} % contents on one page
+
+% ------------------------------------------------------------------------------------------ notation
+\newcommand{\vomega}{\bm{\omega}}
+\newcommand{\vf}{\mathbf{f}}
+\newcommand{\va}{\mathbf{a}}
+\newcommand{\ghat}{\hat{\mathbf{g}}}
+\newcommand{\Smat}{\mathbf{S}}
+\newcommand{\Qmat}{\mathbf{Q}}
+\newcommand{\Rmat}{\mathbf{R}}
+\newcommand{\dd}{\,\mathrm{d}}
+\newcommand{\pright}{\ensuremath{P(\mathrm{right})}}
+\newcommand{\tauk}{\ensuremath{\tau_k}}
+\newcommand{\code}[1]{\texttt{\detokenize{#1}}}
+\newcommand{\handL}{\textcolor{handleft}{\textsf{\textbf{LEFT}}}}
+\newcommand{\handR}{\textcolor{handright}{\textsf{\textbf{RIGHT}}}}

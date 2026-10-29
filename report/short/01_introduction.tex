@@ -1,0 +1,63 @@
+% short/01_introduction.tex: the question, why it is hard, the approach, the status, related work (about 1 page
+% with Figures 1 and 2). Full version: sections/01_introduction.tex. The status paragraph is the ONLY place that
+% states the audit status of the final-model lane.
+\section{Introduction}\label{sec:intro}
+
+\paragraph{The question.} A person holds a smartphone at arm's length and brings it to the nose with the left or
+the right hand (Figure~\ref{fig:gesture}). The task, set by the principal investigator (PI), is to predict which
+hand from the motion sensors that the browser's DeviceMotion interface delivers at about
+60~Hz~\cite{w3c2025deviceorientation}, as a calibrated probability \pright{} that the right hand moved the phone
+(of the touches given 80\,\%, about 80\,\% should be right-hand touches), for persons the model has never seen.
+
+% Figures 1 and 2 share one float (the gesture frames stacked beside the diagram), placed here so that it lands at
+% the top of the next page and the introduction flows on below it.
+\begin{figure}[tbp]
+\centering
+\begin{minipage}[c]{0.34\linewidth}\centering
+  \begin{subfigure}{\linewidth}\centering
+    \repoimage{gesture-a}{../docs/img/gesture/right_upright_natural_start.png}\caption{Arm extended, still}
+  \end{subfigure}\\[3pt]
+  \begin{subfigure}{\linewidth}\centering
+    \repoimage{gesture-b}{../docs/img/gesture/right_upright_natural_halfway.png}\caption{The approach}
+  \end{subfigure}\\[3pt]
+  \begin{subfigure}{\linewidth}\centering
+    \repoimage{gesture-c}{../docs/img/gesture/right_upright_natural_touch.png}\caption{Nose touch and hold}
+  \end{subfigure}
+\end{minipage}\hfill
+\begin{minipage}[c]{0.58\linewidth}\centering
+  \input{short/diagram_pipeline}
+\end{minipage}\par\medskip
+\captionsetup{format=plain,justification=raggedright,singlelinecheck=false}
+\begin{minipage}[t]{0.34\linewidth}
+  \caption{The gesture as the app shows it (right hand, upright grip, natural speed). The model reads the
+    approach.}
+  \label{fig:gesture}
+\end{minipage}\hfill
+\begin{minipage}[t]{0.58\linewidth}
+  \caption{From sensors to an answer. Steps 3--5 are evaluated on the stored approach windows by leaving one person
+    out; the dashed cue-free steps were simulated with lane m4's reference classifier, not yet with the final
+    model.}
+  \label{fig:pipeline}
+\end{minipage}
+\end{figure}
+
+\paragraph{Why it is hard.} Persons, phones and grips differ, and the device axes turn with the grip. The two hands
+make mirror-image movements, so most simple descriptors (speed, duration, path length) are the same for both, and
+in production there is no start cue: the page must find the approach in a continuous stream.
+
+\paragraph{The approach.} The left--right mirror symmetry of the body shows which quantities can carry the hand
+(Section~\ref{sec:physics}). Each trial is standardised into a gravity frame and a heading-following body frame, four
+model families are compared by leave-one-person-out (LOSO) cross-validation, a pre-specified rule picks the final
+model, and a simulation then removes the start cue (Figure~\ref{fig:pipeline}).
+
+\paragraph{Status.} This preliminary version shortens the full report (report/main.pdf in
+\url{https://github.com/AxelFridman/nosetouch-study}), which states every decision with its evidence. The analysis ran in lanes: the three model-family lanes (m1--m3), preprocessing (p1) and the
+production simulation (m4) each passed two independent audits; the final-model lane is a first pass, not yet
+independently audited, and the final model has not yet run in the cue-free simulation.
+
+\paragraph{Related work.} Most prior studies infer the hand from touch traces or grip during ordinary phone use, and
+several split the data by trial or at random, which overstates the accuracy for new
+persons~\cite{goel2012gripsense,guo2016operating,fernandez2021implicit,saeb2017usecase,little2017crossvalidation}.
+Opposite rotation senses of the two hands were seen with wrist sensors in a clinical finger-to-nose test, without a
+classifier~\cite{mohammadighazi2022ataxia}, and modern classifiers are often over-confident~\cite{guo2017calibration},
+so this study evaluates person-wise and checks calibration.

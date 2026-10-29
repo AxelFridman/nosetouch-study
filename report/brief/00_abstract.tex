@@ -1,0 +1,14 @@
+% brief/00_abstract.tex: the abstract, set across both columns under the title (six sentences, about 130 words).
+% Wording from sections/00_abstract.tex, shortened. Numbers only through \R / \Rci (tables/numbers_index.tsv).
+\begin{abstract}
+\noindent The task is to predict from a smartphone's motion sensors whether the left or the right hand brought it
+from arm's length to the nose, as a calibrated probability \pright{}, for persons the model has never seen. The data
+are \R{describe/primary_trials} instructed trials of \R{describe/n_persons} persons, and every evaluation leaves one
+person out. As the mirror symmetry of the body predicts, the phone's early rotation about gravity changes sign with
+the hand. Among \R{final/n_candidates} candidates, a pre-specified rule chose a one-dimensional convolutional network;
+the nested estimate of this selection, with the candidates fixed, is an accuracy of \Rci{final/nested_accuracy}. With
+its in-fold Platt calibrator its probabilities are consistent with calibration, and three attempts raise its accuracy
+to \R{final/final_kthree} (exploratory). Without a start cue, where the final model has not yet run, a simpler
+reference classifier shows a hand for \R{derived/m4_prod_shown_coverage} of the recordings and is right on
+\R{derived/m4_prod_shown_acc} of them (forced choice \R{m4/prod_acc_forced}; exploratory).
+\end{abstract}

@@ -1,0 +1,43 @@
+% short/07_secondary.tex: speed, grip, dominant hand, demographics, and the PD01 case study in three sentences
+% (about 1 page with Figure 13). Full version: sections/07_secondary.tex and Appendix I (sections/I_case_study.tex).
+% PD01: descriptive only; no age beyond a range, no sex or gendered pronoun, no height, device or dates.
+\section{Secondary analyses}\label{sec:secondary}
+
+The same recordings carry more than the hand. These models feed nothing the page shows, and all use LOSO with
+balanced accuracy, the mean recall over the classes.
+
+\paragraph{Instructed speed.} On label-blind windows, a pre-specified multinomial logistic model on mirror-invariant
+kinematic features recognises the instructed speed at a balanced accuracy of \Rci{sec/speed_lr_common_bacc} (chance
+\R{sec/chance_speed}). The protocol confounds speed with grip, however: the grip alone predicts the speed at
+\Rci{sec/speed_grip_bacc}, and the model does not beat it (Holm $p$ =
+\R{sec/pair_speed_lr_common_vs_speed_grip_d_bacc_p_holm} over the balanced-accuracy comparisons of the speed
+models).
+
+\paragraph{Grip.} The grip is recognised at \Rci{sec/grip_lr_bacc} from the up vector while the phone rests before
+the movement. Its \R{sec/grip_lr_n_errors} errors come from \R{sec/grip_lr_n_persons_with_errors} persons and were
+probably trials held in another grip than instructed, although no independent record confirms it.
+
+\paragraph{Dominant hand.} Mirror-invariant kinematics show no detectable dominant-hand signal: the pooled AUC is
+\Rci{sec/dom_auc}, against a within-person permutation null with mean \R{sec/dom_null_pooled_mean} ($p$ =
+\R{sec/dom_p_pooled}, unadjusted, a single pre-specified test; Figure~\ref{fig:SEC_06_dominance_auc}).
+
+\begin{figure}[htbp]
+\centering
+\genfig{sec/SEC_06_dominance_auc}
+\caption{Mirror-invariant kinematics show no detectable dominant-hand signal: the pooled AUC against its
+within-person permutation null (a) and the AUC within each person (b).}
+\label{fig:SEC_06_dominance_auc}
+\end{figure}
+
+\paragraph{Demographics.} Production has no demographics. In a quick, unaudited first pass, giving a second-stage
+model on the final model's logit the persons' age, sex, height, handedness and usual phone hand changes the accuracy
+by \Rcib{demo/main_dacc}~points (Holm $p$ = \R{demo/main_holm_acc} over the two add-on variants), so they are not
+added.
+
+\paragraph{An exploratory case study: PD01.} One additional participant with Parkinson's disease, PD01, was compared
+with the \R{x1/n_ref_persons} modelling persons in a descriptive case study; no model was trained, tuned or scored on
+PD01's trials. PD01 lies beyond every reference person in \R{x1/null_pre_lfl_case} of \R{x1/n_prespecified}
+pre-specified movement characteristics, but \R{x1/null_pre_lfl_n_ge} reference persons, judged on as many trials,
+reach that count, and no difference survives the Benjamini--Hochberg adjustment over the pre-specified
+characteristics. PD01 is unusual, not unique, and nothing here is a diagnostic claim (full report,
+Appendix~\fullref{app:pd01}).

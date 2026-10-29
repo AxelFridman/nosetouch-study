@@ -1,0 +1,30 @@
+% brief/01_question.tex: the task, why it is hard, the approach, the status (Figure 1: the pipeline, one column).
+% Wording from sections/01_introduction.tex, shortened. This is the only place that states the audit status; it also
+% defines "lane", used by Figure 1's legend (short/diagram_pipeline.tex) and by Sections 4 and 5.
+\section{The question}\label{sec:question}
+The task, set by the principal investigator (PI), is to predict which hand brings a smartphone to the nose from the
+motion sensors that the browser delivers to a web page at about 60~Hz~\cite{w3c2025deviceorientation}.
+
+The answer is a percentage, \pright{}: the probability that the right hand moved the phone. It must be calibrated
+(of the touches given 80\,\%, about 80\,\% should be right-hand touches) and hold for persons the model has never
+seen.
+
+The two hands make mirror-image movements, so simple descriptors such as speed and duration are much the same for
+both; persons, phones and grips add their own variation. In production there is also no start cue: the page must
+find the approach in a continuous stream and decide when it has seen enough.
+
+Figure~\ref{fig:pipeline} shows the pipeline. Every evaluation leaves one person out (LOSO), because splits by
+trial overstate the accuracy for new persons~\cite{saeb2017usecase}.
+
+This version is preliminary: the analysis ran in lanes, one per model family or analysis step, and the final-model
+lane, which selects, calibrates and exports the model, is a first pass, not yet independently audited. The full
+report gives every decision with its evidence (Appendices~\fullref{app:data} to~\fullref{app:pd01}).
+
+\begin{figure}[tbp]
+\centering
+\input{short/diagram_pipeline}
+\caption{From the phone's sensors to the answer shown. The dashed steps, which production needs without a start
+cue, were simulated in lane m4 with a simpler reference classifier, yaw8 (Section~\ref{sec:results}), not yet with
+the final model (Section~\ref{sec:production}).}
+\label{fig:pipeline}
+\end{figure}

@@ -21,8 +21,9 @@ another process never reads half a file; an unchanged file is not rewritten, so 
 * ``tables/provenance.tex``: ``\\datakind``, ``\\buildlabel``, ``\\provenanceline`` (git hash and dirty flag, the cache's
   data identity, persons and trials) and ``\\finalbuildtrue`` in final mode.
 
-The check lists every ``\\R``-family key, ``\\genfig`` and ``\\gentab`` used in main.tex and sections/*.tex that has no
-generated asset; in final mode a missing asset is an error (exit 1).
+The check lists every ``\\R``-family key, ``\\genfig`` and ``\\gentab`` used in the report's own .tex files (the drivers
+main.tex, short.tex and brief.tex, preamble.tex, and sections/, short/ and brief/) that has no generated asset; in
+final mode a missing asset is an error (exit 1).
 """
 from __future__ import annotations
 
@@ -312,7 +313,9 @@ def _strip_comments(text: str) -> str:
 
 
 def check(keys: set[str], figs: set[str], tabs: set[str]) -> list[str]:
-    files = sorted(REPORT.glob('*.tex')) + sorted((REPORT / 'sections').glob('*.tex'))
+    files = sorted(REPORT.glob('*.tex'))
+    for folder in ('sections', 'short', 'brief'):        # the full, the short and the brief version
+        files += sorted((REPORT / folder).glob('*.tex'))
     missing = []
     for f in files:
         text = _strip_comments(f.read_text(encoding='utf-8'))

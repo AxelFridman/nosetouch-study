@@ -1,0 +1,106 @@
+% brief/03_results.tex: evaluation, selection and headline, the shipped model, per-person spread, grips and screen
+% away, calibration, attempts, natural use; Table 1 (tab:key, one column, hand-made from \R keys). Wording from
+% sections/04_methods.tex and sections/05_results.tex, shortened. Details: Appendix F of the full report. Figure 3
+% (both columns) is defined before \section so that it lands at the top of the page after the one where this section
+% starts.
+\begin{figure*}[tbp]
+\centering
+\genfig{final/FINAL_08_calibration}
+\caption{Reliability of the final model with its in-fold Platt calibrator, over all trials and per platform
+(equal-mass bins; person-bootstrap 95\,\% bands; dashed: perfect calibration). The percentage shown is consistent
+with calibration.}
+\label{fig:FINAL_08_calibration}
+\end{figure*}
+
+\section{Results}\label{sec:results}
+These results use the approach window that the app stored during recording, with all tuning nested inside the
+training persons of each LOSO fold. Every 95\,\% confidence interval (CI) is a person-cluster bootstrap
+interval, from 2000 resamples of persons~\cite{saravanan2020bootstrap}, and each p-value names its family of
+comparisons and its adjustment.
+
+Four model families were built: rules and interpretable models on physics features, classical machine learning on
+engineered features, time-frequency and deep sequence models, and a reference floor fixed before any model was built,
+yaw8 (a mirror-augmented logistic regression on the cumulative yaw at 8 instants).
+
+A rule fixed before the comparison chose the final model among \R{final/n_candidates} candidates, each scored as it
+would ship (full report, Appendix~\fullref{app:final}). It keeps the leaders that paired tests cannot separate from
+the lowest log loss, drops those that fail on a grip absent from training, on natural use, or with the screen facing
+away even after a rest-pose check, and takes the one easiest to run in a browser.
+
+The rule chose a one-dimensional convolutional network (1D CNN) on 12 gravity-frame and body-frame channels: the
+final model. Rerunning the whole selection inside every outer fold, on the training persons only and with the
+candidates fixed, gives the headline: a nested, selection-aware accuracy of \Rci{final/nested_accuracy} and an AUC
+of \Rcib{final/nested_auc} (Table~\ref{tab:key}).
+
+The final model's own LOSO accuracy, \Rci{final/final_accuracy}, is exploratory: it was the best of
+\R{final/final_configs} configurations compared on the outer folds, then of \R{final/n_candidates} candidates, and
+its optimism over the nested estimate is \Rcib{final/optimism_accuracy}~points. The results below describe this
+shipped model and share its exploratory status.
+
+The final model is \Rcib{final/final_vs_ref_acc}~points more accurate than the reference floor yaw8, which reaches
+\Rci{reference/accuracy} (Holm $p$~\R{final/final_vs_ref_holm_acc} over the \R{final/paired_ref_m} comparisons with
+the reference).
+
+Accuracy varies by person: \R{final/brk_below80} of \R{describe/n_persons} persons score below
+\R{final/person_threshold}, the lowest \R{final/brk_low_person}, and \R{final/brk_conf_err} of the
+\R{final/brk_err} errors are confident (below 0.2 for the true hand), clustered in a few persons.
+
+The body frame limits the cost of a grip absent from training: trained on upright grips only, the final model
+changes by \Rcib{final/final_grip_d}~points on the sideways grips (Holm $p$ = \R{final/rob_m3_deep_grip_holm} over
+the \R{final/fig_grip_tested} grip tests). The leaders that read device-frame channels change by
+\Rb{final/rob_m2_lgbm_grip_d} to \Rb{final/rob_m2_lr_grip_d}~points (each Holm $p \le$
+\R{final/rob_m2_lgbm_grip_holm} over the same \R{final/fig_grip_tested} tests), which removed them from the selection.
+
+A phone held with the screen facing away defeats every model that reads the screen-relative frame: on synthesised
+screen-away twins the final model falls to \R{final/final_flip_raw}. An exported check of the rest pose before the
+movement, with an un-flip, brings it back to \R{final/final_flip_fixed}.
+
+\begin{table}[tbp]
+\centering
+\caption{Key results (95\,\% person-bootstrap CIs in brackets). The middle four rows describe the final model as
+shipped, an exploratory selection.}
+\label{tab:key}
+\footnotesize
+\begin{tabularx}{\linewidth}{@{}>{\raggedright\arraybackslash}p{0.25\linewidth}>{\raggedright\arraybackslash}X@{}}
+\toprule
+Question & Result \\
+\midrule
+Unseen persons & nested estimate: accuracy \Rci{final/nested_accuracy}, AUC \Rcib{final/nested_auc} \\
+The percentage & calibration error (ECE) \R{final/final_cal_ece} (chance: up to
+  \R{final/final_cal_ece_null_hi}); slope \Rcib{final/final_cal_slope}, intercept
+  \Rcib{final/final_cal_intercept} \\
+Three attempts & accuracy \Rci{final/final_kthree} \\
+Unseen grip & accuracy change on sideways grips when trained on upright ones: \Rcib{final/final_grip_d}~points \\
+Natural use & right-hand recall \R{final/final_nat_recall}$^{a}$ \\
+No start cue & yaw8, not the final model$^{b}$: a hand shown for \R{derived/m4_prod_shown_coverage}, right on
+  \R{derived/m4_prod_shown_acc} of those; forced choice \R{m4/prod_acc_forced} \\
+\bottomrule
+\end{tabularx}
+\par\smallskip\raggedright\scriptsize
+$^{a}$All free-choice trials are right-hand, so a constant right answer would score 100\,\%.
+$^{b}$Lane m4's reference classifier; exploratory, the best of \R{m4/n_configs_final} cue-free pipelines.
+\end{table}
+
+Deep networks are often over-confident~\cite{guo2017calibration}; with a Platt
+calibrator~\cite{platt1999probabilistic} fitted inside each training fold, the final model's probabilities are
+consistent with calibration (Figure~\ref{fig:FINAL_08_calibration}).
+
+Its expected calibration error (ECE), \R{final/final_cal_ece}, is inside the range that a perfectly calibrated model
+shows by chance (up to \R{final/final_cal_ece_null_hi}), with slope \Rcib{final/final_cal_slope} and intercept
+\Rcib{final/final_cal_intercept} (ideal: 1 and 0).
+
+No further remedy helps: Platt, temperature, isotonic and beta calibration, fitted inside the folds on top of it,
+each raise the log loss slightly, none detectably (Holm $p$ = \R{final/cal_platt_holm} for each, over the four
+remedies).
+
+With $k = 3$ attempts of one person and hand, the accuracy of the mean \pright{} rises to \Rci{final/final_kthree}
+(\R{final/agg_persons} persons with at least 5 trials of each hand).
+
+The displayed aggregate, $\pright_k = \sigma\bigl(\sum_i z_i/\tauk\bigr)$, combines the logits $z_i$ of the
+attempts with a scale \tauk{} fitted inside each fold ($\sigma$: the logistic function). It gives nearly the same
+answers and is neither over- nor under-confident on average (calibration in the large only).
+
+On the \R{final/final_nat_n} free-choice trials the right-hand recall is \R{final/final_nat_recall}
+(\R{final/final_nat_credit} correct), with no detectable shortfall against the same persons' instructed trials (Holm
+$p$ = \R{final/nat_m3_deep_holm} over the \R{final/n_candidates} candidates). All free-choice trials are right-hand so
+far, so a constant right answer would score 100\,\% and this recall says nothing about the left hand.

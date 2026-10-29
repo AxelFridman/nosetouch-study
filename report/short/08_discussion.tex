@@ -1,0 +1,33 @@
+% short/08_discussion.tex: what the results mean, limitations, next steps (about 0.75 page). Full version:
+% sections/08_discussion.tex. The audit status is stated only in the introduction; do not repeat it here.
+\section{Discussion}\label{sec:discussion}
+
+\paragraph{What the results mean.} Early in the approach the phone turns about gravity in opposite senses for the
+two hands, so the hand can be read from the motion sensors for persons the model has never seen: the cross-lane
+selection that chose the body-frame 1D CNN has a selection-aware accuracy of \Rci{final/nested_accuracy}, the CNN's
+body frame limits the change on an unseen grip to \Rb{final/final_grip_d}~points (device-frame leaders:
+\Rb{final/rob_m2_lgbm_grip_d} to \Rb{final/rob_m2_lr_grip_d}), and with its in-fold Platt calibrator its percentage
+is consistent with calibration. The main risk lies before the classifier: finding the approach without a cue costs
+accuracy, and free-choice movements are often rejected.
+
+\paragraph{Limitations.}
+\begin{itemize}[nosep,leftmargin=1.5em]
+  \item Only \R{describe/n_persons} persons, mostly students; \R{describe/n_left_handed} left-handed and
+    \R{describe/persons_ios} on iOS.
+  \item One free-choice trial per person, all right-hand: a constant right answer would score 100\,\%.
+  \item The cue-free numbers come from lane m4's yaw8 classifier, not the final model.
+  \item Screen-away holds and multi-attempt sessions are synthesised, not recorded.
+  \item The shipped model's own numbers are optimistic: it was the best of \R{final/final_configs} configurations,
+    then of \R{final/n_candidates} candidates, and its body-frame input was designed after outer-fold results had
+    been seen. The nested estimate removes only the optimism of choosing among the \R{final/n_candidates}
+    candidates, not that of the lanes' own outer-fold choices or of the post hoc body-frame design.
+\end{itemize}
+
+\paragraph{Next steps.}
+\begin{enumerate}[nosep,leftmargin=1.5em]
+  \item Run the final model in the cue-free simulation; teach the detector free-choice approaches.
+  \item Build the inference page from the exported model, with the rest-pose check, the stillness check and the
+    displayed aggregate of equation~\eqref{eq:aggregate}.
+  \item Record more persons, especially left-handed persons, and left-hand free-choice trials.
+  \item Let the PI evaluate the page prospectively on new persons.
+\end{enumerate}

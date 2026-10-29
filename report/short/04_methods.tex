@@ -1,0 +1,63 @@
+% short/04_methods.tex: standardisation, evaluation design, metrics, model families, the selection rule (about
+% 1.5 pages, no figure). The lane codes (m1-m3, p1) are mapped to the families here; m4 in Section 6. Full version: sections/04_methods.tex. The person-cluster bootstrap and LOSO are stated
+% here once for the short version.
+\section{Methods}\label{sec:methods}
+
+\paragraph{Standardisation.} Every trial is resampled onto a uniform 60~Hz grid, the iOS accelerometer sign is
+normalised, and a gravity frame is built without the magnetometer by carrying the gravity direction at rest through
+the movement with the gyroscope. A body frame follows the phone's heading, so a rotation of the phone in the hand
+leaves its channels unchanged; all channels are low-pass filtered at 15~Hz, and the approach window stored by the app
+(the oracle window) is time-normalised to \R{p1/n_norm} samples.
+
+\paragraph{Data treatment.} In the preprocessing lane p1, a fixed panel of pre-specified models judged each
+data-treatment choice against its alternatives, and all \R{p1/n_choices} defaults were kept (full report,
+Appendix~\fullref{app:prep}).
+
+\paragraph{Evaluation.} Every evaluation is LOSO: a model is trained on all other persons and tested on the held-out
+person, once for each of the \R{describe/n_persons} persons, with every hyperparameter, calibrator and aggregation
+scale fitted on the training persons only. All 95\,\% confidence intervals (CIs) are person-cluster bootstrap
+intervals over 2000 resamples of persons~\cite{saravanan2020bootstrap}; paired comparisons use an exact sign-flip
+test on the per-person differences, p-values are adjusted within a named family by Holm's method or, where stated,
+by the Benjamini--Hochberg method, and single pre-specified tests are reported unadjusted.
+
+\paragraph{Selection.} A configuration chosen by its LOSO result among several is exploratory, and its number of
+configurations tried is reported with it. The headline of a selection is its nested estimate: the whole selection is
+repeated inside each outer fold on the training persons only, so the held-out person never influences the choice.
+
+\paragraph{Abstention and natural use.} A pipeline may abstain by returning \pright{} = 0.5 exactly; an abstention
+is never a right-hand answer and earns half credit, and for such a pipeline the coverage (the share answered), the
+accuracy on the answered trials and the forced-choice accuracy are reported. Natural use is scored as right-hand recall on the free-choice trials; all are
+right-hand trials so far, so a constant right answer would score 100\,\%.
+
+\paragraph{Metrics.} Accuracy reads \pright{} above 0.5 as right; the AUC and the log loss measure discrimination
+and the quality of the probabilities. Calibration is judged by three numbers together: the expected calibration
+error (ECE) against its perfect-calibration null band (the ECE values a perfectly calibrated model shows by chance),
+and the slope and intercept of a logistic recalibration, near 1 and 0 for a calibrated model.
+
+\paragraph{Several attempts.} Attempts $i = 1, \dots, k$ of one person and hand are combined as
+\begin{equation}
+  \pright_k = \sigma\!\left(\frac{1}{\tauk}\sum_{i=1}^{k} z_i\right),
+  \label{eq:aggregate}
+\end{equation}
+where $z_i$ is the logit of attempt $i$, $\sigma$ the logistic function and \tauk{} a scale fitted inside each fold;
+the $k$-attempt results use the \R{final/agg_persons} persons with enough trials of each hand.
+
+\paragraph{Model families.} Four families were developed in parallel:
+\begin{itemize}[nosep,leftmargin=1.5em]
+  \item rules and interpretable models (lane m1): the sign of the first-half yaw and antisymmetric logistic models on
+    six physics features (PHYS6);
+  \item classical machine learning on \R{m2/lr_full_n_features} engineered features (lane m2): logistic regression,
+    support vector machines, LightGBM and stacks;
+  \item time-frequency and deep sequence models (lane m3): MiniRocket~\cite{dempster2021minirocket} and
+    one-dimensional convolutional networks (1D CNN);
+  \item the reference floor yaw8: a mirror-augmented logistic regression on the cumulative yaw at 8 instants, fixed
+    before any model was built.
+\end{itemize}
+
+\paragraph{The cross-lane rule.} With the finalists of lanes m1--m3 and p1, the reference floor and a few cross-lane
+variants, \R{final/n_candidates} candidates entered a selection whose rule was fixed in advance: find the lowest log
+loss in production form and the leaders that paired comparisons cannot separate from it (Holm), drop the leaders
+with a Holm-significant accuracy drop on an unseen grip, a natural-use shortfall or a screen-away failure that the
+rest-pose check cannot repair, and take the most portable of the rest. Rerun inside every outer fold, the same rule gives
+the nested, selection-aware estimate; it treats the candidates as fixed and does not repeat the lanes' own choices
+made on the outer folds.

@@ -7,7 +7,7 @@ Style (report/README.md: figures are drawn at their final width and included at 
   a re-stepped handright: the report's ``#00798C`` fails the chroma floor and sits in the CVD warn band
   against the left colour; ``#00739A`` keeps the teal hue and passes every check of the dataviz
   validator with CVD dE 9.7 under protanopia and 27.5 in normal vision; update
-  ``\\definecolor{handright}`` in report/main.tex to match). Platforms: Android ``#008300``, iOS ``#6250d6``
+  ``\\definecolor{handright}`` in report/preamble.tex to match). Platforms: Android ``#008300``, iOS ``#6250d6``
   (CVD dE 28.8). Ordered levels (speed, tier): one blue ramp, light -> dark. Never more hues than needed;
   identity is also given by a legend or a direct label;
 * thin marks, solid hairline grid, no top / right spines;

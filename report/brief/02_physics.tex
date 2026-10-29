@@ -1,0 +1,42 @@
+% brief/02_physics.tex: the data in brief, then why the hand is detectable. Wording from sections/02_data.tex
+% and sections/03_physics.tex, shortened; PD01 is left out of the brief. The video footnote is the one of
+% sections/02_data.tex. Figure 2 (both columns, natural 6.2-in width) is defined before \section so that it is met on
+% page 1 and lands at the top of page 2 (brief.tex: one figure* per page top).
+\begin{figure*}[tbp]
+\centering
+\genfig{core/S2_13_first_half_yaw}
+\caption{The yaw about gravity accumulated over the first half of the approach separates the hands (left: AUC within
+each person; right: the pooled distributions). The net yaw over the whole approach (grey) has a lower pooled AUC,
+\R{describe/net_yaw_auc_pooled}, not tested in a paired comparison.}
+\label{fig:S2_13_first_half_yaw}
+\end{figure*}
+
+\section{Why the hand is detectable}\label{sec:physics}
+The data come from \R{describe/n_persons} students (\R{describe/n_left_handed} left-handed;
+\R{describe/persons_android} on Android, \R{describe/persons_ios} on iOS), who followed the prompts of the NoseTouch
+web app for the hand, the grip (upright or sideways) and the speed of each trial.\footnote{\raggedright A video of a
+data-collection session: \url{https://drive.google.com/file/d/1V9PF623HkJ8MjR6loJhUHnDkCx60W-Jl/view?usp=sharing}.}
+A pre-specified exclusion cascade keeps
+\R{describe/primary_trials} instructed trials and \R{describe/natural_use_n} free-choice ones of the
+\R{describe/attempts_total} recorded attempts.
+
+In the free-choice trial each person chose the hand and reported it afterwards; these natural-use trials, all
+right-hand, are scored but never used for training (full report, Section~\fullref{sec:data}).
+
+Mirroring the body across its midline swaps the hands. It flips the sign of chiral (mirror-odd) quantities, such as
+the yaw rate about gravity, and leaves mirror-even ones, such as speed and duration, unchanged.
+
+If the two hands move as mirror images, only chiral quantities can carry the hand. The yaw rate about gravity is also
+unchanged by any grip, because a grip only rotates the phone's axes.
+
+Early in the approach the forearm swings toward the body's midline, so, seen from above, the phone turns
+counter-clockwise in the right hand and clockwise in the left.
+
+The yaw about gravity accumulated over the first half of the approach separates the hands with a pooled area under
+the ROC curve (AUC) of \R{describe/fhy_auc_pooled}, and within persons the AUC is above 0.5 for
+\R{describe/fhy_persons_auc_above_half} of \R{describe/n_persons} persons (Figure~\ref{fig:S2_13_first_half_yaw}).
+Its sign alone, with no training, classifies \R{describe/fhy_sign_rule_accuracy} of the trials.
+
+The models therefore get time-resolved channels in a gravity frame, and a body frame that follows the phone's
+heading adds channels that do not depend on an upright or sideways grip (a screen-away hold needs a separate check,
+Section~\ref{sec:results}).

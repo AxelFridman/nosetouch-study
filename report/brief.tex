@@ -1,0 +1,55 @@
+%% NoseTouch report: the brief version (driver), 3-4 pages in two columns: the question, why it works, the headline
+%% numbers, the calibrated percentage and the cue-free risk. Every detail is left to the full report (\fullref).
+%% Sections are brief/*.tex; the preamble is shared with main.tex and short.tex (preamble.tex). Generated figures
+%% are 6.2 in wide: use them only as figure* (both columns) at their natural size, never shrunk into one column;
+%% the pipeline diagram (short/diagram_pipeline.tex) is drawn for one column. Build: `latexmk` or `latexmk brief.tex`.
+\documentclass[paper=a4,fontsize=10pt,DIV=16,twocolumn,parskip=false,headings=small,abstract=true,
+  titlepage=false,bibliography=totoc]{scrartcl}
+\newcommand{\nosectionbarrier}{} % floats may cross a \section: two columns and figure* floats need the room
+\usepackage{xr-hyper} % labels of the full report (build/main.aux); must come before hyperref (preamble.tex)
+\input{preamble} % shared with main.tex and short.tex
+\renewcommand{\sectiondir}{brief}
+\hypersetup{pdftitle={Which hand? Detecting left- vs right-hand nose touches from smartphone motion sensors
+  (brief version)}}
+\setlength{\columnsep}{6mm}
+\captionsetup{font=footnotesize,labelfont=bf}
+\renewcommand*{\bibfont}{\footnotesize}
+% figure* floats: one per page top, never a float-only page. Each section file defines its figure* BEFORE its
+% \section, so the figure is met one page early and lands at the top of the page where its section is read.
+\setcounter{dbltopnumber}{1}
+\renewcommand{\dbltopfraction}{0.9}
+\renewcommand{\dblfloatpagefraction}{0.95}
+% The pipeline diagram fills about 80 % of page 1's short columns: keep it a top float beside text, not a float column.
+\renewcommand{\floatpagefraction}{0.9}
+% Tighter gaps between a top float and the text (LaTeX default 20pt): the four pages hold all four visuals.
+\setlength{\dbltextfloatsep}{12pt plus 2pt minus 2pt}
+\setlength{\textfloatsep}{12pt plus 2pt minus 2pt}
+\interfootnotelinepenalty=10000 % never split the video footnote across columns
+
+% \fullref{label}: the number of a section, figure or table of the FULL report, linked to main.pdf.
+\externaldocument[full-]{build/main}[main.pdf]
+\newcommand{\fullref}[1]{\ref{full-#1}}
+
+\title{Which hand?}
+\subtitle{Detecting left- vs right-hand nose touches from smartphone motion sensors (brief version)}
+\author{Axel Fridman}
+\publishers{\normalsize Principal investigator: Izhar Bar-Gad}
+\date{\buildlabel{} \textperiodcentered{} \today}
+
+\begin{document}
+% Title and abstract across both columns.
+\twocolumn[\begin{@twocolumnfalse}
+  \maketitle
+  \InputSection{00_abstract}
+  \vspace{0.8\baselineskip}
+\end{@twocolumnfalse}]
+\thispagestyle{scrheadings}
+
+\InputSection{01_question}      % sec:question   the task, the approach, Fig. 1 pipeline (column)   ~0.6 page
+\InputSection{02_physics}       % sec:physics    data in two sentences; the early yaw, Fig. 2 (both columns) ~0.6 page
+\InputSection{03_results}       % sec:results    evaluation, headline, calibration (Fig. 3), attempts, grips ~1.1 pages
+\InputSection{04_production}    % sec:production no start cue, Fig. 4 (both columns)                 ~0.5 page
+\InputSection{05_discussion}    % sec:discussion meaning, limitations, next steps                    ~0.4 page
+
+\printbibliography[heading=bibintoc]                                                                  % ~0.3 page
+\end{document}

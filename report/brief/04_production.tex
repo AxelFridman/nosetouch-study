@@ -1,0 +1,44 @@
+% brief/04_production.tex: no start cue. Every number here uses lane m4's reference classifier yaw8, NOT the final
+% model (lane prod was not run). Wording from
+% sections/06_production.tex, shortened. Figure 4 (both columns) is defined before \section; brief.tex allows one
+% figure* per page top, so it lands on the page after Figure 3.
+\begin{figure*}[tbp]
+\centering
+\genfig{m4/M4_01_detection_outcomes}
+\caption{What each cue-free detector hands to the hand classifier on the \R{m4/n_recordings} full recordings
+(percentages; the other learned detectors are variants compared in the full report). The production detector scores an
+earlier movement in \R{m4/prod_share_earlier_movement} of them, v0 (the first movement after a fixed stillness) in
+\R{describe/cuefree_share_earlier_movement}.}
+\label{fig:M4_01_detection_outcomes}
+\end{figure*}
+
+\section{Without a start cue}\label{sec:production}
+In production the page receives a continuous stream: it must find the approach, reject other movements and decide
+when to answer. A simulation on the \R{m4/n_recordings} full recordings (lane m4) ran this pipeline with its own
+reference classifier, yaw8, so its numbers measure what detection costs, not how the final model performs without a
+cue (full report, Appendix~\fullref{app:prod}).
+
+The production detector cuts the stream into candidate movements and scores each with a classifier that does not use
+the hand. The segment it hands to yaw8 is the approach in \R{m4/prod_share_approach} of the recordings, and it rejects
+\R{m4/prod_share_rejected} (Figure~\ref{fig:M4_01_detection_outcomes}).
+
+An abstention, a rejected recording or an output of exactly 0.5, is never a right-hand answer. The pipeline shows a
+hand for \R{derived/m4_prod_shown_coverage} of the recordings and is right on \R{derived/m4_prod_shown_acc} of those
+(forced choice \R{m4/prod_acc_forced}); it is exploratory, the best of \R{m4/n_configs_final} pipelines compared on
+the outer folds.
+
+Against yaw8 on the approach windows that the app stored during recording, detection changes the accuracy, with half
+credit for abstentions, by \Rcib{m4/d_prod_vs_oracle}~points (Holm $p$ = \R{m4/d_prod_vs_oracle_p_holm} over
+\R{m4/paired_family_n} comparisons).
+
+In synthesised multi-attempt sessions only \R{m4/sessdet_precision} of the accepted attempts are approaches, and the
+others cancel most of the gain of combining attempts. The stopping rule of Figure~\ref{fig:pipeline} is post hoc and
+exploratory: its aggregation scale was added after the held-out sessions had shown this problem.
+
+The detector rejects free-choice approaches more often than instructed ones (\R{m4/nat_rejected} of
+\R{m4/nat_n}, \R{m4/nat_rejection_rate}, against \R{m4/prim_rejection_rate}; Poisson-binomial
+$p$ = \R{m4/nat_p_poisson}, unadjusted, a single pre-planned test), so it must learn them before production.
+
+Three instructions follow: hold the phone with the screen facing you, keep still for 1~s before the movement, and
+make several attempts. The detector relies on that stillness: with none, the accuracy with half credit falls from
+\R{m4/stress_production_1_acc} (1~s kept) to \R{m4/stress_production_0_acc}.

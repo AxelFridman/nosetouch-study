@@ -1,8 +1,11 @@
-# LaTeX output: latexmk writes auxiliary files to build/ and the PDF next to main.tex.
-# The compiled report (main.pdf) is tracked so it can be read on GitHub; local copies such as preview_draft.pdf are not.
+# LaTeX output: latexmk writes auxiliary files to build/ and each PDF next to its driver (main.tex, short.tex, brief.tex).
+# The compiled versions (main.pdf, short.pdf, brief.pdf) are tracked so they can be read on GitHub; local copies such as
+# preview_draft.pdf are not.
 /build/
 /*.pdf
 !/main.pdf
+!/short.pdf
+!/brief.pdf
 *.aux
 *.bbl
 *.bcf

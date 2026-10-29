@@ -1,0 +1,38 @@
+% short/00_abstract.tex: the abstract and the key-results box (about 1 page with the title).
+% Same content as sections/00_abstract.tex, shorter. Numbers only through \R keys (tables/numbers_index.tsv).
+\begin{abstract}
+\noindent A person brings a smartphone from arm's length to the nose with the left or the right hand. From the
+phone's motion sensors (a web browser, about 60~Hz), this report predicts which hand as a calibrated probability
+\pright{}, for persons the model has never seen. The data are \R{describe/primary_trials} instructed trials of
+\R{describe/n_persons} persons, and every evaluation leaves one person out. The phone's early rotation about gravity
+changes sign with the hand. A pre-specified rule chose a one-dimensional convolutional network among
+\R{final/n_candidates} candidates; the nested, selection-aware estimate of this selection, with the candidates
+fixed, is an accuracy of \Rci{final/nested_accuracy} (area under the ROC curve, AUC, \R{final/nested_auc}). With its
+in-fold Platt calibrator the network's probabilities are consistent with calibration (expected calibration error,
+ECE, \R{final/final_cal_ece}, null band up to \R{final/final_cal_ece_null_hi}; slope \Rcib{final/final_cal_slope}),
+and three attempts raise its accuracy to \R{final/final_kthree} (exploratory). Without a start cue, a simpler reference classifier, not the final model, shows a hand for
+\R{derived/m4_prod_shown_coverage} of the recordings and is right on \R{derived/m4_prod_shown_acc} of them (forced
+choice \R{m4/prod_acc_forced}; exploratory, the best of \R{m4/n_configs_final} pipelines). The main gaps are \R{describe/n_left_handed} left-handed persons, right-hand
+free-choice trials only and no cue-free run of the final model yet.
+\end{abstract}
+
+\begin{tcolorbox}[colback=black!3,colframe=black!45,boxrule=0.5pt,arc=1pt,left=4pt,right=4pt,top=2pt,bottom=2pt,
+  title={\sffamily\bfseries Key results},coltitle=black,colbacktitle=black!10,fonttitle=\small]
+\footnotesize
+\begin{tabularx}{\linewidth}{@{}>{\raggedright\arraybackslash}p{0.18\linewidth}>{\raggedright\arraybackslash}X@{}}
+\textbf{Unseen persons} & Nested, selection-aware accuracy \Rci{final/nested_accuracy}, AUC \Rcib{final/nested_auc}
+  (candidates fixed). Section~\ref{sec:results}. \\[2pt]
+\textbf{The percentage} & With its in-fold Platt calibrator, consistent with calibration: ECE \R{final/final_cal_ece}
+  (null band up to \R{final/final_cal_ece_null_hi}), slope \Rcib{final/final_cal_slope}, intercept
+  \Rcib{final/final_cal_intercept}; no further remedy helps. \\[2pt]
+\textbf{Three attempts} & Accuracy of the mean \pright{} \Rci{final/final_kthree} (exploratory); the displayed
+  aggregate is neither over- nor under-confident on average (calibration in the large only). \\[2pt]
+\textbf{Natural use} & Right-hand recall \R{final/final_nat_recall} (\R{final/final_nat_credit} of
+  \R{final/final_nat_n}); all free-choice trials are right-hand, so a constant right answer would score 100\,\%.
+  \\[2pt]
+\textbf{No start cue} & The production simulation's (lane m4) reference classifier yaw8, \emph{not} the final model
+  (exploratory, best of \R{m4/n_configs_final} pipelines): a hand shown for \R{derived/m4_prod_shown_coverage} of the recordings, right on
+  \R{derived/m4_prod_shown_acc} of those; forced choice \R{m4/prod_acc_forced}; \Rci{m4/prod_acc} with half credit
+  for abstentions. Section~\ref{sec:production}. \\
+\end{tabularx}
+\end{tcolorbox}

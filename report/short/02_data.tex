@@ -1,0 +1,41 @@
+% short/02_data.tex: app, protocol, participants, curation, the dataset in numbers, gaps (about 1.25 pages with
+% Figure 3). Full version: sections/02_data.tex. The video footnote is the one of sections/02_data.tex, unchanged.
+\section{Data}\label{sec:data}
+
+\paragraph{App and protocol.} The data were recorded with NoseTouch, a web app that runs in the phone's browser and
+guides the participant hands-free with spoken and visual prompts. Tier~0 of a visit is one free-choice trial, whose
+hand the participant picks and reports afterwards (the natural-use set, scored but never trained on); tiers~1--4
+prompt the hand, the grip and the speed in blocks of one hand (full report, Table~\fullref{tab:protocol}), and the
+median visit took \R{describe/visit_minutes_median}~min.
+
+% Floats sit before the paragraph that cites them (this one a paragraph earlier, so that it fits on page 3): a
+% float deferred past the end of a section leaves a gap, because every \section flushes the floats before it.
+\begin{figure}[htbp]
+\centering
+\genfig{core/S2_02_exclusion_flow}
+\caption{The exclusion cascade, applied in order; an attempt is charged to the first rule it fails. It yields the
+primary set for training and evaluation and the natural-use set, which is only scored.}
+\label{fig:S2_02_exclusion_flow}
+\end{figure}
+
+\paragraph{Participants.} The participants were Bar-Ilan University students, most of them master's students, each
+offered sweets for their time; a video shows a data-collection session\footnote{\raggedright A video of a
+data-collection session:
+\url{https://drive.google.com/file/d/1V9PF623HkJ8MjR6loJhUHnDkCx60W-Jl/view?usp=sharing}.}. One additional
+participant, PD01, was analysed separately in an exploratory case study and never modelled
+(Section~\ref{sec:secondary}).
+
+\paragraph{Curation.} The data snapshot holds \R{describe/attempts_total} attempts, and a pre-specified exclusion
+cascade keeps \R{describe/primary_trials} primary trials and \R{describe/natural_use_n} natural-use trials
+(Figure~\ref{fig:S2_02_exclusion_flow}). Quality flags are kept and scored apart rather than excluded, so the models
+see the data production will see, and labels are never changed.
+
+\paragraph{The dataset.} The \R{describe/n_persons} persons are \R{describe/n_female} women and \R{describe/n_male}
+men aged \R{describe/age_min} to \R{describe/age_max} years, \R{describe/n_left_handed} of them left-handed;
+\R{describe/persons_android} recorded on Android and \R{describe/persons_ios} on iOS. The primary set has
+\R{describe/primary_left} left-hand and \R{describe/primary_right} right-hand trials.
+
+\paragraph{Gaps.} With \R{describe/n_left_handed} left-handed persons no effect of handedness can be estimated, and
+with \R{describe/persons_ios} iPhone users platform comparisons have little power. All
+\R{describe/natural_use_right} free-choice trials are right-hand trials, so natural use measures right-hand recall
+only: a constant right answer would score 100\,\%.

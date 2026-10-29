@@ -704,7 +704,7 @@ def _report(records: list[StepRecord]) -> None:
     records.append(StepRecord('report', 'latex', 'ok' if r.returncode == 0 else 'failed', dt))
     if r.returncode != 0:
         raise PipelineError(f'report: latexmk failed (exit {r.returncode}); see {REPORT_DIR / "build" / "main.log"}')
-    print(f'[pipeline] report: {REPORT_DIR / "main.pdf"} ({dt:.1f} s)', flush=True)
+    print(f'[pipeline] report: {REPORT_DIR / "main.pdf"}, short.pdf, brief.pdf ({dt:.1f} s)', flush=True)
 
 
 def describe_units(units: Sequence[Unit]) -> str:

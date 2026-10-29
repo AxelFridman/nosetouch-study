@@ -1,0 +1,30 @@
+% brief/05_discussion.tex: meaning, limitations, next steps. Wording from sections/08_discussion.tex, shortened; the
+% audit status is stated only in Section 1. The nested-estimate limitation follows the full report's Limitations
+% bullet and Section 5.2 (the candidates are fixed; the lanes' own choices and the body-frame design stay in).
+\section{Discussion}\label{sec:discussion}
+The hand that brings a phone to the nose can be read from the phone's motion sensors for persons never seen, and the
+signal is physical: early in the approach the phone turns about gravity in opposite senses for the two hands.
+
+With its in-fold Platt calibrator the final model's percentage is consistent with calibration, and its body-frame
+input limits the change on an unseen grip to \Rb{final/final_grip_d}~points.
+
+The main risk lies before the classifier: finding the approach without a cue costs accuracy, and free-choice
+movements are often rejected.
+
+The data are limited: \R{describe/n_persons} students aged \R{describe/age_min} to \R{describe/age_max}, of whom
+\R{describe/persons_ios} used iOS and \R{describe/n_left_handed} are left-handed (accuracy \R{final/brk_left_p11} and
+\R{final/brk_left_p17}; no CI for two persons), and free-choice trials of the right hand only. The cue-free numbers
+come from yaw8, not the final model, and screen-away holds and multi-attempt sessions were synthesised, not recorded.
+
+The nested estimate treats the \R{final/n_candidates} candidates as fixed: it does not remove the optimism of the
+lanes' own outer-fold choices (\R{final/n_exploratory_candidates} candidates; the final model the best of
+\R{final/final_configs}) or of the body-frame input, designed after outer-fold results had been seen.
+
+The learning curve suggests that more persons of the same kind would add little average accuracy
+(\R{final/lc_m3_deep_at40} extrapolated to 40 persons, against \R{final/lc_m3_deep_accall} with
+\R{final/lc_m3_deep_nall} training persons); new persons are needed above all for the groups the data lack.
+
+Next steps: run the final model behind the cue-free detector, teach the detector free-choice approaches and build the
+inference page from the exported model (\R{final/export_kb}~kB, about \R{final/export_ms}~ms per prediction). Then
+record left-handed persons and left-hand free choice, close the open audits and let the PI test the page
+prospectively on new persons.

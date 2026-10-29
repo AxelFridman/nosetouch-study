@@ -1,0 +1,42 @@
+% short/diagram_pipeline.tex: the overview diagram, shared by short.tex and brief.tex (\input it inside a figure).
+% TikZ, drawn at a fixed size (about 7.4 cm wide, explicit 7.5/8.5-pt fonts), so it reads the same at column width in the
+% brief and beside its caption in the short version. Numbers only through \R keys. Dashed boxes: the cue-free steps,
+% simulated by lane m4 with its reference classifier yaw8; the final model has not yet run behind the detector.
+\begin{tikzpicture}[
+    node distance=2.4mm,
+    stage/.style={draw=black!55, rounded corners=1.5pt, fill=black!3, text width=6.8cm, inner sep=2.4pt,
+      align=left, font=\fontsize{7.5}{9}\selectfont},
+    cuefree/.style={stage, dashed, fill=white},
+    flow/.style={-{Latex[length=1.5mm,width=1.3mm]}, black!65, semithick},
+    head/.style={font=\fontsize{8.5}{10}\selectfont\bfseries}]
+  \node[stage] (sensors) {{\fontsize{8.5}{10}\selectfont\bfseries 1\enspace Phone sensors}\\
+    accelerometer and gyroscope, read by the browser at about 60~Hz};
+  \node[cuefree, below=of sensors] (detect) {{\fontsize{8.5}{10}\selectfont\bfseries 2\enspace Find the approach
+    (no start cue)}\\ cut the stream into candidate movements; take the most likely approach if
+    $P(\mathrm{approach}) \geq \R{m4/det_threshold}$, else wait};
+  \node[stage, below=of detect] (std) {{\fontsize{8.5}{10}\selectfont\bfseries 3\enspace Standardise}\\
+    gravity frame and heading-following body frame; \R{p1/n_norm} samples, 12 channels};
+  \node[stage, below=of std] (model) {{\fontsize{8.5}{10}\selectfont\bfseries 4\enspace Model}\\
+    1D CNN, trained only on other persons};
+  \node[stage, below=of model] (calib) {{\fontsize{8.5}{10}\selectfont\bfseries 5\enspace Calibrated
+    \pright{}}\\ Platt calibrator fitted inside each training fold};
+  \node[cuefree, below=of calib] (stop) {{\fontsize{8.5}{10}\selectfont\bfseries 6\enspace Several attempts,
+    then stop}\\ combine the logits, $\sigma\bigl(\sum_i z_i/\tau_k\bigr)$; answer once the result leaves
+    $(1 - p_{\mathrm{stop}},\, p_{\mathrm{stop}})$, $p_{\mathrm{stop}} = \R{m4/p_stop}$, or after
+    \R{m4/k_max} attempts\\[13pt]\mbox{}};
+  % The answer bar inside box 6 (schematic, not to scale): left of the band LEFT, right of it RIGHT.
+  \begin{scope}[shift={(stop.south west)}, xshift=2.5mm, yshift=1.4mm, font=\fontsize{7.5}{9}\selectfont]
+    \fill[handleft!30]  (0,0) rectangle (1.25,0.30);
+    \fill[black!10]     (1.25,0) rectangle (5.05,0.30);
+    \fill[handright!30] (5.05,0) rectangle (6.3,0.30);
+    \draw[black!50] (0,0) rectangle (6.3,0.30);
+    \node[text=handleft]  at (0.625,0.15) {\sffamily\bfseries LEFT};
+    \node[text=black!65]  at (3.15,0.15) {next attempt};
+    \node[text=handright] at (5.675,0.15) {\sffamily\bfseries RIGHT};
+  \end{scope}
+  \foreach \a/\b in {sensors/detect, detect/std, std/model, model/calib, calib/stop}
+    \draw[flow] (\a) -- (\b);
+  \draw[flow] (stop.east) -- ++(3.2mm,0) |- (detect.east); % back to step 2 while P stays inside the band
+  \node[below=1.2mm of stop.south west, anchor=north west, inner sep=0pt, font=\fontsize{7}{8.5}\selectfont,
+    text=black!70] {dashed: simulated with lane m4's classifier yaw8};
+\end{tikzpicture}%

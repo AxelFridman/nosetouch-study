@@ -437,7 +437,7 @@ never changed, and the sensitivity analyses of section 5.5 show they do not move
   street attempts, so docs/09 D10, which makes it the deployed segmentation, needs revisiting by the
   cue-free lane.
 - **Visits run long.** They take about 10 minutes, not 5, and 4 of 23 street visits ended early.
-- **Report colour.** The hand colours are left `#D1495B` and right `#00739A` (`report/main.tex` defines
+- **Report colour.** The hand colours are left `#D1495B` and right `#00739A` (`report/preamble.tex` defines
   `handright` as `00739A`; the old `#00798C` failed the chroma floor and sat in the colour-blind warning band).
 
 ## 9. API for later lanes
