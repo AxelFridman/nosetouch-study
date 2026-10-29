@@ -166,6 +166,7 @@ for (const [profile, use] of PROFILES) {
         page.on('request', (r) => requests.push(r.url()));
         await page.goto(`/?predict=1&sim=1&model=m4&hand=${hand}&seed=7`);
         await expect(page.getByTestId('pm-start')).toBeVisible();
+        await expect(page.locator('#app')).not.toContainText('Loading'); // main.tsx's placeholder is gone once mounted
         await expect(page.getByTestId('pm-demo-badge')).toHaveText(`Demo: simulated ${hand.toUpperCase()} hand`);
         await page.getByTestId('pm-start-btn').click();
         await expect(page.getByTestId('pm-watching')).toBeVisible();

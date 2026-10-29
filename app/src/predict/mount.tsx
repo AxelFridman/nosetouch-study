@@ -36,8 +36,14 @@ export function mount(root: HTMLElement, search: string): () => void {
   doc.title = params.lang === 'he' ? 'NoseTouch · באיזו יד?' : 'NoseTouch · Which hand?';
 
   let disposed = false;
+  let cleared = false;
   const show = (preview: PreviewState | null): void => {
-    if (!disposed) render(<PredictApp params={params} binding={binding} preview={preview} />, root);
+    if (disposed) return;
+    if (!cleared) {
+      root.textContent = ''; // main.tsx's 'Loading…' placeholder: Preact would render next to it, not over it
+      cleared = true;
+    }
+    render(<PredictApp params={params} binding={binding} preview={preview} />, root);
   };
   const previewName = import.meta.env.DEV ? new URLSearchParams(search).get('preview') : null;
   if (import.meta.env.DEV && previewName) {
