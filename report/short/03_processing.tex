@@ -1,0 +1,86 @@
+% short/03_processing.tex: from the raw signals to a standard movement, in the order a reader needs: the even 60 Hz
+% clock (native rates: nothing lost), smoothing (zero-phase Butterworth, gradual), up and the turn about the vertical
+% (gravity removed, the gravity frame and the yaw), the iPhone accelerometer sign, the body frame (Figure 5, TikZ:
+% two horizontal directions set by where the screen faces, so they turn with the phone's heading but not with the
+% grip), cutting out the movement and time-normalising it to 64 points. Numbers and settings only through \R keys.
+\section{From raw signals to a standard movement}\label{sec:processing}
+
+\paragraph{An even clock.} A web page receives the motion samples about \R{describe/rate_hz_median_whole} times per second:
+per session (one phone on one visit), the median rate ranged from \R{describe/rate_hz_min}~Hz (on
+\R{describe/rate_hz_min_platform}) to \R{describe/rate_hz_max}~Hz (on \R{describe/rate_hz_max_platform}). The samples do not arrive at perfectly even times, and some iPhone recordings have gaps of about a third of a
+second (\R{describe/ios_long_gap_attempts} recordings, median \R{describe/ios_long_gap_median_ms}~ms; the lowest average
+rate of a single recording was \R{describe/rate_hz_recording_min}~Hz), so we put every recording on an even
+\R{describe/fs_hz}~Hz clock by linear interpolation, bridging gaps of up to \R{describe/max_gap_ms}~ms (a trial with a
+longer gap near the movement was not kept, Section~\ref{sec:data}). This loses
+essentially nothing: the phones delivered about as many samples as the clock has, and the arm movement is slow
+(\R{describe/gyro_power_below_5hz} of the gyroscope's signal power lies below 5~Hz).
+
+\paragraph{Smoothing.} We smooth every channel with a standard low-pass filter (a Butterworth filter of order
+\R{describe/lowpass_order}, cut-off \R{describe/lowpass_hz}~Hz), run once forward and once backward in time so that it
+does not shift peaks in time. It is not a sharp cut: it damps fast wiggles gradually, keeping
+\R{describe/lowpass_gain_10hz} of the amplitude of a 10~Hz oscillation, \R{describe/lowpass_gain_15hz} at
+\R{describe/lowpass_hz}~Hz and \R{describe/lowpass_gain_20hz} at 20~Hz. During the movement,
+\R{describe/gyro_power_below_lowpass} of the gyroscope's power and \R{describe/acc_power_below_lowpass} of the
+accelerometer's lie below \R{describe/lowpass_hz}~Hz, so the filter removes little of the movement itself.
+
+\paragraph{Up, and the turn about the vertical.} The phone's own axes turn with the grip, so we express the motion
+relative to the vertical. When the phone is still, the accelerometer feels only gravity, which shows which way is down;
+we measure it in the still \R{describe/rest_ms}~ms just before the movement (at arm's length) and just after it (at the
+nose). During the movement the accelerometer also feels the movement itself, so there we carry `down' with the
+gyroscope: it tells how far the phone has rotated since the still moment, and we rotate `down' back by the same amount,
+sample by sample, forward from the start and backward from the end, and blend the two. (We did not use the phone's
+compass, the magnetometer, so we know where up is but not which way the person faces; phones also report their own
+estimate of gravity, but we computed ours.) Carried through the whole movement, the `down' of the start arrives within
+a median of \R{describe/closure_median_deg}$^\circ$ of the `down' measured at the nose.
+
+With up known at every sample, we subtract gravity from the accelerometer, so that every acceleration from here
+on is that of the movement alone (zero when the phone is still), and we split each rotation and acceleration into a vertical and a horizontal part. This
+gives \R{final/cnn_n_gravity} \emph{gravity-frame} channels (a frame is a set of directions to measure along; this one
+is fixed by gravity alone) that do not depend on how the phone sits in the hand: the total rotation speed, the total
+acceleration, the vertical and the horizontal acceleration, the tilting speed (how fast the phone tilts about any
+horizontal axis, a size without a direction), the yaw rate, the yaw and the tilt since the start (how far the phone
+has tipped relative to the vertical since the start of the movement). The \emph{yaw rate} is how fast
+the phone turns about the vertical, like a door on its hinges, counted positive counter-clockwise seen from above
+(Figure~\ref{fig:frames}c); the \emph{yaw} adds it up from the start of the movement, that is, how far the phone has
+turned about the vertical so far.
+
+\begin{figure}[tp]
+\centering
+\input{short/diagram_frames}
+\caption{The phone's own axes (grey) and the directions we measure in (black; this section explains them), as the
+person sees the phone, so that $z$ and `towards the face' point out of the page. (a, b) Turning the phone in the hand
+from upright to sideways swaps its $x$ and $y$ axes, but up, right and towards the face stay the same. (c) Seen from
+above, up points out of the page: the yaw rate, the turn about the vertical, is positive counter-clockwise.}
+\label{fig:frames}
+\end{figure}
+
+\paragraph{The iPhone sign.} Measuring `down' needs the right sign. iPhones report the accelerometer with the opposite
+sign to Android phones on all three axes (the gyroscope has the same sign on both), so on an iPhone `down' would come
+out as `up', every turn about the vertical would be reversed and a left hand would look like a right hand. We therefore
+multiplied every iPhone accelerometer value by $-1$ and checked each session on its own recordings: while the phone is
+held still before a movement, the corrected reading must point up along the axis that the grip puts on top. All
+\R{describe/accel_sign_flipped_ios} iPhone sessions needed the flip, and none of the \R{describe/sessions_android}
+Android sessions did.
+
+\paragraph{The body frame.} The gravity frame has no horizontal direction, so it cannot tell which way the phone moves
+or tilts sideways; the phone's own axes can, but they change with the grip. Four more channels therefore use two
+horizontal directions set by where the screen faces (Figure~\ref{fig:frames}): `towards the face', the direction the
+screen faces, made horizontal, and `right', horizontal and perpendicular to it, towards the person's right. Since the
+screen faces the person, these are in practice the directions of the person's body (hence the name). They turn with the phone when it turns about the vertical, but not when it is turned
+within the plane of its screen, which is all that a change of grip does: held upright or sideways, the screen still
+faces the person, so up, right and towards the face, and every channel measured along them, stay the same, while the
+phone's own $x$ and $y$ axes swap places (Figure~\ref{fig:frames}a, b). Along these directions we measure the roll
+rate (rotation about the towards-the-face direction) and the pitch rate (rotation about the right direction), which
+split the tilting speed into its two horizontal directions, with signs, and the sideways acceleration and the
+acceleration towards the face. The final model reads these \R{final/cnn_n_body}
+\emph{body-frame} channels together with the \R{final/cnn_n_gravity} gravity-frame channels.
+
+\paragraph{Cutting out the movement, and time-normalising it.} The models read only the movement to the nose, between
+the app's two markers. The start marker is the last still moment before the phone's rotation or acceleration rose
+clearly above its resting level, a median of \R{describe/reaction_median_ms}~ms after the start beep; the end marker is
+the moment the phone came to rest at the nose. A median movement lasts \R{describe/duration_median_s}~s, that is,
+\R{describe/approach_samples_median} samples at \R{describe/fs_hz}~Hz. Between the two markers we compute each channel
+at \R{describe/n_norm} points evenly spaced in time, by interpolating between the samples, whatever the duration: the
+first point is the start and the last is the arrival at the nose. Time then runs as a percentage of the movement,
+from 0 to 100\,\%, so movements of different speeds line up point by point, and every movement becomes an input of
+the same size.

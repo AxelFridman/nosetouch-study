@@ -1,0 +1,60 @@
+% short/04_physics.tex: why the hand is detectable: the mechanism (the mirror, the swing of the forearm) and the
+% evidence (Figure 6, the average curves; Figure 7, the first-half yaw), with the AUC explained where it is first used.
+% Uses the gravity frame, the yaw, the roll and the 0-100 % time axis of Section 3. The two figures tell the hands
+% apart by line style as well as by colour (black-and-white print).
+\section{Why the hand is detectable}\label{sec:physics}
+
+\begin{figure}[tbp]
+\centering
+\begin{minipage}[t]{0.49\linewidth}\centering
+  \genfig{core/S2_23_mean_curves}
+  \caption{The average movement to the nose with each hand (left: red, dashed; right: blue, solid): each
+  participant's mean curve, averaged over the \R{describe/n_persons} participants (band: $\pm 1$ standard error).
+  Time runs from the start of the movement (0\,\%) to the arrival at the nose (100\,\%). Top: tilting speed; middle:
+  yaw rate (turning speed about the vertical); bottom: the yaw, with the first half of the movement shaded.}
+  \label{fig:means}
+\end{minipage}\hfill
+\begin{minipage}[t]{0.49\linewidth}\centering
+  \genfig{core/S2_24_first_half_yaw}
+  \caption{The first-half yaw of all \R{describe/primary_trials} trials (\R{describe/primary_left} left-hand,
+  hatched; \R{describe/primary_right} right-hand, filled): how far the phone turned about the vertical in the first
+  half of the movement to the nose (positive: counter-clockwise seen from above). Dashed: the medians of the two
+  hands. Trials beyond $\pm 45^\circ$ are drawn at the edge.}
+  \label{fig:fhy}
+\end{minipage}
+\end{figure}
+
+\paragraph{The mechanism.} Reflecting a movement left to right, as in a mirror, gives the same movement made with the
+other hand. The reflection keeps the speed, the duration, every up--down and towards-the-face motion and the tilting
+forward and back, but it reverses every sideways motion, every turn about the vertical (clockwise becomes
+counter-clockwise) and every roll, the turn about the towards-the-face direction. Because the two arms are close to
+mirror images, the hand can show mainly in such reversed quantities, and the turn about the vertical is the most
+natural one. When the phone is brought to the nose, the forearm swings towards the body's midline, so, seen from
+above, the phone turns counter-clockwise in the right hand and clockwise in the left. Near the nose the wrist turns the
+phone partly back to face the person, so the turn in the first half of the movement should carry the clearest signal.
+
+\paragraph{The evidence.} The average movements of the \R{describe/n_persons} participants show exactly this
+(Figure~\ref{fig:means}). The phone tilts at the same speed with both hands (top panel), but it turns about the
+vertical in opposite directions over most of the first half of the movement, counter-clockwise with the right hand and
+clockwise with the left (middle); added up, the yaw of the two hands ends with opposite signs (bottom). To summarise
+each trial by one number, we take its \emph{first-half yaw}: the yaw at the halfway point in time, that is, the yaw
+rate added up from the start of the movement until halfway to the nose. Its median is
+\R{describe/fhy_median_left_deg}$^\circ$ for the left hand and $+$\R{describe/fhy_median_right_deg}$^\circ$ for the
+right (Figure~\ref{fig:fhy}), and its sign alone (positive: right hand), with no training at all, names the hand in
+\R{describe/fhy_sign_rule_accuracy} of the trials. The two histograms overlap, however, so on the remaining trials the
+sign names the wrong hand: one number is not enough.
+
+How well a number separates the hands is measured by the AUC, the area under the ROC curve (which traces the share of
+right-hand trials called right against the share of left-hand trials called right as the decision threshold
+moves). Its meaning is simple: the chance that a randomly chosen right-hand trial has a larger value than a
+randomly chosen left-hand trial; it is 0.5 for a useless number and 1
+for a perfect one. For the first-half yaw the AUC is \R{describe/fhy_auc_pooled}. Within each participant it is above
+0.5 for all \R{describe/fhy_persons_auc_above_half} participants (median \R{describe/fhy_person_auc_median}), and it is
+about the same on Android phones (\R{describe/fhy_auc_android}) and on iPhones (\R{describe/fhy_auc_ios}). The yaw at
+the end of the movement separates the hands less well (AUC \R{describe/net_yaw_auc_pooled}), because the wrist turns the
+phone back near the nose. Numbers that a mirror leaves unchanged carry almost no information about the hand: of the
+\R{m1/cat_n_features} single-number summaries of the movement that we examined, the \R{m1/cat_n_even} that the mirror
+leaves unchanged, such as the peak rotation speed (AUC \R{m1/cat_peak_gyro_auc_2}) and the duration
+(\R{m1/cat_duration_s_auc_2}), have AUCs between \R{m1/cat_even_auc_min} and \R{m1/cat_even_auc_max}, while the
+\R{m1/cat_n_odd} that the mirror reverses reach up to \R{m1/cat_odd_auc_max} (for example the yaw one second after the start
+of the movement), a little above the first-half yaw.

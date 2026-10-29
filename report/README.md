@@ -1,23 +1,25 @@
 # NoseTouch report (LaTeX)
 
-"Which hand? Detecting left- vs right-hand nose touches from smartphone motion sensors" (Axel Fridman; PI: Izhar Bar-Gad). The report comes in three versions that share one preamble and one set of generated numbers, figures and tables: the full report (`main.pdf`), a short version of about 15 pages (`short.pdf`) and a brief version of 3-4 pages (`brief.pdf`). Each version is a driver (`main.tex`, `short.tex`, `brief.tex`) and one file per section. Every number, figure and table comes from the saved Stage 2 analysis outputs (`analysis/reports/stage2/`, git-ignored) through the asset step; nothing here fits a model.
+"Which hand? Detecting left- vs right-hand nose touches from smartphone motion sensors" (Axel Fridman; PI: Izhar Bar-Gad). The report comes in three versions that share one preamble and one set of generated numbers, figures and tables: the full report (`main.pdf`), the 15-page report for the PI (`short.pdf`, which stands alone) and a brief version of 3-4 pages (`brief.pdf`). Each version is a driver (`main.tex`, `short.tex`, `brief.tex`) and one file per section. Every number, figure and table comes from the saved Stage 2 analysis outputs (`analysis/reports/stage2/`, git-ignored) through the asset step; nothing here fits a model.
 
 ```text
 report/
   preamble.tex        shared preamble: packages, number macros, \genfig, \gentab, \pending, colours, layout, notation
   main.tex            full report driver: \documentclass, \input{preamble}, title, \InputSection of every section
   sections/           00_abstract, 01_introduction ... 08_discussion (main text); A_data ... I_case_study (appendix)
-  short.tex, short/   short version (about 15 pages): 00_abstract ... 08_discussion; short/diagram_pipeline.tex is
-                      the overview diagram (TikZ), shared with the brief version
+  short.tex, short/   the report for the PI (about 15 pages, stands alone): 00_abstract, 01_introduction, 02_data,
+                      03_processing, 04_physics, 05_methods, 06_results, 07_secondary, 08_discussion; its TikZ
+                      diagrams are diagram_overview.tex (the pipeline) and diagram_frames.tex (the axes);
+                      short/diagram_pipeline.tex is the brief version's overview diagram
   brief.tex, brief/   brief version (3-4 pages, two columns): 00_abstract, 01_question ... 05_discussion
   references.bib      bibliography (biblatex + biber)
   latexmkrc           build recipe: asset step, then pdfLaTeX + biber; auxiliary files in build/
   report.toml         where the analysis outputs are ([runs] stage2), the cache metadata, the predictor link
   scripts/make_assets.py   the asset step (copies outputs, writes numbers.tex and provenance.tex, checks usage)
-  figures/<unit>/     generated figures + captions.json (git-ignored); core/ holds the describe figures S2_*
+  figures/<unit>/     generated figures + captions.json (tracked); core/ holds the describe figures S2_*
   figures/photo/      hand-placed session photo (git-ignored; the asset step never touches it)
   figures/static/     hand-made figures (tracked; never touched by the asset step)
-  tables/<unit>/      generated table floats; tables/numbers.tex, numbers_index.tsv, provenance.tex (git-ignored)
+  tables/<unit>/      generated table floats; tables/numbers.tex, numbers_index.tsv, provenance.tex (tracked)
   build/              auxiliary build output (git-ignored)
   main.pdf, short.pdf, brief.pdf   the three compiled versions (tracked)
 ```
@@ -36,7 +38,7 @@ REPORT_MODE=final latexmk       # final build: a missing asset, ??key or \pendin
 latexmk -C                      # remove everything latexmk made
 ```
 
-latexmk builds `main.tex` first: the short and brief versions read its labels (`build/main.aux`) to point into the full report.
+latexmk builds `main.tex` first: the brief version reads its labels (`build/main.aux`) to point into the full report. The short version stands alone and reads nothing from the full report.
 
 Or from `analysis/`: `.venv/Scripts/python.exe -m stage2.pipeline report` (asset step, then latexmk; `--no-latex` for the asset step only). `python -m stage2.pipeline all` ends with the same step.
 
@@ -45,16 +47,17 @@ Or from `analysis/`: `.venv/Scripts/python.exe -m stage2.pipeline report` (asset
 | | Full (`main.tex`) | Short (`short.tex`) | Brief (`brief.tex`) |
 |---|---|---|---|
 | Length | 24 pages of main text + appendices A-I | about 15 pages with figures and references | 3-4 pages |
-| Layout | A4, 11 pt, one column | as the full report | A4, 10 pt, two columns |
+| Layout | A4, 11 pt, one column | A4, 11 pt, one column, a slightly larger text block; page numbers only (no build label, no provenance footer) | A4, 10 pt, two columns |
 | Sections | `sections/` | `short/` | `brief/` |
-| Figures | all | about 12 essential ones, at their natural width | 3 generated (`figure*`, across both columns) + the diagram |
-| Details | appendices | the full report, via `\fullref{label}` | the full report, via `\fullref{label}` |
+| Figures | all | 14: the app drawing, two diagrams, the photo and 10 generated figures, most drawn for this version | 3 generated (`figure*`, across both columns) + the diagram |
+| Details | appendices | none: it stands alone and never points to another version | the full report, via `\fullref{label}` |
 
 - The three versions share `preamble.tex`, so every macro, colour and number works the same in each; a driver sets only its `\documentclass` options, its title and `\sectiondir` (the folder `\InputSection` reads).
 - `\fullref{label}` prints the number of a section, figure or table of the full report and links to `main.pdf` (package `xr-hyper`): `full report, Appendix~\fullref{app:final}`.
-- The short and brief versions say the same as the full report, with fewer words: one or two sentences per paragraph, captions of one or two sentences. Content changes go to the full report first.
+- The brief version says the same as the full report, with fewer words: one or two sentences per paragraph, captions of one or two sentences. Content changes go to the full report first.
+- The short version is the report for the PI. It is written for a reader who has seen nothing else: every term is explained before (or where) it is first used, it never mentions the full report, an appendix or a lane, and it has its own plain figures (S2_22-S2_24, FINAL_15-FINAL_19, DEMO_02_simple, X1_10), drawn from the same saved results. Its print settings (no build label, no provenance footer) are made in `short.tex` only.
 - Generated figures are drawn 6.2 in wide (the full report's text width). Use them at their natural size: in the brief version only as `figure*`, never shrunk into one column. The overview diagram `short/diagram_pipeline.tex` is drawn for one column.
-- `brief.tex` defines `\nosectionbarrier` before the preamble, so its floats may cross a section; the other two keep floats in their section.
+- `brief.tex` and `short.tex` define `\nosectionbarrier` before the preamble, so their floats may cross a section (the short version ends its floats with a `\FloatBarrier` before the references); the full report keeps floats in their section.
 
 ## How numbers, tables and figures get into the PDF
 
@@ -65,7 +68,7 @@ Or from `analysis/`: `.venv/Scripts/python.exe -m stage2.pipeline report` (asset
 | `figures/<unit>/<NAME>.pdf` (PNG fallback), `figures/<unit>/captions.json` | every `captions.json` under `analysis/reports/stage2/figures/` (root registry -> `core/`) | `\genfig{<unit>/<NAME>}` inside your own `figure` float |
 | `tables/<unit>/<name>.tex` | every `.tex` under `analysis/reports/stage2/tables/<unit>/`; each tabular wrapped in `\fitwidth` | `\gentab{<unit>/<name>}`: a complete float with its caption and `\label{tab:<name>}` |
 | `tables/numbers.tex`, `tables/numbers_index.tsv` | every `results/<unit>_numbers.json` | `\R{<unit>/<key>}`, `\Rb`, `\Rci`, `\Rcib` |
-| `tables/provenance.tex` | git, the cache's `meta.json`, `describe` numbers | page footer: git hash, data identity, persons, trials |
+| `tables/provenance.tex` | git, the cache's `meta.json`, `describe` numbers | page footer of the full and brief versions: git hash, data identity, persons, trials |
 
 Number macros:
 - `\R{final/some_key}` prints the value as its numbers file formats it, **with** its unit sign: a `.1%` entry prints `89.3 %`. Never add `\%` after `\R`.
@@ -102,7 +105,7 @@ Tables: `python -m stage2.pipeline tables --lanes <unit>`; numbers: `python -m s
 
 ## Privacy
 
-The repository is public: generated figures and tables, the photo and the build output stay out of git (`.gitignore`). Report-facing tables and figure data are checked by the analysis' privacy tests (no name tokens, codes, backend ids or timestamps).
+The repository is public. The researcher approved publishing the report and everything it shows (2026-10-28), so the generated figures, tables and numbers and the session photo are tracked, and a clone can rebuild the PDFs without the participant data; the participant data, the analysis outputs (`analysis/data/`, `analysis/reports/`) and the build output stay out of git (`.gitignore`). Report-facing tables and figure data are checked by the analysis' privacy tests (no name tokens, codes, backend ids or timestamps).
 
 ## Troubleshooting
 

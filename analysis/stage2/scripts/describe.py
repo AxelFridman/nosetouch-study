@@ -2,7 +2,7 @@
 
     cd analysis
     python -m stage2.pipeline describe                                   # compute (skipped when current), figures, tables, numbers
-    python -m stage2.pipeline figures --lanes describe                   # redraw every S2_01..S2_20 figure (seconds)
+    python -m stage2.pipeline figures --lanes describe                   # redraw every S2_01..S2_24 figure (seconds)
     python -m stage2.pipeline figures --lanes describe --only S2_05_sampling_gaps
     python -m stage2.pipeline compute --lanes describe --only raw_quality --force   # one section (or a figure's name)
     python -m stage2.scripts.describe [--force] [--rebuild-cache]       # the same as 'pipeline describe'
@@ -188,8 +188,8 @@ def load_summary() -> dict[str, Any]:
 
 #: every figure input compute writes (the currency check of the compute step)
 INPUT_FILES = ('sets.json', 'primary_trials.csv', 'sampling_intervals.json', 'spectrum.json', 'complete_attempts.csv',
-               'example_traces.json', 'class_means.json', 'sign_patterns.json', 'platform_means.json',
-               'return_means.json', 'stillness_before_onset.csv', 'stress_settings.json')
+               'example_traces.json', 'raw_example.json', 'class_means.json', 'sign_patterns.json',
+               'platform_means.json', 'return_means.json', 'stillness_before_onset.csv', 'stress_settings.json')
 
 
 # ───────────────────────────── the inputs of one compute run ─────────────────────────────
@@ -592,6 +592,45 @@ def example_traces(ctx: Ctx) -> None:
     ctx.summary['example_traces'] = {'person': L['person_id'], 'left_trial': L['trial_key'], 'right_trial': R['trial_key']}
 
 
+RAW_EVENTS = ('go_ms', 'onset_ms', 'first_touch_ms', 'end_ms', 'end_detected_ms', 'return_onset_ms', 'return_end_ms')
+
+
+def raw_example(ctx: Ctx) -> None:
+    """The two example trials of S2_10 (one person, one trial per hand) as the phone delivered them (S2_22):
+    the raw sample times, the gyroscope (rotationRate about the device x, y, z axes, deg/s) and the accelerometer
+    including gravity (m/s^2). Only the session's unit and sign convention is applied (``Dataset.signals``): no
+    resampling, no filter, no gravity removal. ``as_recorded`` is True when that convention changed no value."""
+    ex = ctx.summary.get('example_traces') or {}
+    keys = [ex.get('left_trial'), ex.get('right_trial')]
+    if not all(keys):
+        saved = load_input('example_traces')
+        keys = [t['trial_key'] for t in saved.get('trials', [])]
+    T = ctx.T.set_index('trial_key', drop=False)
+    trials = []
+    for key in keys:
+        if key not in T.index:
+            continue
+        r = T.loc[key]
+        tid = r['trial_id']
+        raw = ctx.ds.streams(tid)
+        sig = ctx.ds.signals(tid)
+        go = float(r['go_ms'])
+        same = bool(np.allclose(sig.accg, raw.accg, equal_nan=True) and np.allclose(sig.gyro, raw.gyro(), equal_nan=True))
+        t = np.asarray(sig.t, dtype=float)
+        trials.append({
+            'hand': r['hand'], 'person_id': r['person_id'], 'trial_key': key, 'platform': r['platform'],
+            'orientation': r['orientation'], 'speed': r['speed'], 'gravity_sign': int(sig.gravity_sign),
+            'as_recorded': same, 'n_samples': int(t.size),
+            'rate_hz': float((t.size - 1) / (t[-1] - t[0]) * 1000.0) if t.size > 1 else math.nan,
+            'events_s': {k[:-3]: ((float(r[k]) - go) / 1000.0 if pd.notna(r[k]) else None) for k in RAW_EVENTS},
+            't_s': (t - go) / 1000.0,
+            'gyro': {ax: sig.gyro[:, j] for j, ax in enumerate('xyz')},
+            'acc': {ax: sig.accg[:, j] for j, ax in enumerate('xyz')}})
+    save_input('raw_example', {'person_id': trials[0]['person_id'] if trials else None, 'trials': trials,
+                               'what': 'device-frame gyroscope (deg/s) and accelerometer including gravity (m/s^2) '
+                                       'at the raw sample times; W3C axes and sign; no resampling or filter'})
+
+
 # ───────────────────────────── 9. class means, mirror symmetry, first-half yaw ─────────────────────────────
 
 
@@ -956,7 +995,8 @@ def label_consistency(ctx: Ctx) -> None:
 SECTIONS: dict[str, Callable[[Ctx], None]] = {
     'participants': participants, 'exclusion_flow': exclusion_flow, 'completion': completion,
     'conditions': conditions, 'primary_trials': primary_trials, 'raw_quality': raw_quality,
-    'durations_segmentation': durations_segmentation, 'example_traces': example_traces, 'class_means': class_means,
+    'durations_segmentation': durations_segmentation, 'example_traces': example_traces, 'raw_example': raw_example,
+    'class_means': class_means,
     'sign_patterns': sign_patterns, 'first_half_yaw': first_half_yaw, 'platform_differences': platform_differences,
     'return_risk': return_risk, 'cuefree': cuefree_baseline, 'cuefree_stress': cuefree_stress,
     'gravity_closure': gravity_closure, 'flags_gates': flags_gates, 'label_consistency': label_consistency,
@@ -965,11 +1005,12 @@ SECTIONS: dict[str, Callable[[Ctx], None]] = {
 SECTION_FIGURES: dict[str, tuple[str, ...]] = {
     'participants': ('S2_01_demographics',), 'exclusion_flow': ('S2_02_exclusion_flow',),
     'completion': ('S2_03_completion_durations',), 'conditions': ('S2_04_conditions',),
-    'primary_trials': ('S2_13_first_half_yaw', 'S2_14_platforms', 'S2_17_gravity_closure'),
+    'primary_trials': ('S2_13_first_half_yaw', 'S2_14_platforms', 'S2_17_gravity_closure', 'S2_24_first_half_yaw'),
     'raw_quality': ('S2_05_sampling_gaps', 'S2_06_noise_vs_quantisation', 'S2_07_spectrum'),
     'durations_segmentation': ('S2_08_durations_peaks', 'S2_09_segmentation_contact'),
-    'example_traces': ('S2_10_example_traces',), 'class_means': ('S2_11_class_means',),
-    'sign_patterns': ('S2_12_sign_patterns',), 'first_half_yaw': ('S2_13_first_half_yaw',),
+    'example_traces': ('S2_10_example_traces',), 'raw_example': ('S2_22_raw_example',),
+    'class_means': ('S2_11_class_means', 'S2_23_mean_curves'),
+    'sign_patterns': ('S2_12_sign_patterns',), 'first_half_yaw': ('S2_13_first_half_yaw', 'S2_24_first_half_yaw'),
     'platform_differences': ('S2_14_platforms',), 'return_risk': ('S2_15_return_vs_approach',),
     'cuefree': ('S2_16_cuefree_v0',), 'cuefree_stress': ('S2_19_cuefree_stress',),
     'gravity_closure': ('S2_17_gravity_closure',), 'flags_gates': ('S2_18_flags_gates',),
@@ -1320,6 +1361,81 @@ def describe_numbers() -> dict[str, dict[str, Any]]:
                                          'cue-free v0: the approach is among all its detections')
     n['cuefree_onset_error_median_ms'] = E(cf['onset_error_median_ms'], '.0f', src, 'cue-free v0: median onset lag (ms)')
     n.update(_more_numbers(s, src))
+    n.update(_plain_numbers())
+    return n
+
+
+def _plain_numbers() -> dict[str, dict[str, Any]]:
+    """Numbers behind the plain explanations of the stand-alone report: height by sex, the phones' native motion
+    sampling rates before the 60 Hz grid, the accelerometer sign per platform and the processing settings (saved
+    tables and stage2/config.py only)."""
+    E = RX.numbers_entry
+    n: dict[str, dict[str, Any]] = {}
+    part = load_table('participants')
+    pc = 'tables/participants.csv'
+    for sx, word in (('female', 'women'), ('male', 'men')):
+        h = part.loc[part['sex'] == sx, 'height_cm'].astype(float).dropna()
+        n[f'height_mean_{sx}'] = E(float(h.mean()), '.1f', pc, f'mean height of the {word} who gave one (cm)')
+        n[f'height_sd_{sx}'] = E(float(h.std(ddof=1)), '.1f', pc, f'SD of height, {word} who gave one (cm)')
+        n[f'height_n_{sx}'] = E(int(h.size), 'd', pc, f'{word} who gave a height')
+    # native rate per phone and visit (session): the median, over the session's complete recordings, of each
+    # recording's mean rate ((samples - 1) / duration); a single recording's mean rate also counts its gaps
+    q = load_table('sampling_per_trial')
+    qc = 'tables/sampling_per_trial.csv'
+    q = q.assign(session=q['trial_key'].astype(str).str.rsplit('-', n=1).str[0])
+    per = q.groupby(['session', 'platform'], as_index=False)['hz'].median()
+    lo, hi = per.loc[per['hz'].idxmin()], per.loc[per['hz'].idxmax()]
+    one = q.loc[q['hz'].idxmin()]
+    n['rate_hz_min'] = E(float(lo['hz']), '.1f', qc, 'native motion rate of the slowest phone (session median, Hz)')
+    n['rate_hz_max'] = E(float(hi['hz']), '.1f', qc, 'native motion rate of the fastest phone (session median, Hz)')
+    n['rate_hz_median'] = E(float(per['hz'].median()), '.1f', qc, 'native motion rate, median over sessions (Hz)')
+    # the same value to the nearest whole number, for 'about N times per second' in plain prose
+    n['rate_hz_median_whole'] = E(float(per['hz'].median()), '.0f', qc,
+                                  'native motion rate, median over sessions, to the nearest whole number (Hz)')
+    n['rate_hz_min_platform'] = E(PLATFORM_NAMES.get(lo['platform'], lo['platform']), '', qc,
+                                  'platform of the slowest phone')
+    n['rate_hz_max_platform'] = E(PLATFORM_NAMES.get(hi['platform'], hi['platform']), '', qc,
+                                  'platform of the fastest phone')
+    n['rate_hz_sessions'] = E(int(len(per)), 'd', qc, 'sessions (one phone each) in the rate summary')
+    n['rate_hz_recordings'] = E(int(len(q)), 'd', qc, 'complete recordings in the rate summary')
+    n['rate_hz_recording_min'] = E(float(one['hz']), '.1f', qc,
+                                   'lowest mean rate of a single recording, its gaps included (Hz)')
+    n['rate_hz_recording_min_platform'] = E(PLATFORM_NAMES.get(one['platform'], one['platform']), '', qc,
+                                            'platform of that recording')
+    ns = load_table('normalisation_per_session')
+    nc = 'tables/normalisation_per_session.csv'
+    for pl in PLATFORMS:
+        g = ns[ns['platform'] == pl]
+        n[f'accel_sign_flipped_{pl}'] = E(int((g['gravity_sign'] < 0).sum()), 'd', nc,
+                                          f'{PLATFORM_NAMES[pl]} sessions whose accelerometer values were negated')
+    tr = load_input_csv('primary_trials')
+    n['approach_samples_median'] = E(float(round(tr['duration_ms'].median() / 1000 * C.FS_HZ)), 'd',
+                                     'tables/describe/describe_primary_trials.csv',
+                                     'samples of a median-length approach on the 60 Hz grid')
+    cf = 'stage2/config.py'
+    n['fs_hz'] = E(C.FS_HZ, '.0f', cf, 'uniform sampling grid (Hz)')
+    n['lowpass_hz'] = E(C.LOWPASS_HZ, '.0f', cf, 'low-pass cut-off (Hz)')
+    n['lowpass_order'] = E(C.LOWPASS_ORDER, 'd', cf, 'order of the Butterworth low-pass')
+    n['n_norm'] = E(C.N_NORM, 'd', cf, 'samples of a time-normalised approach')
+    n['max_gap_ms'] = E(C.MAX_GAP_MS, '.0f', cf, 'longest sampling gap bridged by interpolation (ms)')
+    n['gap_window_pad_s'] = E(C.GAP_WINDOW_PAD_S, '.1f', cf, 'margin around the approach checked for gaps (s)')
+    n['min_duration_s'] = E(C.MIN_DURATION_MS / 1000, '.2f', cf, 'shortest approach kept (s)')
+    n['min_peak_gyro_dps'] = E(C.MIN_PEAK_GYRO_DPS, '.0f', cf, 'lowest peak rotation speed kept (deg/s)')
+    n['rest_ms'] = E(C.REST_MS, '.0f', cf, 'rest window that measures gravity before and after the approach (ms)')
+    n['still_gyro_dps'] = E(C.STILL_GYRO_DPS, '.0f', cf, 'rotation speed below which a rest sample counts as still (deg/s)')
+    # what the zero-phase low-pass keeps: amplitude gain of the forward-backward Butterworth (|H|^2) at a few
+    # frequencies, and how much of the approach's power lies below 5 Hz (median over the primary trials)
+    from scipy import signal as _sig
+    sos = _sig.butter(C.LOWPASS_ORDER, C.LOWPASS_HZ, btype='low', fs=C.FS_HZ, output='sos')
+    for f_hz in (10, 15, 20):
+        _, h = _sig.sosfreqz(sos, worN=[float(f_hz)], fs=C.FS_HZ)
+        n[f'lowpass_gain_{f_hz}hz'] = E(float(np.abs(h[0]) ** 2), '.1%', cf,
+                                        f'share of a {f_hz} Hz component\'s amplitude kept by the zero-phase low-pass')
+    sp = load_summary()['spectrum']
+    n['gyro_power_below_5hz'] = E(sp['gyro_power_below_5hz'], '.0%', 'tables/describe_summary.json',
+                                  'gyroscope power of the approach below 5 Hz')
+    n['acc_power_below_5hz'] = E(sp['acc_power_below_5hz'], '.0%', 'tables/describe_summary.json',
+                                 'accelerometer power of the approach below 5 Hz')
     return n
 
 

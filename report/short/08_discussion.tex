@@ -1,33 +1,15 @@
-% short/08_discussion.tex: what the results mean, limitations, next steps (about 0.75 page). Full version:
-% sections/08_discussion.tex. The audit status is stated only in the introduction; do not repeat it here.
+% short/08_discussion.tex: what the results mean, in a few sentences, with the one limitation (the sample) merged in
+% and the inference page's unevaluated movement finding named once. No next steps. Numbers only through \R keys.
 \section{Discussion}\label{sec:discussion}
 
-\paragraph{What the results mean.} Early in the approach the phone turns about gravity in opposite senses for the
-two hands, so the hand can be read from the motion sensors for persons the model has never seen: the cross-lane
-selection that chose the body-frame 1D CNN has a selection-aware accuracy of \Rci{final/nested_accuracy}, the CNN's
-body frame limits the change on an unseen grip to \Rb{final/final_grip_d}~points (device-frame leaders:
-\Rb{final/rob_m2_lgbm_grip_d} to \Rb{final/rob_m2_lr_grip_d}), and with its in-fold Platt calibrator its percentage
-is consistent with calibration. The main risk lies before the classifier: finding the approach without a cue costs
-accuracy, and free-choice movements are often rejected.
-
-\paragraph{Limitations.}
-\begin{itemize}[nosep,leftmargin=1.5em]
-  \item Only \R{describe/n_persons} persons, mostly students; \R{describe/n_left_handed} left-handed and
-    \R{describe/persons_ios} on iOS.
-  \item One free-choice trial per person, all right-hand: a constant right answer would score 100\,\%.
-  \item The cue-free numbers come from lane m4's yaw8 classifier, not the final model.
-  \item Screen-away holds and multi-attempt sessions are synthesised, not recorded.
-  \item The shipped model's own numbers are optimistic: it was the best of \R{final/final_configs} configurations,
-    then of \R{final/n_candidates} candidates, and its body-frame input was designed after outer-fold results had
-    been seen. The nested estimate removes only the optimism of choosing among the \R{final/n_candidates}
-    candidates, not that of the lanes' own outer-fold choices or of the post hoc body-frame design.
-\end{itemize}
-
-\paragraph{Next steps.}
-\begin{enumerate}[nosep,leftmargin=1.5em]
-  \item Run the final model in the cue-free simulation; teach the detector free-choice approaches.
-  \item Build the inference page from the exported model, with the rest-pose check, the stillness check and the
-    displayed aggregate of equation~\eqref{eq:aggregate}.
-  \item Record more persons, especially left-handed persons, and left-hand free-choice trials.
-  \item Let the PI evaluate the page prospectively on new persons.
-\end{enumerate}
+It was possible to predict the hand that brought a phone to the nose from the phone's motion sensors alone in most
+cases, for people the model had never seen: we estimate that a small neural network identifies the hand of a single
+movement with an accuracy of \R{final/nested_accuracy}, and of three movements made with the same hand with about
+\R{final/att_k3_used_acc} (slightly optimistic, Section~\ref{sec:results}). The cue is
+physical: early in the movement the phone turns about the vertical in opposite directions for the two hands. We also
+explored ways to make the prediction more stable and valid, such as checking and correcting its calibration and
+combining several attempts. In one person with Parkinson's disease, several characteristics of the movement were
+unusual, but this hand cue was typical (\R{x1/fhy_hand_pct}th percentile). The main limitation is the sample: only \R{describe/n_persons}
+participants, all students aged \R{describe/age_min} to \R{describe/age_max}, of whom \R{describe/n_left_handed} are
+left-handed and \R{describe/persons_ios} used an iPhone, so the accuracy may differ for older or left-handed people and
+for other phones.

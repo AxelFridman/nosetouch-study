@@ -1,8 +1,9 @@
 # latexmk configuration for the NoseTouch report. Run `latexmk` in report/ (see README.md).
 #
-# Builds the three versions with pdfLaTeX + biber: main.pdf (the full report), short.pdf (about 15 pages) and
-# brief.pdf (3-4 pages); they share preamble.tex. Auxiliary files go to build/ (git-ignored). main.tex comes
-# first: short.tex and brief.tex read its labels (build/main.aux) for their references to the full report.
+# Builds the three versions with pdfLaTeX + biber: main.pdf (the full report), short.pdf (the 15-page report for
+# the PI, which stands alone) and brief.pdf (3-4 pages); they share preamble.tex. Auxiliary files go to build/
+# (git-ignored). main.tex comes first: brief.tex reads its labels (build/main.aux) for its references to the full
+# report.
 # `latexmk short.tex` builds one version only.
 # Before LaTeX runs, the asset step scripts/make_assets.py (when it exists; docs/09 milestone M6) regenerates
 # figures/, tables/ and the result numbers from the analysis runs named in report.toml. It runs once per latexmk

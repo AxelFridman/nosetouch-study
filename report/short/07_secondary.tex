@@ -1,43 +1,101 @@
-% short/07_secondary.tex: speed, grip, dominant hand, demographics, and the PD01 case study in three sentences
-% (about 1 page with Figure 13). Full version: sections/07_secondary.tex and Appendix I (sections/I_case_study.tex).
-% PD01: descriptive only; no age beyond a range, no sex or gendered pronoun, no height, device or dates.
-\section{Secondary analyses}\label{sec:secondary}
+% short/07_secondary.tex: would demographics help (Figure 13, its own float, caption beside the chart) and the PD01
+% case study (Figure 14, its own float, caption beside the chart): the question, who and what was recorded (why only
+% left-hand upright trials; the reach uses the natural-speed ones), what differs (the 9 beyond-range characteristics: 5
+% survive every check, 4 named that do not), why it is unusual but not unique (the count of Figure 14b, then the
+% Crawford-Howell test: smallest p before and after the correction, on the scales fixed in advance), the confounds.
+% PD01: the diagnosis is stated; age band only ("in their fifties"); no sex or gendered pronoun ("PD01", "they"), no
+% height, phone or platform, no dates; no model output of any kind for PD01. Numbers only through \R keys.
+\section{Demographics, and a case study: PD01}\label{sec:secondary}
 
-The same recordings carry more than the hand. These models feed nothing the page shows, and all use LOSO with
-balanced accuracy, the mean recall over the classes.
-
-\paragraph{Instructed speed.} On label-blind windows, a pre-specified multinomial logistic model on mirror-invariant
-kinematic features recognises the instructed speed at a balanced accuracy of \Rci{sec/speed_lr_common_bacc} (chance
-\R{sec/chance_speed}). The protocol confounds speed with grip, however: the grip alone predicts the speed at
-\Rci{sec/speed_grip_bacc}, and the model does not beat it (Holm $p$ =
-\R{sec/pair_speed_lr_common_vs_speed_grip_d_bacc_p_holm} over the balanced-accuracy comparisons of the speed
-models).
-
-\paragraph{Grip.} The grip is recognised at \Rci{sec/grip_lr_bacc} from the up vector while the phone rests before
-the movement. Its \R{sec/grip_lr_n_errors} errors come from \R{sec/grip_lr_n_persons_with_errors} persons and were
-probably trials held in another grip than instructed, although no independent record confirms it.
-
-\paragraph{Dominant hand.} Mirror-invariant kinematics show no detectable dominant-hand signal: the pooled AUC is
-\Rci{sec/dom_auc}, against a within-person permutation null with mean \R{sec/dom_null_pooled_mean} ($p$ =
-\R{sec/dom_p_pooled}, unadjusted, a single pre-specified test; Figure~\ref{fig:SEC_06_dominance_auc}).
-
-\begin{figure}[htbp]
+\begin{figure}[tbp]
 \centering
-\genfig{sec/SEC_06_dominance_auc}
-\caption{Mirror-invariant kinematics show no detectable dominant-hand signal: the pooled AUC against its
-within-person permutation null (a) and the AUC within each person (b).}
-\label{fig:SEC_06_dominance_auc}
+\begin{minipage}[c]{0.49\linewidth}\centering\genfig{demo/DEMO_02_simple}\end{minipage}\hfill
+\begin{minipage}[c]{0.48\linewidth}
+\caption{Change in accuracy of each participant when age, sex, height, handedness and usual phone hand are combined
+with the final model's output (top), and when each item may also make that output count more or less (bottom),
+against the same combination without them (LOSO). Diamond and bar: the mean change and its 95\,\% CI.}
+\label{fig:demo}
+\end{minipage}
 \end{figure}
 
-\paragraph{Demographics.} Production has no demographics. In a quick, unaudited first pass, giving a second-stage
-model on the final model's logit the persons' age, sex, height, handedness and usual phone hand changes the accuracy
-by \Rcib{demo/main_dacc}~points (Holm $p$ = \R{demo/main_holm_acc} over the two add-on variants), so they are not
-added.
+\paragraph{Would demographics help?} The app does not know who is using it. We asked whether knowing a participant's
+age, sex, height, handedness and usual phone hand would help if it did. In each LOSO round, a small second logistic
+regression combined the final model's score with these five items, and we compared it with the same combination
+without them. They did not help; they made the accuracy slightly worse (Figure~\ref{fig:demo}): it stayed the same
+for \R{demo/main_same} of the \R{demo/profile_n_persons} participants, fell for \R{demo/main_worse} and rose for
+\R{demo/main_better}, a mean change of \Rcib{demo/main_dacc} percentage points (\Rcib{demo/inter_dacc} when each item
+could also make the model's output count more or less), probably because with only \R{final/n_train_persons} training
+participants the combination fits chance differences between people that do not hold for a new person. On their own,
+the five items predict the hand at chance level (\R{demo/covonly_acc}), because every participant used both hands: a
+fixed personal trait cannot tell which hand made a given movement.
 
-\paragraph{An exploratory case study: PD01.} One additional participant with Parkinson's disease, PD01, was compared
-with the \R{x1/n_ref_persons} modelling persons in a descriptive case study; no model was trained, tuned or scored on
-PD01's trials. PD01 lies beyond every reference person in \R{x1/null_pre_lfl_case} of \R{x1/n_prespecified}
-pre-specified movement characteristics, but \R{x1/null_pre_lfl_n_ge} reference persons, judged on as many trials,
-reach that count, and no difference survives the Benjamini--Hochberg adjustment over the pre-specified
-characteristics. PD01 is unusual, not unique, and nothing here is a diagnostic claim (full report,
-Appendix~\fullref{app:pd01}).
+\begin{figure}[tbp]
+\centering
+\begin{minipage}[c]{0.49\linewidth}\centering\genfig{x1/X1_10_pd01_vs_reference}\end{minipage}\hfill
+\begin{minipage}[c]{0.48\linewidth}
+\caption{PD01 against the \R{x1/n_ref_persons} participants (the reference participants). (a) One row per
+characteristic, rescaled from the lowest participant to the highest (shaded: their range; dots: the participants;
+tick: their median; diamond: PD01). Top: the characteristics in which PD01 lies outside the range of all the
+participants compared; bottom: characteristics in which a difference might be expected. Hold: before the movement;
+reach: the movement to the nose; at nose and end: after the arrival and when the recording stopped; repeats: over
+successive trials (n = \R{x1/seq_peak_speed_mv_nref}: only the participants with enough repeats); wobble: rotation
+back and forth at the given frequencies; share at 3--12~Hz: the part of the rotation at these frequencies; net turn:
+the overall change of the phone's orientation over the reach; smoothness (jerk, spectral): two standard measures of
+how smooth the reach was; reaction time: from the start beep to the start of the movement. (b) For each person, the
+number of the \R{x1/n_prespecified} characteristics in which that person lies outside the range of all the others,
+each judged on as many trials as PD01 made.}
+\label{fig:pd01}
+\end{minipage}
+\end{figure}
+
+\paragraph{PD01: who, and what was recorded.} Here we ask how one person with Parkinson's disease moved in this task,
+compared with the \R{x1/n_ref_persons} participants (the reference participants of Figure~\ref{fig:pd01}). No model
+was trained, tuned or tested on PD01, and nothing here is a diagnosis. PD01, introduced in Section~\ref{sec:data}, is
+decades older than the participants and recorded with the same app, remotely, seated and without supervision, in
+\R{x1/case_n_sessions} short sessions (\R{x1/case_session1_minutes} and \R{x1/case_session2_minutes}~minutes, against
+\R{x1/ref_session_minutes_min} to \R{x1/ref_session_minutes_max} for the participants) that covered only the start of
+the protocol, with the phone upright. The app accepted \R{x1/case_n_accepted} of PD01's \R{x1/case_n_attempts} tries:
+\R{x1/case_n_free} warm-up trials, not used (as for the participants), and \R{x1/case_n_primary} instructed movements,
+all with the left hand and the phone upright, which are compared below (\R{x1/case_n_primary_natural} of them at
+natural speed, which the measures of the reach use).
+
+\paragraph{What differs.} Before looking at PD01's data we fixed \R{x1/n_prespecified} characteristics of the movement:
+how still the phone was held in the \R{x1/pre_window_s}~s before the movement (the hold); how fast, long, far and
+smoothly it moved to the nose (the reach); how much the phone wobbled, that is, rotated back and forth, at 3--7~Hz (the
+band of the tremor typical of Parkinson's disease at rest) and at 7--12~Hz; how the reach changed over repeats; what
+happened in the \R{x1/nose_window_s}~s at the nose; and the first-half yaw. Each was compared between PD01's average and
+each participant's average over the same kind of trial. PD01 lies outside the range of all the participants compared
+(all \R{x1/n_ref_persons}, or the \R{x1/seq_peak_speed_mv_nref} with enough repeats for the change over repeats) in
+\R{x1/null_pre_lfl_case} of the \R{x1/n_prespecified} characteristics (Figure~\ref{fig:pd01}a, top). PD01's reach had a
+much higher peak acceleration, \R{x1/peak_acc_x_med} times the participants' median (\R{x1/peak_acc_pd} against
+\R{x1/peak_acc_med}~m/s$^2$; highest participant \R{x1/peak_acc_max}), and its wobble at 7--12~Hz was
+\R{x1/app_rms_7_12_x_med} times the median (\R{x1/app_rms_7_12_pd} against \R{x1/app_rms_7_12_med} degrees per
+second). Over the reach, the phone's tilt changed less than for any participant (\R{x1/tilt_change_pd}$^\circ$ against
+a median of \R{x1/tilt_change_med}$^\circ$), and in all \R{x1/nose_no_return_ncase} trials PD01 had not yet lowered the
+phone when the recording stopped. While holding the phone before the movement, PD01 swayed unusually little at slow
+frequencies, which made the share of the hold's rotation at 3--12~Hz the highest of all, without more fast wobble than
+the participants. These \R{x1/n_robust_prespecified} differences survive every check we made, for example judging each
+participant on only as many trials as PD01 made, or leaving out the trials in which PD01's accelerometer may have
+reached its limit (an accelerometer cannot report values above a maximum, so a stronger acceleration is cut off there).
+The others do not: the peak turning speed, just above the highest participant's, the fall of the peak speed over the
+repeats, the reach's net turn and the share of the reach's rotation at 3--12~Hz. Where a difference might be expected,
+PD01 was within the participants' range (Figure~\ref{fig:pd01}a, bottom): the 3--7~Hz wobble while holding
+(\R{x1/pre_rms_3_7_pct}th percentile), the duration of the reach (\R{x1/duration_s_pct}th), its smoothness and pauses,
+and the hand cue that the models read, the first-half yaw (\R{x1/fhy_hand_pct}th).
+
+\paragraph{Unusual, but not unique.} With \R{x1/n_ref_persons} participants to compare with, even an ordinary person
+lies outside everyone else's range on a few characteristics by chance alone. We therefore asked every participant the
+same question: in how many of the \R{x1/n_prespecified} characteristics does that participant lie outside the range
+of the other \R{x1/n_ref_minus_one}, judged on as many trials as PD01 made? The answer is a median of
+\R{x1/null_pre_lfl_ref_median}, from \R{x1/null_pre_lfl_ref_min} to \R{x1/null_pre_lfl_ref_max}, and
+\R{x1/null_pre_lfl_n_ge} participants (\R{x1/null_pre_lfl_ge_persons}) reach PD01's count of \R{x1/null_pre_lfl_case}
+(Figure~\ref{fig:pd01}b). We also tested each characteristic with the Crawford--Howell test, a $t$-test made for
+comparing one person with a small group, corrected for testing \R{x1/n_prespecified} at once (which makes some look
+extreme by chance): the smallest p-value, \R{x1/min_p_ch_prespecified} for the peak acceleration, became
+\R{x1/min_q_ch} after the correction, so no difference is statistically significant on the scales we fixed in advance
+(on a plain instead of a logarithmic scale, the peak acceleration and the reach's 7--12~Hz wobble would be). With one
+person against only \R{x1/n_ref_persons} others such a test has little power, so this is weak evidence either way.
+PD01 is therefore among the most unusual people we recorded, but not unique. Moreover, PD01's age and phone, whether
+the arm rested on something while PD01 sat (no one watched the remote recording), and an accelerometer that may have
+reached its limit in \R{x1/case_n_clip_accepted} of the \R{x1/case_n_accepted} accepted trials could explain the
+differences as well as the disease; telling these apart would need several patients and age-matched controls.

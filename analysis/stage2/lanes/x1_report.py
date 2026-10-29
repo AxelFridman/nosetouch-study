@@ -110,6 +110,9 @@ def numbers(D: dict[str, Any]) -> dict[str, dict[str, Any]]:
                              ('max', 'ref_max', 'maximum')):
             out[f'{k}_{s}'] = E(_f(r[col]), f, SRC_MAIN, f'reference {what}: {lab}')
         out[f'{k}_pct'] = E(_f(r['percentile']), '.0f', SRC_MAIN, f'mid-rank percentile of the case: {lab}')
+        if c.scale == 'log' and _f(r['pd_value']) > 0 and _f(r['ref_median']) > 0:     # a ratio-scale quantity
+            out[f'{k}_x_med'] = E(_f(r['pd_value']) / _f(r['ref_median']), '.1f', SRC_MAIN,
+                                  f'case value / reference median ("n times the typical value"): {lab}')
         out[f'{k}_z'] = E(_f(r['robust_z']) if ok_z else None, '+.1f', SRC_MAIN,
                           f'robust z on the declared ({r["z_scale"]}) scale: {lab}')
         out[f'{k}_zlin'] = E(_f(r['robust_z_linear']) if ok_z else None, '+.1f', SRC_MAIN, f'robust z, linear: {lab}')
@@ -197,6 +200,12 @@ def numbers(D: dict[str, Any]) -> dict[str, dict[str, Any]]:
         'n_q_ch_below_five': E(int((pre['q_ch'] < 0.05).sum()), 'd', SRC_MAIN,
                                'pre-specified characteristics with a Crawford-Howell q below 0.05'),
     }
+    exp = pre[pre['key'].isin(EXPECTED_TO_DIFFER)]
+    out['n_expected'] = E(int(len(exp)), 'd', SRC_MAIN, 'declared characteristics a reader would expect to differ '
+                                                         '(rest-tremor band, smoothness, slowness, the hand cue)')
+    out['n_expected_inside'] = E(int((~exp['beyond_all'].astype(bool)).sum()), 'd', SRC_MAIN,
+                                 'of them, characteristics in which the case is NOT beyond every reference person '
+                                 '(the lower rows of X1_10)')
     pmin = pre.loc[pre['ch_p'].idxmin()]
     out['min_p_ch_prespecified'] = E(float(pmin['ch_p']), pfmt(pmin['ch_p']), SRC_MAIN,
                                      'smallest Crawford-Howell p of a pre-specified characteristic')
@@ -224,6 +233,7 @@ def numbers(D: dict[str, Any]) -> dict[str, dict[str, Any]]:
                 f'{pre_}_ref_median': E(float(rp['n_characteristics'].median()), '.1f', SRC_MAIN,
                                         f'{desc}: reference median'),
                 f'{pre_}_ref_max': E(int(rp['n_characteristics'].max()), 'd', SRC_MAIN, f'{desc}: reference maximum'),
+                f'{pre_}_ref_min': E(int(rp['n_characteristics'].min()), 'd', SRC_MAIN, f'{desc}: reference minimum'),
                 f'{pre_}_ref_max_phen': E(int(rp['n_phenomena'].max()), 'd', SRC_MAIN,
                                           f'{desc}: reference maximum, phenomena'),
                 f'{pre_}_n_ge': E(nn['n_ref_ge_case_characteristics'], 'd', SRC_MAIN,

@@ -261,6 +261,8 @@ def numbers(force=False, only=None):
         n[f'{s}_nat_flips'] = E(int(f['nat_class_changes']), 'd', src, f'{v}: natural-use trials whose answer changes')
         n[f'{s}_better'] = E(int(f['persons_a_better']), 'd', src, f'{v}: persons more accurate with the covariates')
         n[f'{s}_worse'] = E(int(f['persons_b_better']), 'd', src, f'{v}: persons less accurate with the covariates')
+        n[f'{s}_same'] = E(int(sum(abs(p['d_acc']) < 1e-12 for p in f['per_person'])), 'd', src,
+                           f'{v}: persons whose accuracy does not change with the covariates')
     s = D['descriptive']['sensor_vs_shipped']
     n['stack_vs_shipped_dacc'] = E(100 * s['mean_person_acc_diff'], '+.1f', src, 'sensor-only second stage minus shipped')
     n['stack_vs_shipped_dll'] = E(s['mean_person_logloss_diff'], '+.3f', src, 'sensor-only stage minus shipped: log loss')

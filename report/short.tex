@@ -1,21 +1,40 @@
-%% NoseTouch report: the short version (driver), about 15 pages including figures and references.
-%% It tells the same story as the full report (main.tex) with only the essential text: one or two sentences per
-%% paragraph, the figures that carry the argument, details left to the full report (\fullref below).
-%% Sections are short/*.tex; the preamble (packages, \R, \Rb, \Rci, \Rcib, \genfig, \gentab, notation) is shared
-%% with main.tex and brief.tex in preamble.tex. Build: `latexmk` (all three) or `latexmk short.tex`.
+%% NoseTouch report: the final report for the PI (driver), about 15 pages including figures and references.
+%% It stands alone: it never points to another version, an appendix or an analysis lane. Every term is explained
+%% before (or where) it is first used, so it reads from top to bottom (the abstract is the only summary).
+%% Sections are short/*.tex; the preamble (packages, \R, \Rb, \Rci, \Rcib, \genfig, notation) is shared with
+%% main.tex and brief.tex in preamble.tex. Build: `latexmk short.tex` (or `latexmk` for all three versions).
+%% The print settings below (no build label, no provenance footer, black links, page numbers only) are made HERE
+%% only, after the shared preamble, so the full and brief versions keep theirs.
 \documentclass[paper=a4,fontsize=11pt,DIV=12,parskip=half-,headings=small,abstract=true,
   titlepage=false,bibliography=totoc]{scrartcl}
-\usepackage{xr-hyper} % labels of the full report (build/main.aux); must come before hyperref (preamble.tex)
+% A text block of 161.5 x 240 mm (the width of KOMA's DIV=13; the full report's DIV=12 is 157.5 x 222.75 mm), so
+% that the report keeps its 16 pages: side margins of about 24 mm, lines about 3 % longer, a top margin of about
+% 19 mm and the page number in the bottom margin. Generated figures stay at their natural 6.2-in width. (\areaset,
+% unlike DIV=13, does not print typearea's line-length advisory in the log.)
+\areaset{161.5mm}{240mm}
+% Floats may move past the next \section (as in the brief): a section barrier would force a page break whenever a
+% tall figure is still waiting at the end of a short section, leaving half-empty pages. \FloatBarrier is still
+% available and is used before the references.
+\newcommand{\nosectionbarrier}{}
 \input{preamble} % shared with main.tex and brief.tex
 \renewcommand{\sectiondir}{short}
-\hypersetup{pdftitle={Which hand? Detecting left- vs right-hand nose touches from smartphone motion sensors
-  (short version)}}
+\hypersetup{hidelinks, % black links for print
+  pdftitle={Which hand? Detecting left- vs right-hand nose touches from smartphone motion sensors},
+  pdfsubject={NoseTouch report (PI: Izhar Bar-Gad)},
+  pdfkeywords={smartphone, motion sensors, left or right hand, leave-one-subject-out, calibration}}
 
-% \fullref{label}: the number of a section, figure or table of the FULL report, linked to main.pdf, for example
-% "full report, Appendix~\fullref{app:final}" or "Section~\fullref{sec:results:calibration} of the full report".
-% latexmk builds main.tex first, so build/main.aux exists; a missing label prints ?? and a warning.
-\externaldocument[full-]{build/main}[main.pdf]
-\newcommand{\fullref}[1]{\ref{full-#1}}
+% Page furniture for print: page numbers only (no build label in the header, no git or data line in the footer).
+\clearpairofpagestyles
+\cfoot*{\pagemark}
+\pagestyle{scrheadings}
+% Run-in paragraph headings with less space above them than KOMA's default (3.25ex): parskip=half- already
+% separates the paragraphs and the bold heading marks the start. A little less space between a float and the text.
+\RedeclareSectionCommand[beforeskip=.5ex plus .3ex minus .1ex]{paragraph}
+\setlength{\textfloatsep}{12pt plus 2pt minus 4pt}
+\setlength{\floatsep}{10pt plus 2pt minus 2pt}
+% With a ragged bottom, LaTeX's bonus for breaking a page before a heading (\@secpenalty = -300) ends pages several
+% lines early before a \section or \paragraph; without it the pages fill (a heading still keeps two lines of its text).
+\makeatletter\@secpenalty=0\makeatother
 
 % \needlines{n}: start a new page unless n more lines fit on this one (keeps the References heading with its first
 % entries; the logic of needspace's \Needspace*, without loading the package).
@@ -23,32 +42,47 @@
 \newcommand{\needlines}[1]{\par\penalty-100\begingroup\dimen@=#1\baselineskip
   \dimen@ii=\pagegoal\advance\dimen@ii-\pagetotal\ifdim\dimen@>\dimen@ii\break\fi\endgroup}
 \makeatother
-\renewcommand*{\bibfont}{\small} % the brief uses \footnotesize
+\renewcommand*{\bibfont}{\footnotesize}
+\setlength{\bibitemsep}{0pt}
+% A compact list for print: no DOIs or optional URLs (an @online entry keeps its URL, an arXiv entry its number) and
+% at most three authors per entry.
+\ExecuteBibliographyOptions{doi=false,url=false,maxbibnames=3,minbibnames=1}
+% The one URL of the list (the W3C specification) breaks only after a '/' or a '.': not inside a word (the
+% preamble's letter and digit penalties allow that; 0 turns it off) and not after 'https:'.
+\setcounter{biburlbigbreakpenalty}{10000}
+\setcounter{biburllcpenalty}{0}\setcounter{biburlucpenalty}{0}\setcounter{biburlnumpenalty}{0}
+% Two entries of the shared references.bib, adjusted for this version only (main and brief are not affected): the
+% ISEC 2025 paper's note repeats its date ("Presented 22 February 2025. 2025."), and the W3C specification's note
+% gives its W3C maturity level, whose last word ("... Recommendation Draft") a reader of the printed report could
+% take for a label of this report; both notes are dropped here (title, date and URL identify the specification).
+\DeclareSourcemap{\maps[datatype=bibtex]{\map{\step[fieldsource=entrykey, match=\regexp{singh2025dominant}, final]
+  \step[fieldset=note, null]}\map{\step[fieldsource=entrykey, match=\regexp{w3c2025deviceorientation}, final]
+  \step[fieldset=note, null]}}}
 
 \title{Which hand?}
 \subtitle{Detecting left- vs right-hand nose touches from smartphone motion sensors}
-\author{Axel Fridman}
-\publishers{\normalsize Principal investigator: Izhar Bar-Gad}
-\date{Short version \textperiodcentered{} \buildlabel{} \textperiodcentered{} \today}
+% The PI line sits directly under the author (KOMA prints \publishers after the date).
+\author{Axel Fridman\\[0.3ex]{\normalsize Principal investigator: Izhar Bar-Gad}}
+\date{\today}
 
 \begin{document}
 \maketitle
 \thispagestyle{scrheadings}
 
-% 15 pages as built on 2026-10-29. A float sits BEFORE the paragraph that cites it: \section flushes the previous
-% section's floats (placeins), so a float placed after a section's last paragraph can leave a half-empty page.
-% The page count is tight: a few added lines early on move Figure 3 or Figure 8 to the next page and push the
-% references onto a 16th page, so check the page count after every edit.
-\InputSection{00_abstract}      % abstract + key-results box                         page 1
-\InputSection{01_introduction}  % sec:intro      question, why hard, approach, status  pp. 1-3 (Figs. 1-2 in one float)
-\InputSection{02_data}          % sec:data       app, protocol, curation, numbers     pp. 3-4 (Fig. 3)
-\InputSection{03_physics}       % sec:physics    mirror, mechanism, evidence          pp. 4-5 (Fig. 4)
-\InputSection{04_methods}       % sec:methods    standardisation, LOSO, metrics, rule pp. 5-7
-\InputSection{05_results}       % sec:results    comparison ... learning curve        pp. 7-11 (Figs. 5-10)
-\InputSection{06_production}    % sec:production cue-free detection and stopping      pp. 11-13 (Figs. 11-12)
-\InputSection{07_secondary}     % sec:secondary  speed, grip, handedness, demographics, PD01 pp. 13-14 (Fig. 13)
-\InputSection{08_discussion}    % sec:discussion meaning, limitations, next steps     p. 14
+% A float sits before (or at the start of) the text that cites it; floats may drift past a \section, and the
+% \FloatBarrier below keeps them out of the references. 16 pages as built on 2026-10-29: check the page count and the
+% last page after every edit.
+\InputSection{00_abstract}      % abstract
+\InputSection{01_introduction}  % sec:intro       question, why hard, approach (Figs. 1-2), related work
+\InputSection{02_data}          % sec:data        app, protocol, participants (Fig. 3), what was kept, raw signals (Fig. 4)
+\InputSection{03_processing}    % sec:processing  60 Hz, filter, iPhone sign, gravity and body frames (Fig. 5), 64 points
+\InputSection{04_physics}       % sec:physics     mechanism and evidence (Figs. 6-7)
+\InputSection{05_methods}       % sec:methods     LOSO, measures, models, calibration, attempts, choice, data treatment
+\InputSection{06_results}       % sec:results     comparison, calibration, attempts, persons, more participants (Figs. 8-12)
+\InputSection{07_secondary}     % sec:secondary   demographics (Fig. 13) and the PD01 case study (Fig. 14)
+\InputSection{08_discussion}    % sec:discussion  meaning and limitation
 
+\FloatBarrier
 \needlines{10}
-\printbibliography[heading=bibintoc]                                             % p. 15
+\printbibliography[heading=bibintoc]
 \end{document}

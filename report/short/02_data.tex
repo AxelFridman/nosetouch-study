@@ -1,41 +1,84 @@
-% short/02_data.tex: app, protocol, participants, curation, the dataset in numbers, gaps (about 1.25 pages with
-% Figure 3). Full version: sections/02_data.tex. The video footnote is the one of sections/02_data.tex, unchanged.
+% short/02_data.tex: the app and the inference page, the protocol and the app's markers, participants (Figure 3, the
+% session photo), what was kept (598 trials), what a recording looks like (Figure 4, raw signals). PD01: diagnosis
+% stated, age band only, no sex or gendered pronoun, no height, device or dates. The video footnote is the one of the
+% full report's data section, unchanged. The inference page finds each movement without the start beep (lane m4's
+% detector, never evaluated with the final model): said in one plain sentence once the markers are defined.
 \section{Data}\label{sec:data}
 
-\paragraph{App and protocol.} The data were recorded with NoseTouch, a web app that runs in the phone's browser and
-guides the participant hands-free with spoken and visual prompts. Tier~0 of a visit is one free-choice trial, whose
-hand the participant picks and reports afterwards (the natural-use set, scored but never trained on); tiers~1--4
-prompt the hand, the grip and the speed in blocks of one hand (full report, Table~\fullref{tab:protocol}), and the
-median visit took \R{describe/visit_minutes_median}~min.
+\paragraph{The app.} We built the app that recorded the data, NoseTouch: a web app that runs in the phone's browser
+on iPhones (iOS) and Android phones, with nothing to install. It guides the participant hands-free with spoken and
+visual prompts, records the accelerometer and the gyroscope, and uploads every recorded movement. We also built a
+second page that runs the final model of this report in the phone's browser and shows which hand it predicts for a
+new person's movement (the inference page, \predictorlink).
 
-% Floats sit before the paragraph that cites them (this one a paragraph earlier, so that it fits on page 3): a
-% float deferred past the end of a section leaves a gap, because every \section flushes the floats before it.
-\begin{figure}[htbp]
+\paragraph{The protocol.} A participant holds the phone still at arm's length, with the screen facing them. At a
+start beep they bring the phone to touch the nose, hold it there until a double beep, and stretch the arm out again
+(Figure~\ref{fig:gesture}); one such movement is a trial. The app asks for one hand at a time, in short blocks, and
+varies the grip (the phone upright, or sideways with its top to the left or to the right), the speed (natural, fast or
+slow) and, in some trials, the movement itself (for example a curved path or a pause halfway). While recording, the
+app detects when the phone starts to move after the beep and when it comes to rest at the nose (it needs this moment
+to play the double beep), and it stores these two moments with the recording; we call them the app's markers. The
+inference page has no start beep: it must find each movement in the sensor stream by itself, a step that this report
+does not evaluate (every accuracy in it uses the app's markers), so its answers may be less accurate. A participant's
+visit, one session with the app, took a median of \R{describe/visit_minutes_median}~minutes.
+
+\begin{figure}[tbp]
 \centering
-\genfig{core/S2_02_exclusion_flow}
-\caption{The exclusion cascade, applied in order; an attempt is charged to the first rule it fails. It yields the
-primary set for training and evaluation and the natural-use set, which is only scored.}
-\label{fig:S2_02_exclusion_flow}
+\repoimage[0.64\linewidth]{photo}{figures/photo/data_collection.jpg}
+\caption{A data-collection session (cropped so that no face is visible). Each participant follows the prompts on
+their own phone, starting from arm's length (the phone on the left asks for the left hand at natural speed); the
+sweets on the table were the compensation.}
+\label{fig:photo}
 \end{figure}
 
-\paragraph{Participants.} The participants were Bar-Ilan University students, most of them master's students, each
-offered sweets for their time; a video shows a data-collection session\footnote{\raggedright A video of a
-data-collection session:
-\url{https://drive.google.com/file/d/1V9PF623HkJ8MjR6loJhUHnDkCx60W-Jl/view?usp=sharing}.}. One additional
-participant, PD01, was analysed separately in an exploratory case study and never modelled
-(Section~\ref{sec:secondary}).
+\paragraph{Participants.} The \R{describe/n_persons} participants, P01 to P20, were Bar-Ilan University students,
+most of them master's students, each offered sweets for their time (Figure~\ref{fig:photo}; a video shows a
+session\footnote{\raggedright A video of a data-collection session:
+\url{https://drive.google.com/file/d/1V9PF623HkJ8MjR6loJhUHnDkCx60W-Jl/view?usp=sharing}.}). They sat or stood while recording
+(\R{x1/ref_sessions_sitting} and \R{x1/ref_sessions_standing} sessions), and \R{describe/n_persons_multi_session} of
+them recorded a second or third session, so there are \R{describe/sessions_included} sessions in all. They were
+\R{describe/n_female} women and \R{describe/n_male} men with a mean age of \R{describe/age_mean} (SD
+\R{describe/age_sd}) years, from \R{describe/age_min} to \R{describe/age_max}. The mean height was
+\R{describe/height_mean_female} (SD \R{describe/height_sd_female})~cm for the women and \R{describe/height_mean_male}
+(SD \R{describe/height_sd_male})~cm for the men (\R{describe/height_n_female} of the \R{describe/n_female} women and
+\R{describe/height_n_male} of the \R{describe/n_male} men gave their height). They also reported their handedness
+(\R{describe/n_right_handed} right-handed, \R{describe/n_left_handed} left-handed) and the hand they usually hold a
+phone in; \R{describe/persons_android} recorded on an Android phone and \R{describe/persons_ios} on an iPhone. One
+more person, PD01, who has a diagnosis of Parkinson's disease and is in their fifties, recorded with the same app.
+PD01 was never used to build or test any model and is described separately in Section~\ref{sec:secondary}.
 
-\paragraph{Curation.} The data snapshot holds \R{describe/attempts_total} attempts, and a pre-specified exclusion
-cascade keeps \R{describe/primary_trials} primary trials and \R{describe/natural_use_n} natural-use trials
-(Figure~\ref{fig:S2_02_exclusion_flow}). Quality flags are kept and scored apart rather than excluded, so the models
-see the data production will see, and labels are never changed.
+\paragraph{What we kept.} Of the \R{describe/attempts_total} tries recorded (including those the app rejected), we
+kept \R{describe/primary_trials} trials: those that the app accepted (among other checks, the phone
+started to move after the start beep and came to rest at the nose within the time limits, and the participant did
+not ask to redo the trial), that lasted at least \R{describe/min_duration_s}~s, in which the phone clearly turned (a
+peak rotation speed of at least \R{describe/min_peak_gyro_dps} degrees per second), and whose stream of samples had no
+gap longer than \R{describe/max_gap_ms}~ms around the movement (phones sometimes stop sending samples for a moment).
+We did not use a warm-up trial at the start of each visit, in which the participant chose the hand, nor a few
+discarded sessions: one that a participant stopped and later repeated, and the failed recordings of one more
+volunteer. The label of a trial is the hand the app asked for. The \R{describe/primary_trials} trials are
+\R{describe/primary_left} left-hand and \R{describe/primary_right} right-hand trials, a median of
+\R{describe/primary_per_person_median} per participant (from \R{describe/primary_per_person_min} to
+\R{describe/primary_per_person_max}).
 
-\paragraph{The dataset.} The \R{describe/n_persons} persons are \R{describe/n_female} women and \R{describe/n_male}
-men aged \R{describe/age_min} to \R{describe/age_max} years, \R{describe/n_left_handed} of them left-handed;
-\R{describe/persons_android} recorded on Android and \R{describe/persons_ios} on iOS. The primary set has
-\R{describe/primary_left} left-hand and \R{describe/primary_right} right-hand trials.
+\begin{figure}[tbp]
+\centering
+\begin{minipage}[c]{0.49\linewidth}\centering\genfig{core/S2_22_raw_example}\end{minipage}\hfill
+\begin{minipage}[c]{0.48\linewidth}
+\caption{Two trials of P15, one with each hand (the same Android phone, upright grip, natural speed), exactly as
+the phone recorded them, about \R{describe/rate_hz_median_whole} samples per second with no smoothing (here the
+colours mark the axes, not the hands). Top: the gyroscope,
+the rotation speed about each of the phone's axes ($x$ across the screen, $y$ along it, $z$ out of it); bottom: the
+accelerometer along the same axes, gravity included (in this grip the $y$ axis points up, so it reads about
+9.8~m/s$^2$ even at rest). Grey band: the movement to the nose,
+between the app's markers; beige band: the arm going back. Time runs from the start beep.}
+\label{fig:raw}
+\end{minipage}
+\end{figure}
 
-\paragraph{Gaps.} With \R{describe/n_left_handed} left-handed persons no effect of handedness can be estimated, and
-with \R{describe/persons_ios} iPhone users platform comparisons have little power. All
-\R{describe/natural_use_right} free-choice trials are right-hand trials, so natural use measures right-hand recall
-only: a constant right answer would score 100\,\%.
+\paragraph{What a recording looks like.} Both sensors measure along the phone's own three axes: $x$ across the screen
+(towards its right edge), $y$ along the screen (towards its top) and $z$ out of the screen. The gyroscope gives how
+fast the phone rotates about each axis, in degrees per second; the accelerometer gives the acceleration along each
+axis, in m/s$^2$, and also feels gravity, so an Android phone held still and upright reads about 9.8~m/s$^2$ on its
+$y$ axis (Section~\ref{sec:processing} explains iPhones). Figure~\ref{fig:raw} shows one left-hand and one right-hand
+trial of the same participant exactly as recorded: six noisy channels per trial (three rotation speeds and three
+accelerations), in which the two trials differ, but nothing tells the eye which hand moved the phone.

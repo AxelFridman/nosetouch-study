@@ -11,7 +11,7 @@ from stage2.lanes import x1_stats as XS
 #: The figures of the lane, in order (``x1_figures.FIGURE_FUNCTIONS`` draws each).
 FIGURE_NAMES = ('X1_01_example_traces', 'X1_02_preparation', 'X1_03_spectra', 'X1_04_movement',
                 'X1_05_speed_scaling', 'X1_06_repeats', 'X1_07_hand_signature', 'X1_08_zscore_summary',
-                'X1_09_multivariate')
+                'X1_09_multivariate', 'X1_10_pd01_vs_reference')
 #: The characteristics of the strip-plot figures (also their panels, in this order).
 STRIP_KEYS = {
     'X1_02_preparation': ('hold_wait_s', 'false_starts', 'rt_s', 'pre_rms_3_7', 'pre_rms_7_12', 'pre_ratio_db',
@@ -194,9 +194,43 @@ def _x1_09(D: dict[str, Any], N: XR.Nums) -> dict[str, str]:
                             if N.v('mv_lin_loco_max_beyond') > N.v('mv_lin_n_beyond') else '.'))}
 
 
+def overview_rows(main: Any, inside_keys: tuple[str, ...] = XR.EXPECTED_TO_DIFFER) -> tuple[list[str], list[str]]:
+    """The rows of X1_10, decided by the saved results: (the pre-specified characteristics in which the case lies
+    beyond every reference person, the declared "expected to differ" characteristics in which it does not), each in
+    the order of ``x1_stats.CHARACTERISTICS``."""
+    pre = main[~main['post_hoc'].astype(bool)]
+    order = {c.key: i for i, c in enumerate(XS.CHARACTERISTICS)}
+    outside = sorted(pre.loc[pre['beyond_all'].astype(bool), 'key'], key=order.__getitem__)
+    inside = sorted((k for k in inside_keys if k in set(pre['key']) and k not in outside), key=order.__getitem__)
+    return outside, inside
+
+
+def _x1_10(D: dict[str, Any], N: XR.Nums) -> dict[str, str]:
+    """The plain overview of the short report: plain words, no test names (the reader knows no statistics)."""
+    case = D['case']
+    p = 'null_pre_lfl'
+    outside, inside = overview_rows(D['main'])
+    m = D['main'].set_index('key')
+    fewer = any(m.loc[k, 'n_ref'] < m['n_ref'].max() for k in outside + inside)
+    return {'caption': (f'(a) {case} and the {N("n_ref_persons")} reference participants on the pre-specified '
+                        f'characteristics in which {case} lies outside the range of all of them (top) and on a declared '
+                        f'selection in which a difference might be expected (bottom). Each row is rescaled so that the '
+                        f'lowest reference participant sits at 0 and the highest at 1 (log scale for skewed '
+                        f'quantities)' + ('; a row that compares fewer reference participants (those who made enough '
+                                          'trials) shows their number n' if fewer else '')
+                        + f'. (b) For each person, the number of the {N("n_prespecified")} pre-specified '
+                        f'characteristics in which that person lies outside the range of all the others, each '
+                        f'reference participant judged on as many trials as {case} made.'),
+            'decision': (f'Unusual, not unique: {case} lies outside the range of every reference participant compared '
+                         f'in {N(f"{p}_case")} of {N("n_prespecified")} pre-specified characteristics, and '
+                         f'{N(f"{p}_n_ge")} of the {N("n_ref_persons")} reference participants '
+                         f'({N(f"{p}_ge_persons")}) {N.verb(f"{p}_n_ge", "reaches", "reach")} that count too.')}
+
+
 _TEXTS = {'X1_01_example_traces': _x1_01, 'X1_02_preparation': _x1_02, 'X1_03_spectra': _x1_03,
           'X1_04_movement': _x1_04, 'X1_05_speed_scaling': _x1_05, 'X1_06_repeats': _x1_06,
-          'X1_07_hand_signature': _x1_07, 'X1_08_zscore_summary': _x1_08, 'X1_09_multivariate': _x1_09}
+          'X1_07_hand_signature': _x1_07, 'X1_08_zscore_summary': _x1_08, 'X1_09_multivariate': _x1_09,
+          'X1_10_pd01_vs_reference': _x1_10}
 
 
 def texts(name: str) -> dict[str, str]:

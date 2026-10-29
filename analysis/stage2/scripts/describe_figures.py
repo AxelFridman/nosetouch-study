@@ -1,4 +1,4 @@
-"""Figures of the core unit 'describe' (S2_01..S2_20), drawn ONLY from the files its compute step saved.
+"""Figures of the core unit 'describe' (S2_01..S2_20, S2_22..S2_24), drawn ONLY from the files its compute step saved.
 
 One function per figure, named after it. Every presentation detail (sizes, axis limits and scales, ticks,
 bins, labels, colours) is a keyword argument whose default lives in ``FIGURES`` below, so a change is a one-line
@@ -94,6 +94,27 @@ FIGURES: dict[str, dict[str, Any]] = {
     'S2_20_label_consistency': dict(
         width='full', height=4.5, ytick_fontsize=5.5, text_fontsize=4.8, size_base=14, size_per_trial=9,
         ring_extra=70, legend_fontsize=6.5),
+    # plain-language versions for the stand-alone report (half the text width; S2_10, S2_11, S2_13 stay as they are)
+    'S2_22_raw_example': dict(
+        width='half', height=3.5, xlim_left=-0.6, xpad_right=0.35, trace_lw=0.75, gyro_ylim=(-100, 125),
+        acc_ylim=(-6, 14.5), approach_color='#e9e7e0', return_color='#f7f0dc', band_label_fontsize=7.5,
+        band_label_y=0.975, title_fontsize=9, label_fontsize=8, tick_fontsize=7, legend_fontsize=7.5,
+        xticks=(0, 1, 2, 3, 4, 5), band_labels={'approach': 'to the\nnose', 'return': 'back'},
+        axis_labels={'x': 'x axis', 'y': 'y axis', 'z': 'z axis'}),
+    'S2_23_mean_curves': dict(
+        width='half', height=4.3, band_alpha=0.2, lw=1.6, title_fontsize=8.5, label_fontsize=8, tick_fontsize=7,
+        legend_fontsize=8, note_fontsize=7, half_color='#f1f0ea', sign_note_channel='yaw_rate',
+        channels=('gyro_horiz', 'yaw_rate', 'yaw_cum'),
+        titles={'gyro_horiz': 'Tilting speed: the same for both hands',
+                'yaw_rate': 'Turning speed about the vertical: opposite',
+                'yaw_cum': 'Total turn about the vertical: opposite'},
+        units={'gyro_horiz': 'deg/s', 'yaw_rate': 'deg/s', 'yaw_cum': 'deg'},
+        xlabel='time (% of the movement to the nose)', xticks=(0, 25, 50, 75, 100)),
+    'S2_24_first_half_yaw': dict(
+        width='half', height=2.5, clip_deg=45, bin_deg=3, fill_alpha=0.25, lw=1.2, median_lw=1.0,
+        label_fontsize=8, tick_fontsize=7, legend_fontsize=8, note_fontsize=7.5,
+        xlabel='turn about the vertical in the first half\nof the movement to the nose (deg)', ylabel='trials',
+        xticks=(-45, -30, -15, 0, 15, 30, 45)),
 }
 
 
@@ -1039,6 +1060,185 @@ def fig_S2_20_label_consistency(**kw: Any) -> dict[str, str]:
         decision='Raise the ringed blocks with the researcher; keep the labels; report results with and without them.')
 
 
+# ───────────────────────────── 22-24: plain-language figures for the stand-alone report ─────────────────────────────
+
+
+def _band(a: Any, lo: float | None, hi: float | None, color: str) -> None:
+    if lo is not None and hi is not None:
+        a.axvspan(lo, hi, color=color, zorder=0, lw=0)
+
+
+def fig_S2_22_raw_example(**kw: Any) -> dict[str, str] | None:
+    """The phone's own signals for one left and one right trial of the S2_10 person, as delivered (no filter)."""
+    name = 'S2_22_raw_example'
+    o = _opts(name, kw)
+    ex = D.load_input('raw_example')
+    trials = {r['hand']: r for r in ex.get('trials', [])}
+    if set(trials) != {'left', 'right'}:
+        print(f'{name}: no left/right example pair saved; not drawn', flush=True)
+        return None
+    fig, ax = figure(o['width'], o['height'], 2, 2, sharex=True, sharey='row')
+    data = []
+    right_edge = 0.0
+    for col, h in enumerate(('left', 'right')):
+        r = trials[h]
+        tt = _arr(r['t_s'])
+        ev = r['events_s']
+        for row, (sensor, ylim) in enumerate((('gyro', o['gyro_ylim']), ('acc', o['acc_ylim']))):
+            a = ax[row, col]
+            _band(a, ev.get('onset'), ev.get('end'), o['approach_color'])
+            _band(a, ev.get('return_onset'), ev.get('return_end'), o['return_color'])
+            for k, axis in enumerate('xyz'):
+                v = _arr(r[sensor][axis])
+                a.plot(tt, v, color=AXIS3[k], lw=o['trace_lw'], label=o['axis_labels'][axis])
+                data += [{'hand': h, 'trial_key': r['trial_key'], 'sensor': 'gyroscope' if sensor == 'gyro'
+                          else 'accelerometer', 'axis': axis, 't_s': ti, 'value': vi} for ti, vi in zip(tt, v)]
+            a.axhline(0, color=AXIS, lw=0.6, zorder=1)
+            a.set_ylim(*ylim)
+            a.tick_params(labelsize=o['tick_fontsize'])
+        for part, lo, hi in (('approach', ev.get('onset'), ev.get('end')),
+                             ('return', ev.get('return_onset'), ev.get('return_end'))):
+            if lo is not None and hi is not None:
+                ax[0, col].text(0.5 * (lo + hi), o['band_label_y'], o['band_labels'][part], ha='center', va='top',
+                                fontsize=o['band_label_fontsize'], color=INK2,
+                                transform=ax[0, col].get_xaxis_transform(), linespacing=0.95)
+        ax[0, col].set_title(HAND_LABELS[h], fontsize=o['title_fontsize'], color=HAND_COLORS[h])
+        right_edge = max(right_edge, (ev.get('return_end') or float(tt[-1])) + o['xpad_right'])
+    ax[0, 0].set_xlim(o['xlim_left'], right_edge)
+    ax[1, 0].set_xticks(list(o['xticks']))
+    ax[0, 0].set_ylabel('gyroscope:\nrotation rate (deg/s)', fontsize=o['label_fontsize'])
+    ax[1, 0].set_ylabel('accelerometer\n(m/s$^2$)', fontsize=o['label_fontsize'])
+    fig.supxlabel('time from the start beep (s)', fontsize=o['label_fontsize'])
+    handles, labels = ax[0, 0].get_legend_handles_labels()
+    fig.legend(handles, labels, loc='outside upper center', ncol=3, fontsize=o['legend_fontsize'], handlelength=1.4,
+               columnspacing=1.0)
+    L = trials['left']
+    grip = str(L['orientation']).replace('_toward', '').replace('_', ' ')
+    rate = float(np.median([trials[h]['rate_hz'] for h in trials]))
+    raw = all(trials[h]['as_recorded'] for h in trials)
+    return _save(fig, name, data=pd.DataFrame(data), caption=(
+        f"Two trials of {ex['person_id']}, one with each hand (same phone, {grip} grip, {L['speed']} speed), "
+        f"{'exactly as the phone recorded them' if raw else 'in the phone axes after the platform sign convention'}"
+        f" (about {rate:.0f} samples per second, no smoothing): the gyroscope gives how fast the phone rotates "
+        'about each of its three axes (x across the screen, y along it, z out of it), and the accelerometer also '
+        'feels gravity, so the y axis, which points up in this grip, reads about 9.8 m/s$^2$ even at rest. Grey: '
+        'the movement to the nose; beige: the arm going back.'),
+        decision='What the raw data look like: six noisy channels per trial and no obvious left/right signature '
+                 'by eye, which is why the analysis builds a gravity frame and learns from many trials.')
+
+
+#: S2_23 and S2_24 (the final report's evidence figures): the two hands differ by line style as well as by colour,
+#: so that they stay apart in a black-and-white print.
+_HAND_LS = {'left': (0, (4.0, 1.6)), 'right': '-'}
+
+
+def fig_S2_23_mean_curves(**kw: Any) -> dict[str, str]:
+    """S2_11 reduced to the channels that tell the story: one even channel against the two chiral ones."""
+    name = 'S2_23_mean_curves'
+    o = _opts(name, kw)
+    cm = D.load_input('class_means')
+    x = _arr(cm['x_pct'])
+    chans = [c for c in o['channels'] if c in cm['channels']]
+    fig, axes = figure(o['width'], o['height'], len(chans), 1, sharex=True)
+    axes = np.atleast_1d(axes)
+    data, persons = [], set()
+    for a, ch in zip(axes, chans):
+        e = cm['channels'][ch]
+        if ch == 'yaw_cum':
+            a.axvspan(0, 50, color=o['half_color'], zorder=0, lw=0)
+            a.text(25, 0.96, 'first half', transform=a.get_xaxis_transform(), ha='center', va='top',
+                   fontsize=o['note_fontsize'], color=INK2)
+        for h in ('left', 'right'):
+            M = _means(e['hands'][h])
+            mu, se = _mean_se(M)
+            persons |= set(e['hands'][h]['persons'])
+            a.fill_between(x, mu - se, mu + se, color=HAND_COLORS[h], alpha=o['band_alpha'], lw=0)
+            a.plot(x, mu, color=HAND_COLORS[h], lw=o['lw'], ls=_HAND_LS[h])
+            data += [{'channel': ch, 'hand': h, 'x_pct': xi, 'mean': m, 'se': s} for xi, m, s in zip(x, mu, se)]
+        a.axhline(0, color=AXIS, lw=0.6)
+        a.set_title(o['titles'].get(ch, ch), fontsize=o['title_fontsize'])
+        a.set_ylabel(o['units'].get(ch, ''), fontsize=o['label_fontsize'])
+        a.tick_params(labelsize=o['tick_fontsize'])
+        if ch == o['sign_note_channel']:
+            a.text(1.0, 1.0, '+ counter-clockwise\n− clockwise\n(seen from above)', transform=a.transAxes,
+                   ha='right', va='top', fontsize=o['note_fontsize'], color=INK2, linespacing=1.0)
+    axes[-1].set_xticks(list(o['xticks']))
+    axes[-1].set_xlim(0, 100)
+    axes[-1].set_xlabel(o['xlabel'], fontsize=o['label_fontsize'])
+    from matplotlib.lines import Line2D
+    fig.legend(handles=[Line2D([0], [0], color=HAND_COLORS[h], lw=o['lw'], ls=_HAND_LS[h], label=HAND_LABELS[h])
+                        for h in ('left', 'right')], loc='outside upper center', ncol=2,
+               fontsize=o['legend_fontsize'], handlelength=2.6)
+    return _save(fig, name, data=pd.DataFrame(data), caption=(
+        'The average movement to the nose with each hand (left hand dashed, right hand solid; each participant\'s mean curve, averaged over the '
+        f'{len(persons)} participants; band: ± 1 standard error; time runs from the start of the movement, 0 %, to '
+        'the arrival at the nose, 100 %). The phone tilts at the same speed with both hands, but it turns about the '
+        'vertical in opposite directions: clockwise seen from above with the left hand, counter-clockwise with the '
+        'right.'),
+        decision='The hand shows in the turn about the vertical early in the movement, not in its overall shape.')
+
+
+def fig_S2_24_first_half_yaw(**kw: Any) -> dict[str, str]:
+    """The right panel of S2_13 alone, with plain labels."""
+    name = 'S2_24_first_half_yaw'
+    o = _opts(name, kw)
+    tr = D.load_input_csv('primary_trials')
+    fy = D.load_summary()['first_half_yaw']
+    lim = float(o['clip_deg'])
+    bins = np.arange(-lim, lim + o['bin_deg'] / 2, o['bin_deg'])
+    fig, a = figure(o['width'], o['height'])
+    data, n, med = [], {}, {}
+    for h in ('left', 'right'):
+        raw = tr.loc[tr['hand'] == h, 'first_half_yaw_deg'].dropna()
+        v = raw.clip(-lim, lim)
+        n[h] = int(len(v))
+        med[h] = float(raw.median())
+        if h == 'left':      # hatched, so that the hands differ in a black-and-white print too
+            a.hist(v, bins=bins, histtype='stepfilled', facecolor='none', edgecolor=HAND_COLORS[h],
+                   hatch='//////', lw=0, alpha=0.6)
+        else:
+            a.hist(v, bins=bins, histtype='stepfilled', alpha=o['fill_alpha'], color=HAND_COLORS[h], lw=0)
+        a.hist(v, bins=bins, histtype='step', lw=o['lw'], color=HAND_COLORS[h], ls=_HAND_LS[h])
+        a.axvline(med[h], color=HAND_COLORS[h], lw=o['median_lw'], ls=DASH)
+        data += [{'hand': h, 'trial_key': k, 'person_id': p, 'first_half_yaw_deg': y, 'drawn_at_deg': yc}
+                 for k, p, y, yc in zip(tr.loc[raw.index, 'trial_key'], tr.loc[raw.index, 'person_id'], raw, v)]
+    a.axvline(0, color=INK, lw=0.7)
+    ytop = a.get_ylim()[1]
+    a.set_ylim(0, ytop * 1.22)
+    a.text(-lim * 0.97, 0.97, '← clockwise', transform=a.get_xaxis_transform(), ha='left', va='top',
+           fontsize=o['note_fontsize'], color=INK2)
+    a.text(lim * 0.97, 0.97, 'counter-clockwise →', transform=a.get_xaxis_transform(), ha='right', va='top',
+           fontsize=o['note_fontsize'], color=INK2)
+    for h, side in (('left', -1), ('right', 1)):     # each median named at its line
+        a.text(med[h] + side * lim * 0.03, 0.80, 'median\n' + f'{med[h]:+.1f}°'.replace('-', '−'),
+               transform=a.get_xaxis_transform(), ha='right' if side < 0 else 'left', va='top',
+               fontsize=o['note_fontsize'], color=HAND_COLORS[h], linespacing=1.0,
+               bbox=dict(boxstyle='square,pad=0.15', facecolor='white', edgecolor='none', alpha=0.85))
+    a.set_xlim(-lim, lim)
+    a.set_xticks(list(o['xticks']))
+    a.tick_params(labelsize=o['tick_fontsize'])
+    a.set_xlabel(o['xlabel'], fontsize=o['label_fontsize'])
+    a.set_ylabel(o['ylabel'], fontsize=o['label_fontsize'])
+    from matplotlib.colors import to_rgba
+    from matplotlib.patches import Patch
+    hs = [Patch(facecolor='none', edgecolor=HAND_COLORS['left'], hatch='//////', ls=_HAND_LS['left'], lw=o['lw'],
+                label=HAND_LABELS['left']),
+          Patch(facecolor=to_rgba(HAND_COLORS['right'], o['fill_alpha']), edgecolor=HAND_COLORS['right'],
+                lw=o['lw'], label=HAND_LABELS['right'])]
+    a.legend(handles=hs, loc='upper left', bbox_to_anchor=(0.0, 0.66), fontsize=o['legend_fontsize'],
+             handlelength=1.6)
+    clipped = int(sum((tr['first_half_yaw_deg'].abs() > lim).fillna(False)))
+    return _save(fig, name, data=pd.DataFrame(data), caption=(
+        f"How far the phone turned about the vertical in the first half of the movement to the nose, in all "
+        f"{n['left'] + n['right']} trials ({n['left']} left-hand, {n['right']} right-hand; positive = "
+        f"counter-clockwise seen from above; left hand hatched, right hand filled; dashed: the medians, "
+        f"{med['left']:+.1f}° and {med['right']:+.1f}°). "
+        f"The sign of this turn alone gives the hand in {100 * fy['sign_rule_accuracy_pooled']:.0f} % of the trials"
+        + (f"; the {clipped} trials beyond ±{lim:g}° are drawn at the edge." if clipped else '.')),
+        decision='The single strongest hand cue, shown plainly: opposite medians, but the two hands overlap, so a '
+                 'model must combine more of the movement than this one number.')
+
+
 FIGURE_FUNCTIONS = {
     'S2_01_demographics': fig_S2_01_demographics, 'S2_02_exclusion_flow': fig_S2_02_exclusion_flow,
     'S2_03_completion_durations': fig_S2_03_completion_durations, 'S2_04_conditions': fig_S2_04_conditions,
@@ -1050,6 +1250,8 @@ FIGURE_FUNCTIONS = {
     'S2_15_return_vs_approach': fig_S2_15_return_vs_approach, 'S2_16_cuefree_v0': fig_S2_16_cuefree_v0,
     'S2_17_gravity_closure': fig_S2_17_gravity_closure, 'S2_18_flags_gates': fig_S2_18_flags_gates,
     'S2_19_cuefree_stress': fig_S2_19_cuefree_stress, 'S2_20_label_consistency': fig_S2_20_label_consistency,
+    'S2_22_raw_example': fig_S2_22_raw_example, 'S2_23_mean_curves': fig_S2_23_mean_curves,
+    'S2_24_first_half_yaw': fig_S2_24_first_half_yaw,
 }
 
 

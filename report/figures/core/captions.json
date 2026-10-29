@@ -103,5 +103,20 @@
   "caption": "Left: accuracy of the reference floor (logistic regression on the cumulative yaw at 8 instants, mirror-augmented, leave-one-person-out) when the P(right) of k attempts of one person and hand are averaged; every k uses the same 19 persons (those with at least 5 trials per hand). Right: the reference without the swap-signature blocks (P08-s1 block 1, P08-s1 block 2) or with the docs/09 D6 screen, paired against the reference on the same trials.",
   "decision": "Averaging attempts is worth asking for in the inference app. No label-noise variant differs from the reference beyond its paired 95 % CI, so the labels stay as instructed and the D6 screen stays optional.",
   "file": "S2_21_reference_sensitivity.pdf"
+ },
+ "S2_22_raw_example": {
+  "caption": "Two trials of P15, one with each hand (same phone, upright grip, natural speed), exactly as the phone recorded them (about 60 samples per second, no smoothing): the gyroscope gives how fast the phone rotates about each of its three axes (x across the screen, y along it, z out of it), and the accelerometer also feels gravity, so the y axis, which points up in this grip, reads about 9.8 m/s$^2$ even at rest. Grey: the movement to the nose; beige: the arm going back.",
+  "decision": "What the raw data look like: six noisy channels per trial and no obvious left/right signature by eye, which is why the analysis builds a gravity frame and learns from many trials.",
+  "file": "S2_22_raw_example.pdf"
+ },
+ "S2_23_mean_curves": {
+  "caption": "The average movement to the nose with each hand (left hand dashed, right hand solid; each participant's mean curve, averaged over the 20 participants; band: ± 1 standard error; time runs from the start of the movement, 0 %, to the arrival at the nose, 100 %). The phone tilts at the same speed with both hands, but it turns about the vertical in opposite directions: clockwise seen from above with the left hand, counter-clockwise with the right.",
+  "decision": "The hand shows in the turn about the vertical early in the movement, not in its overall shape.",
+  "file": "S2_23_mean_curves.pdf"
+ },
+ "S2_24_first_half_yaw": {
+  "caption": "How far the phone turned about the vertical in the first half of the movement to the nose, in all 598 trials (302 left-hand, 296 right-hand; positive = counter-clockwise seen from above; left hand hatched, right hand filled; dashed: the medians, -3.8° and +5.3°). The sign of this turn alone gives the hand in 79 % of the trials; the 5 trials beyond ±45° are drawn at the edge.",
+  "decision": "The single strongest hand cue, shown plainly: opposite medians, but the two hands overlap, so a model must combine more of the movement than this one number.",
+  "file": "S2_24_first_half_yaw.pdf"
  }
 }

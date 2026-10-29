@@ -177,6 +177,7 @@ def build() -> None:
     from stage2.lanes.final_summary_body import body
     body(n, w, lab, fin, dec, master, cal, ns)
     _figure_counts(n, master)
+    _report_figure_numbers(n, master)
     L.write_numbers(n.entries)
     L.summary_path.write_text('\n'.join(S) + '\n', encoding='utf-8')
 
@@ -271,3 +272,190 @@ def _figure_counts(n: Num, master: dict[str, Any]) -> None:
         pp = pd.DataFrame(_read('final_breakdown')['persons'])
         n('n_left_handed', int((pp['handedness'].astype(str).str.lower() == 'left').sum()), 'd',
           _src('final_breakdown'), 'left-handed persons')
+
+
+def _model_facts(n: Num, master: dict[str, Any]) -> None:
+    """Sizes of the family models of FINAL_15 as their saved results record them (per-fold parameters)."""
+    import json
+    from stage2 import cv
+
+    def folds(result: str) -> list[dict[str, Any]]:
+        p = cv.load_result(result).predictions
+        seen: dict[int, dict[str, Any]] = {}
+        for f, s in zip(p['fold'], p['params']):
+            seen.setdefault(int(f), json.loads(s) if isinstance(s, str) else dict(s))
+        return list(seen.values())
+
+    def one(vals: list[Any], what: str) -> Any:
+        if len(set(vals)) != 1:
+            raise ValueError(f'{what} differs between folds: {sorted(set(vals))}')
+        return vals[0]
+    if 'm3_deep' in master:
+        res = master['m3_deep']['result']
+        fp = folds(res)
+        n('cnn_n_members', int(one([f['n_members'] for f in fp], 'n_members')), 'd', f'results/{res}.json',
+          '1D CNN: networks in the ensemble (their logits are averaged)')
+        n('cnn_n_params', int(one([f['n_params'] for f in fp], 'n_params')), 'd', f'results/{res}.json',
+          '1D CNN: fitted weights of one network')
+        # its architecture (lane m3's defaults; m3_cnn_body changes only the channels) and input channels
+        from stage2.lanes import m3_body, m3_deep, m3_nets
+        dflt = m3_deep.DEFAULTS
+        net = m3_nets.CNN1D(len(m3_body.BODY_SET), width=int(dflt['width']), n_bins=int(dflt['n_bins']))
+        ks = [int(layer[0].kernel_size[0]) for layer in net.body]
+        if sum(p.numel() for p in net.parameters()) != int(fp[0]['n_params']):
+            raise ValueError('the 1D CNN rebuilt from the defaults does not match the saved number of weights')
+        n('cnn_n_layers', len(ks), 'd', 'stage2/lanes/m3_nets.py', '1D CNN: convolution layers')
+        n('cnn_kernels', ', '.join(str(k) for k in ks[:-1]) + f' and {ks[-1]}', '', 'stage2/lanes/m3_nets.py',
+          '1D CNN: widths of the convolution filters (time points)')
+        n('cnn_width', int(dflt['width']), 'd', 'stage2/lanes/m3_deep.py', '1D CNN: filters per layer')
+        n('cnn_n_bins', int(dflt['n_bins']), 'd', 'stage2/lanes/m3_deep.py',
+          '1D CNN: time segments that the last layer averages over')
+        n('cnn_n_channels', len(m3_body.BODY_SET), 'd', 'stage2/lanes/m3_body.py', '1D CNN: input channels')
+        n('cnn_n_gravity', len(m3_body.BODY_SET) - len(m3_body.BODY_CHANNELS), 'd', 'stage2/lanes/m3_body.py',
+          '1D CNN: gravity-frame input channels')
+        n('cnn_n_body', len(m3_body.BODY_CHANNELS), 'd', 'stage2/lanes/m3_body.py', '1D CNN: body-frame input channels')
+    if 'p1_gbm' in master:
+        r = cv.load_result(master['p1_gbm']['result'])
+        src = f'results/{master["p1_gbm"]["result"]}.json'
+        g = r.params['spec']['panel']['gbm_params']
+        n('gbm_n_features', int(one([f['n_features'] for f in folds(master['p1_gbm']['result'])], 'n_features')), 'd',
+          src, 'gradient boosting: summary features per trial')
+        n('gbm_n_channels', len(r.params['spec']['panel']['channels']), 'd', src, 'gradient boosting: channels')
+        n('gbm_n_trees', int(g['n_estimators']), 'd', src, 'gradient boosting: trees')
+        n('gbm_n_leaves', int(g['num_leaves']), 'd', src, 'gradient boosting: leaves per tree')
+    if 'm3_mr' in master:
+        res = master['m3_mr']['result']
+        nf = [int(f['n_features']) for f in folds(res)]
+        n('mr_n_features_min', min(nf), 'd', f'results/{res}.json', 'MiniRocket: random-kernel features, fewest over folds')
+        n('mr_n_features_max', max(nf), 'd', f'results/{res}.json', 'MiniRocket: random-kernel features, most over folds')
+    if 'm1_phys6' in master:
+        res = master['m1_phys6']['result']
+        n('phys6_n_features', len(cv.load_result(res).params['options']['rms']['cols']), 'd', f'results/{res}.json',
+          'physics model: features (yaw, roll and sideways velocity at the half and at the end of the approach)')
+    if 'm2_stack' in master:
+        res = master['m2_stack']['result']
+        n('stack_n_models', len(cv.load_result(res).params['settings']['ensemble']), 'd', f'results/{res}.json',
+          'stack: models whose outputs a logistic regression combines')
+    from stage2.config import N_NORM
+    n('ref_n_instants', len(range(0, N_NORM, 8)), 'd', 'stage2/scripts/reference.py',
+      'yaw baseline: instants of the approach at which the cumulative yaw is read (every 8th of the time-normalised '
+      'samples)')
+    n('log_loss_chance', math.log(2), '.3f', 'definition', 'log loss of a model that always answers 0.5 (ln 2)')
+
+
+def _report_figure_numbers(n: Num, master: dict[str, Any]) -> None:
+    """The numbers that the final report's figures FINAL_15 - FINAL_19 show (final_figures), read from the same saved
+    files: AUC intervals of the candidates, the two calibration examples (raw and after Platt scaling), the k-attempt
+    curves, the per-person accuracies and the learning curve."""
+    import pandas as pd
+    from stage2 import config as C
+    from stage2.lanes import final_figures as FG
+    src_m = _src('final_master')
+    # FINAL_15: the AUC with its CI for every candidate (the accuracy CIs are registered in build)
+    for k, r in master.items():
+        n.ci(f'{k}_auc', r['auc_ci'], src_m, f'{r["label"]}: AUC', '.3f')
+    n('families_n_models', sum(k in master for k in FG.FAMILY_MODELS), 'd', 'stage2/lanes/final_figures.py',
+      'models in the family comparison (FINAL_15)')
+    n('nested_inner_folds', C.INNER_SPLITS, 'd', 'stage2/config.py',
+      'inner folds over the training persons in which the nested selection compares the candidates')
+    _model_facts(n, master)
+    # FINAL_16: calibration before and after Platt scaling
+    if all((C.TAB_DIR / lane / f'{fname}.json').exists() for *_, lane, fname in FG.CAL_EXAMPLES):
+        what = {'raw': 'raw scores (no calibration)', 'platt': 'after Platt scaling'}
+        for ex in FG.calibration_examples():
+            k, lab, src = ex['key'], ex['label'], ex['source']
+            for st in ('raw', 'platt'):
+                s, d = ex[st], f'{lab}, {what[st]}'
+                n(f'calfig_{k}_{st}_slope', s['slope'], '.2f', src,
+                  f'{d}: calibration slope (1 = calibrated, below 1 = over-confident)')
+                n.ci(f'calfig_{k}_{st}_slope', s['slope_ci'], src, f'{d}: calibration slope', '.2f')
+                n(f'calfig_{k}_{st}_ece', s['ece'], '.3f', src, f'{d}: expected calibration error (ten equal-count bins)')
+                n(f'calfig_{k}_{st}_ece_null', s['ece_null_q95'], '.3f', src,
+                  f'{d}: 95th percentile of the ECE that a perfectly calibrated model shows by chance')
+                n.p(f'calfig_{k}_{st}_ece_p', s['ece_p'], src, f'{d}: p of its ECE against the perfect-calibration null')
+                n(f'calfig_{k}_{st}_ll', s['log_loss'], '.3f', src, f'{d}: log loss')
+                n.pct(f'calfig_{k}_{st}_acc', s['accuracy'], src, f'{d}: LOSO accuracy')
+                if 'intercept' in s:
+                    n(f'calfig_{k}_{st}_int', s['intercept'], '+.2f', src, f'{d}: calibration intercept (0 = calibrated)')
+                    n.ci(f'calfig_{k}_{st}_int', s['intercept_ci'], src, f'{d}: calibration intercept', '+.2f')
+            fsrc, f = f'results/{ex["platt"]["result"]}.json', ex['folds']
+            n(f'calfig_{k}_folds', len(f), 'd', fsrc, f'{lab}: fitted Platt functions (one per LOSO fold)')
+            n(f'calfig_{k}_a_min', f['a'].min(), '.2f', fsrc, f'{lab}: Platt slope a of the fold functions, smallest')
+            n(f'calfig_{k}_a_max', f['a'].max(), '.2f', fsrc, f'{lab}: Platt slope a of the fold functions, largest')
+            n(f'calfig_{k}_b_min', f['b'].min(), '+.2f', fsrc, f'{lab}: Platt offset b of the fold functions, smallest')
+            n(f'calfig_{k}_b_max', f['b'].max(), '+.2f', fsrc, f'{lab}: Platt offset b of the fold functions, largest')
+            n(f'calfig_{k}_change', 100 * ex['mean_abs_change'], '.1f', fsrc,
+              f'{lab}: mean change of P(right) per trial made by the Platt function (points)')
+            n(f'calfig_{k}_changed', ex['answers_changed'], 'd', fsrc,
+              f'{lab}: trials whose answer (right or left) the Platt function changed')
+            b = ex['raw']['bins']
+            n(f'calfig_{k}_groups', len(b), 'd', src, f'{lab}: equal-count groups of trials in the reliability curves')
+            n(f'calfig_{k}_group_min', int(b['n'].min()), 'd', src, f'{lab}: trials per group, fewest')
+            n(f'calfig_{k}_group_max', int(b['n'].max()), 'd', src, f'{lab}: trials per group, most')
+    # FINAL_17: k attempts of one person and hand
+    if _has('final_aggregation'):
+        ag, src = _read('final_aggregation'), _src('final_aggregation')
+        names = {'used': 'sum_tau', 'avg': 'mean_p'}
+        desc = {'used': 'scaled sum of logits sigmoid(sum z / tau_k), the displayed combination',
+                'avg': 'mean of the probabilities'}
+        for k in sorted(int(x) for x in ag['rules']):
+            for nm, rule in names.items():
+                v = ag['rules'][str(k)][rule]
+                n.pct(f'att_k{k}_{nm}_acc', v['accuracy'], src, f'k = {k} attempts, {desc[nm]}: accuracy per person and hand')
+                n(f'att_k{k}_{nm}_ll', v['log_loss'], '.3f', src, f'k = {k} attempts, {desc[nm]}: log loss')
+                n.ci(f'att_k{k}_{nm}_ll', v['log_loss_ci'], src, f'k = {k} attempts, {desc[nm]}: log loss', '.3f')
+                # mean confidence max(P, 1 - P) = accuracy + over-confidence (both per person and hand)
+                n.pct(f'att_k{k}_{nm}_conf', v['accuracy'] + v['over_confidence'], src,
+                      f'k = {k} attempts, {desc[nm]}: mean confidence in the answer given')
+        for k, t in ag['tau_median'].items():
+            if int(k) > 1:
+                n(f'att_tau{k}', t, '.2f', src, f'tau_{k}: median over the outer folds')
+                n(f'att_tau{k}_min', ag['tau_range'][k][0], '.2f', src, f'tau_{k}: smallest over the outer folds')
+                n(f'att_tau{k}_max', ag['tau_range'][k][1], '.2f', src, f'tau_{k}: largest over the outer folds')
+                n(f'att_mult{k}', int(k) / t, '.1f', src,
+                  f'k / tau_{k}: the factor that multiplies the mean logit of {k} attempts (1 = averaging, {k} = '
+                  f'independent attempts)')
+        n('att_draws', int(ag['n_draws']), 'd', src, 'random draws of k attempts per person, hand and k')
+        n('att_k_max', max(int(x) for x in ag['rules']), 'd', src,
+          'largest k; the persons kept have at least this many trials of each hand')
+    # FINAL_18: accuracy by person
+    if _has('final_breakdown'):
+        pp, src = pd.DataFrame(_read('final_breakdown')['persons']), _src('final_breakdown')
+        low = pp.sort_values(['accuracy', 'person_id']).iloc[0]
+        n('brk_n_persons', len(pp), 'd', src, 'persons in the per-person breakdown')
+        n.pct('brk_person_median', float(pp['accuracy'].median()), src, 'median accuracy of a person (LOSO)')
+        n('brk_n_perfect', int((pp['accuracy'] >= 1.0).sum()), 'd', src, 'persons with every trial right')
+        n('brk_low_person_id', str(low['person_id']), '', src, 'the person with the lowest accuracy')
+        n('brk_low_person_n', int(low['n']), 'd', src, 'trials of the person with the lowest accuracy')
+        few = pp.sort_values(['n', 'person_id']).iloc[0]
+        n('brk_fewest_trials', int(few['n']), 'd', src, 'trials of the person with the fewest trials')
+        n('brk_fewest_trials_id', str(few['person_id']), '', src, 'the person with the fewest trials')
+        n.pct('brk_fewest_trials_acc', float(few['accuracy']), src, 'accuracy of the person with the fewest trials')
+    # FINAL_19: the learning curve of the final model
+    if _has('final_learning'):
+        fin = _read('final_decision')['final_model']
+        v, src = _read('final_learning').get(fin), _src('final_learning')
+        if isinstance(v, dict) and isinstance(v.get('fit'), dict):
+            s = pd.DataFrame(v['summary'])
+            for _, r in s.iterrows():
+                n.pct(f'lc_{fin}_acc_n{int(r["n"]):02d}', r['acc_mean'], src,
+                      f'mean accuracy with {int(r["n"])} training persons')
+            sizes = [int(x) for x in s['n'] if int(x) < int(v['n_all'])]
+            n('lc_sizes', ', '.join(str(x) for x in sizes[:-1]) + f' and {sizes[-1]}', '', src,
+              'training sizes drawn at random (persons)')
+            n(f'lc_{fin}_runs', int(sum(int(x) for x in s['reps'][s['n'] < int(v['n_all'])])), 'd', src,
+              'random draws of training persons over every size')
+            n(f'lc_{fin}_b', v['fit']['b'], '.2f', src, 'inverse power law a - b n^-c: b')
+            n(f'lc_{fin}_c', v['fit']['c'], '.2f', src, 'inverse power law a - b n^-c: c')
+            # the final report states the law with accuracy in %: b in percentage points, and the curve's own value
+            # at all training persons, from which the gain_to_40 keys are measured (fit(40) - fit(n_all))
+            n(f'lc_{fin}_b_pts', 100 * v['fit']['b'], '.1f', src,
+              'inverse power law a - b n^-c: b in percentage points (accuracy in %)')
+            grid = [int(x) for x in v['fit']['grid']]
+            if int(v['n_all']) in grid:
+                n.pct(f'lc_{fin}_fit_nall', v['fit']['fit'][grid.index(int(v['n_all']))], src,
+                      'the fitted curve read at all training persons (the base of the extrapolated gain to 40)')
+            n(f'lc_{fin}_nboot', int(v['fit']['n_boot_ok']), 'd', src, 'bootstrap refits of the band')
+            n('lc_extrapolation_n', 40, 'd', 'stage2/lanes/final_finalmodel.py',
+              'training persons at which the fitted curve is read (the at_40 keys)')
+            n('n_train_persons', int(v['n_all']), 'd', src, 'training persons in every LOSO fold (all but the one left out)')

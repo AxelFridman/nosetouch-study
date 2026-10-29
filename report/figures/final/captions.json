@@ -68,5 +68,30 @@
   "caption": "A deployment prior pi of the right hand adds log(pi / (1 - pi)) to every logit: right-hand recall rises, left-hand recall falls and the balanced accuracy drops (primary trials). The shipped default is pi = 0.5 (the PI chooses the hand).",
   "decision": "Keep the prior at 0.5 for the PI's evaluation.",
   "file": "FINAL_14_prior.pdf"
+ },
+ "FINAL_15_families": {
+  "caption": "One or two models of each family, each tested on participants it had never seen (leave-one-subject-out, LOSO): accuracy (left) and area under the ROC curve (right) with person-bootstrap 95 % CIs. The 1D CNN, the final model (blue), scores highest on both; the intervals of the best models overlap.",
+  "decision": "Shows which model family wins; the selection-aware estimate of the whole choice is the nested number (final/nested_accuracy), not the winner's own LOSO accuracy shown here.",
+  "file": "FINAL_15_families.pdf"
+ },
+ "FINAL_16_calibration": {
+  "caption": "Calibration before and after, for a model that needed it (top) and for the final model (bottom). (a) Raw scores against the observed share of right-hand trials, in ten equal-size groups of trials with similar scores (95 % person-bootstrap CI); the dashed diagonal is perfect calibration. (b) The fitted calibration function (Platt scaling, a logistic function of the score), fitted on the training participants of each LOSO fold. (c) The calibrated probabilities against the observed share.",
+  "decision": "What calibration does, shown where it mattered and on the final model, whose raw scores were already close to calibrated.",
+  "file": "FINAL_16_calibration.pdf"
+ },
+ "FINAL_17_attempts": {
+  "caption": "Combining k attempts of the same participant and hand (19 participants with at least 5 attempts of each hand; random draws of k attempts, each participant left out in turn): accuracy (left) and log loss (right, with 95 % person-bootstrap bands). The two ways of combining give nearly the same answers, but the average of the probabilities does not grow more confident as attempts accumulate, so its log loss stops improving.",
+  "decision": "The page shows the scaled sum of evidence; the mean P(right) is not shown.",
+  "file": "FINAL_17_attempts.pdf"
+ },
+ "FINAL_18_persons": {
+  "caption": "Accuracy of the final model on each participant when that participant was left out (LOSO), sorted; dark bars: Android, hatched: iPhone; L: the 2 left-handed participants; dashed: 80 %, which 3 participants fall below.",
+  "decision": "Who the final model fails on.",
+  "file": "FINAL_18_persons.pdf"
+ },
+ "FINAL_19_learning_curve": {
+  "caption": "Learning curve of the 1D CNN: inside every LOSO fold the model was retrained on 5 random draws of training participants of each size (grey dots; black: their mean; the point at 19 uses every training participant). Dashed: the fitted inverse power law with a 95 % band from resampling the draws; it extrapolates to 89.6 % at 40 participants.",
+  "decision": "Whether recording more participants of the same kind looks worthwhile.",
+  "file": "FINAL_19_learning_curve.pdf"
  }
 }

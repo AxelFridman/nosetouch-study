@@ -1,0 +1,143 @@
+% short/05_methods.tex: how the models were tested (LOSO, and the training-only split, which gives predictions for the
+% training participants from models not trained on them, with the reason), the measures (accuracy, AUC, log loss =
+% binary cross-entropy, 95 % person-bootstrap CI), the six models in three named families plus a baseline (MiniRocket
+% and the CNN explained in plain words), mirror augmentation (after the models, which it refers to), calibration
+% (Platt), combining attempts (intuition and a worked example, then equation eq:aggregate), how the processing choices
+% were tested (two fixed test models, MiniRocket for several options; clearly worse in accuracy and in log loss), and
+% the choice of the final model with its honest (repeated-choice) estimate. The model's score is written s (not z,
+% which names the phone's axis out of the screen). Numbers only through \R keys.
+\section{Models and how we tested them}\label{sec:methods}
+
+\paragraph{Testing on new people.} To measure how a model does on a person it has never seen, we used
+leave-one-subject-out (LOSO) cross-validation: a model is trained on \R{final/n_train_persons} participants and tested
+on the remaining one, and this is repeated \R{describe/n_persons} times, so that every participant is the test
+participant once. Everything a model learns from data, including its calibration and the factor used to combine
+attempts (both described below), is learned from the \R{final/n_train_persons} training participants only. Some of
+these steps need predictions for the training participants made by a model that was not trained on them (a model
+predicts the people it was trained on better than new people, so calibrating or combining on such predictions would
+make it over-confident). For these steps we split the training participants into a few groups, trained on all groups
+but one and predicted the group left out, in turn; we call this the \emph{training-only split}. The predictions of the
+\R{describe/n_persons} LOSO rounds are then pooled and scored together.
+
+\paragraph{Measures.} The \emph{accuracy} is the share of trials in which the hand given more than 50\,\% is the hand
+actually used. The AUC of Section~\ref{sec:physics} measures how well the predicted \pright{} separates the hands. The
+\emph{log loss}, or binary cross-entropy, is the average over the trials of $-\ln$ of the probability given to the hand
+actually used: it is low when the model is right and confident and punishes confident mistakes heavily; a model that
+always answers 50\,\% scores \R{final/log_loss_chance}, and lower is better. The main numbers come with a
+95\,\% confidence interval (CI), written [low, high]: unless stated otherwise, we resampled the \R{describe/n_persons} participants with
+replacement \R{p1/n_boot} times, recomputed the number each time and kept the middle 95\,\% of these values (a person
+bootstrap, which respects that the trials of one person are alike).
+
+\paragraph{The models.} Because one number is not enough, we built models that read more of the movement, in three
+families: a physics model that uses a few numbers chosen from the mechanism of Section~\ref{sec:physics}; standard
+machine learning on many summary numbers of each trial (gradient boosting and a stack of three models); and models
+that read the whole time series (MiniRocket and a 1D CNN). A simple yaw baseline completes the comparison. Every model
+reads the movement to the nose of Section~\ref{sec:processing} and outputs a score $s$, the log-odds of the right hand,
+$s = \ln\bigl(\pright/(1-\pright)\bigr)$: $s = 0$ means 50\,\%, positive values favour the right hand, and
+$\pright = \sigma(s) = 1/(1 + e^{-s})$.
+\begin{itemize}[nosep,leftmargin=1.2em]
+  \item \emph{Yaw baseline.} A logistic regression on one channel, the yaw, read at \R{final/ref_n_instants} evenly
+    spaced moments of the movement. It was fixed before any other model was built, as the baseline that a more
+    complex model has to beat.
+  \item \emph{Physics model.} An antisymmetric logistic regression on \R{final/phys6_n_features} numbers chosen from
+    physics: the yaw, the roll (the turn about the towards-the-face direction so far) and the sideways velocity (the
+    sideways acceleration added up), each read halfway through the movement and at its end. All six change sign
+    under the mirror and the regression has no intercept, so the mirror flips the sign of $s$, and since
+    $\sigma(-s) = 1 - \sigma(s)$ the mirror image of a movement gets exactly $1 - \pright$: the two hands are
+    treated symmetrically by construction.
+  \item \emph{Gradient boosting} (LightGBM): \R{final/gbm_n_trees} small decision trees, each correcting the errors of
+    the previous ones. A decision tree sorts a trial by a few yes/no questions about its numbers (for example, is the
+    average yaw in some time segment above a threshold?), and each final group, a leaf (at most \R{final/gbm_n_leaves}
+    per tree), adds its own amount to the score. The trees read \R{final/gbm_n_features} summary
+    numbers: for each of \R{final/gbm_n_channels} channels (the \R{final/cnn_n_gravity} gravity-frame channels and,
+    along each of the phone's three axes, the acceleration, the rotation speed and the direction of up, which shows
+    how the phone is held), its average in \R{p1/n_bins} equal time segments, its mean, spread, minimum and maximum,
+    and when these two occur.
+  \item \emph{Stack of \R{final/stack_n_models} models.} A logistic regression, a support vector machine (a classifier
+    that draws a curved boundary between the hands) and gradient boosting, each on \R{m2/lr_full_n_features} summary
+    numbers per trial (averages in time segments, statistics, frequency content, correlations between channels and
+    running sums, among others), combined by a small logistic regression that learns how much to trust each, from
+    their predictions in the training-only split.
+  \item \emph{MiniRocket}~\cite{dempster2021minirocket}, a fast general-purpose method for time series. It slides a
+    fixed set of short patterns along the \R{final/cnn_n_gravity} gravity-frame channels: at each moment a pattern is
+    multiplied point by point with the stretch of signal under it and the products are added up, which gives a large
+    response where the signal looks like the pattern. Each pattern is also stretched to several time scales, and for
+    each the share of the movement where it responds becomes one summary number (\R{final/mr_n_features_max} in all);
+    a logistic regression is fitted on these numbers.
+  \item \emph{1D CNN}, the final model: a small one-dimensional convolutional neural network that reads the
+    \R{final/cnn_n_channels} gravity- and body-frame channels as time series of \R{describe/n_norm} points. Like
+    MiniRocket it slides short patterns along the signals, but it learns them from the training data, and it stacks
+    them in \R{final/cnn_n_layers} layers of \R{final/cnn_width} patterns, \R{final/cnn_kernels} points long: the
+    first layer compares its patterns with the channels, and each later layer looks for patterns in the responses of
+    the layer before, so that it finds longer patterns built from shorter ones. The responses are averaged within
+    \R{final/cnn_n_bins} time segments, so that the network keeps when in the movement a pattern occurred, and a
+    weighted sum of these averages gives $s$. The numbers in the patterns and in the sum, the weights
+    (\R{final/cnn_n_params} per network), are learned in many small steps that lower the log loss on the training
+    trials. We split the training participants into \R{final/cnn_n_members} groups and
+    trained \R{final/cnn_n_members} such networks, each on all groups but one, stopping when its log loss on the group
+    left out no longer improved (which makes its predictions for that group slightly flattering); for a new
+    participant their outputs are averaged. Training also used small random stretches in time, changes of scale and
+    noise.
+\end{itemize}
+
+\paragraph{Mirror images as extra training data.} Every model but the physics model, which is symmetric by
+construction, was also trained on the mirror image of every training movement, labelled with the other hand (mirror
+augmentation): the same channels with every sideways motion, every turn about the vertical and every roll reversed
+(Section~\ref{sec:physics}). This doubles the training data, balances the two hands and teaches the model that the two
+hands move as mirror images.
+
+\paragraph{Calibration.} A model's output need not be a calibrated probability: many models are over-confident, with
+probabilities too close to 0 and 1~\cite{guo2017calibration}. We check calibration with a reliability curve: the trials are
+sorted by their predicted \pright{} and cut into \R{final/calfig_cnn_groups} groups of \R{final/calfig_cnn_group_min}
+or \R{final/calfig_cnn_group_max} trials, and for each group the average predicted \pright{} is plotted against the
+share of its trials that really were right-hand trials; a calibrated model lies on the diagonal. A calibration function
+can correct a model that is not calibrated. We used Platt scaling~\cite{platt1999probabilistic}: the calibrated
+probability is $\sigma(a s + b)$, where $s$ is the model's score; $a < 1$ pulls extreme scores towards 50\,\%,
+which corrects over-confidence, $a > 1$ pushes them away from 50\,\%, which corrects under-confidence, and $b$ shifts
+all scores towards one hand. In each LOSO round, $a$ and $b$ are fitted on the training participants' predictions from
+the training-only split, so the left-out participant never informs its own calibration.
+
+\paragraph{Combining several attempts.} A person can repeat the movement with the same hand, and each such attempt
+(one more kept trial of the same person and hand) adds evidence about the hand. On the log-odds scale the evidence of
+independent observations simply adds up: two independent answers of 80\,\% each are odds of 4 to 1 each, together
+$4 \times 4 = 16$ to 1, that is 94\,\%, and multiplying odds is adding log-odds. The attempts of one person are not
+independent, however (same person, same habits), so adding them as if they were would make the combined answer
+over-confident. We therefore add the scores of the $k$ attempts, divide the sum by a factor \tauk{}, and turn the
+result back into a probability:
+\begin{equation}
+  \pright_k = \sigma\!\left(\frac{1}{\tauk}\sum_{i=1}^{k} s_i\right),
+  \label{eq:aggregate}
+\end{equation}
+where $s_i$ is the score of attempt $i$. The factor \tauk{} lies between 1 (attempts fully independent: a plain sum)
+and $k$ (attempts identical: a plain average of the scores). In each LOSO round it is the value that gives the lowest
+log loss on random groups of $k$ attempts of the training participants, scored with their predictions from the
+training-only split. For three attempts its median over the rounds is \R{final/att_tau3}: dividing the sum of three
+scores by \R{final/att_tau3} counts them as \R{final/att_mult3} independent attempts instead of 3, so three attempts
+are worth about two independent ones.
+
+\paragraph{How we chose the processing.} For the processing steps of Section~\ref{sec:processing}, except the iPhone
+sign (a correction, not a choice) and the body frame (which only the CNN reads), we also tried alternatives, re-running
+the whole LOSO evaluation each time with two fixed test models (a logistic regression on the yaw rate and the yaw,
+similar to the yaw baseline, and gradient boosting) and, for several alternatives, also with MiniRocket: no smoothing
+or another filter, a coarser clock, the phone's own estimate of gravity, a window of fixed length instead of the
+time-normalised movement, channels rescaled to a common size, other sets of channels and no mirror images, among
+others (\R{p1/n_choices} choices in all). No alternative was clearly better. In accuracy, two were clearly worse:
+replacing the yaw rate and the yaw by the signals along the phone's own axes changed the accuracy of the logistic
+regression by \Rcib{p1/d_lr_frame_device} percentage points, and keeping only the gravity-frame channels changed that
+of gradient boosting by \Rcib{p1/d_gbm_frame_gravity} points (the phone's own axes still carry some information for
+this model; the final model nevertheless reads only channels that do not change with the grip,
+Section~\ref{sec:processing}). By log loss, a few more were clearly worse for gradient boosting, among them training
+without the mirror images (a change of \Rcib{p1/dll_gbm_no_mirror}). All other differences were of a size that chance
+alone can produce. We therefore kept the processing described above.
+
+\paragraph{Choosing the final model, and an honest estimate.} We compared \R{final/n_candidates} models in all
+(several versions within each family) and kept the 1D CNN, which had the lowest log loss and the highest AUC. Picking
+the best of many models on the same participants makes the winner's own score slightly flattering, because part of its
+lead can be luck. To get an honest number for a new participant we repeated the choice inside every LOSO round: with
+one participant left out, the \R{final/n_candidates} models were compared by their log loss on the other
+\R{final/n_train_persons} participants only (with the training-only split, in \R{final/nested_inner_folds} groups),
+and the one with the lowest log loss there was tested on the left-out participant. In a round the choice can fall on
+another model, so this estimate measures our whole way of choosing a model, applied to a new person; on all
+\R{describe/n_persons} participants the same choice gives the CNN. This honest estimate is our main result. It repeats
+the final choice among the models, but not the earlier design decisions made while looking at the same results (for
+example, which channels the CNN reads), so it may still be slightly optimistic.

@@ -30,6 +30,12 @@ FIGURES: dict[str, dict[str, Any]] = {
     'FINAL_12_learning_curve': dict(width='full', height=2.4),
     'FINAL_13_segmentation': dict(width='full', height=1.9),
     'FINAL_14_prior': dict(width='half', height=2.2),
+    # the final report's figures (plain labels, one message each; FINAL_01-14 stay as the full report uses them)
+    'FINAL_15_families': dict(width='full', height=2.0),
+    'FINAL_16_calibration': dict(width='full', height=4.4),
+    'FINAL_17_attempts': dict(width='full', height=2.1),
+    'FINAL_18_persons': dict(width='half', height=2.3),
+    'FINAL_19_learning_curve': dict(width='half', height=2.3),
 }
 
 
@@ -597,6 +603,344 @@ def fig_FINAL_14_prior(**kw: Any) -> None:
                decision='Keep the prior at 0.5 for the PI\'s evaluation.')
 
 
+# ───────────────────────────── 15-19: the final report's figures ─────────────────────────────
+# Plain labels for a reader outside the field, one message per figure, every value read from the saved files (no
+# model is fitted here). The numbers step (final_summary._report_figure_numbers) registers the numbers they show.
+
+#: FINAL_15: one or two models per family (candidate key -> plain name): the pre-specified yaw baseline, the
+#: interpretable physics model, two classical machine-learning models, the time-series model and the final 1D CNN
+FAMILY_MODELS: dict[str, str] = {'ref': 'Yaw baseline', 'm1_phys6': 'Physics model (6 numbers)',
+                                 'p1_gbm': 'Gradient boosting', 'm2_stack': 'Stack of 3 models',
+                                 'm3_mr': 'MiniRocket', 'm3_deep': '1D CNN (final model)'}
+
+#: FINAL_16: (key, plain name, raw result, Platt-calibrated result, lane, saved calibration file of the lane). The
+#: gradient-boosting model of lane p1 is the clearest case among the candidates' uncalibrated versions of raw scores
+#: off the diagonal that Platt scaling repaired (slope CI below 1 before, containing 1 after); the final CNN is shown
+#: next to it because its own raw scores were already close to calibrated.
+CAL_EXAMPLES: tuple[tuple[str, str, str, str, str, str], ...] = (
+    ('gbm', 'Gradient boosting', 'p1_gbm_base', 'p1_calib_gbm_platt', 'p1', 'p1_calibration'),
+    ('cnn', '1D CNN (final model)', 'm3_cnn_body', 'm3_cal_deep_platt', 'm3', 'm3_calibration'))
+
+
+def _platt_folds(result: str) -> pd.DataFrame:
+    """The Platt function of every LOSO fold, P = sigmoid(a * logit(raw P) + b), fitted on that fold's training
+    persons, as the saved result records it in its per-fold parameters (lane p1: top level; lane m3: 'calib')."""
+    import json
+    from stage2 import cv
+    p = cv.load_result(result).predictions
+    rows: dict[int, dict[str, float]] = {}
+    for f, s in zip(p['fold'], p['params']):
+        if int(f) in rows:
+            continue
+        d = json.loads(s) if isinstance(s, str) else dict(s)
+        d = d.get('calib', d)
+        rows[int(f)] = {'fold': int(f), 'a': float(d['a']), 'b': float(d['b'])}
+    return pd.DataFrame(list(rows.values())).sort_values('fold').reset_index(drop=True)
+
+
+def _cal_stage(e: dict[str, Any], bins: list[dict[str, Any]], result: str, lane: str) -> dict[str, Any]:
+    """One stage (raw or Platt) of a calibration example in one vocabulary (lanes p1 and m3 name the fields apart)."""
+    if lane == 'p1':
+        s = {'slope': e['slope'], 'slope_ci': [e['slope_lo'], e['slope_hi']], 'ece': e['ece'],
+             'ece_null_q95': e['ece_null_q95'], 'ece_p': e['ece_p'], 'log_loss': e['log_loss'],
+             'accuracy': e['accuracy']}
+    else:
+        s = {'slope': e['cal_slope'], 'slope_ci': [e['cal_slope_lo'], e['cal_slope_hi']], 'ece': e['ece'],
+             'ece_null_q95': e['ece_null_q95'], 'ece_p': e['ece_null_p'], 'log_loss': e['log_loss'],
+             'accuracy': e['accuracy'], 'intercept': e['cal_intercept'],
+             'intercept_ci': [e['cal_intercept_lo'], e['cal_intercept_hi']]}
+    lo, hi = s['slope_ci']
+    s['miscalibrated'] = bool(hi < 1 or lo > 1 or s['ece'] > s['ece_null_q95'])
+    s['direction'] = 'over' if hi < 1 else 'under' if lo > 1 else ''
+    s['result'] = result
+    s['bins'] = pd.DataFrame(bins)[['p_mean', 'y_mean', 'y_lo', 'y_hi', 'n']]
+    return s
+
+
+def calibration_examples() -> list[dict[str, Any]]:
+    """The two models of FINAL_16, raw and after Platt scaling, from the lanes' saved calibration files (reliability
+    in ten equal-count groups of trials with person-bootstrap 95 % intervals, calibration slope with its CI, ECE and
+    the 95th percentile of its perfect-calibration null, log loss) and their saved results (the Platt function of
+    every fold, the mean change of P(right) per trial)."""
+    from stage2 import config as C
+    from stage2 import cv
+    from stage2.lanes.final_io import denull
+    out = []
+    for key, label, raw, platt, lane, fname in CAL_EXAMPLES:
+        doc = denull(json_load(C.TAB_DIR / lane / f'{fname}.json'))
+        if lane == 'p1':
+            e_raw, e_cal = doc['methods']['gbm:none']['overall'], doc['methods']['gbm:platt']['overall']
+            b_raw, b_cal = doc['reliability']['gbm:none'], doc['reliability']['gbm:platt']
+        else:
+            ents = {x['method']: x for x in doc['roles']['deep']['entries']}
+            if ents['none']['name'] != raw or doc['roles']['deep']['best'] != raw:
+                raise ValueError(f'{fname}: the deep role\'s raw result is {ents["none"]["name"]}, not {raw}')
+            e_raw, e_cal = ents['none'], ents['platt']
+            b_raw, b_cal = e_raw['reliability'], e_cal['reliability']
+        r_raw, r_cal = cv.load_result(raw), cv.load_result(platt)
+        for e, r, nm in ((e_raw, r_raw, raw), (e_cal, r_cal, platt)):   # the lane's entry describes this result
+            if abs(float(e['log_loss']) - float(r.metrics['log_loss'])) > 1e-9:
+                raise ValueError(f'{fname}: its entry does not describe {nm} (log loss differs)')
+        pr = r_raw.predictions.set_index('trial_id')['p_right']
+        pc = r_cal.predictions.set_index('trial_id')['p_right'].reindex(pr.index)
+        out.append({'key': key, 'label': label, 'lane': lane, 'source': f'tables/{lane}/{fname}.json',
+                    'raw': _cal_stage(e_raw, b_raw, raw, lane), 'platt': _cal_stage(e_cal, b_cal, platt, lane),
+                    'folds': _platt_folds(platt), 'mean_abs_change': float((pc - pr).abs().mean()),
+                    'answers_changed': int(((pr > 0.5) != (pc > 0.5)).sum()), 'n_trials': int(len(pr))})
+    return out
+
+
+def json_load(path: Any) -> dict[str, Any]:
+    import json
+    from pathlib import Path
+    return json.loads(Path(path).read_text(encoding='utf-8'))
+
+
+def _cal_title(ex: dict[str, Any]) -> str:
+    """The row title of FINAL_16, generated from the saved verdicts (slope CI and ECE against its null band)."""
+    r, c = ex['raw'], ex['platt']
+    if r['miscalibrated'] and not c['miscalibrated']:
+        # short enough to fit the 6.2-in figure in one line at 8 pt bold
+        how = {'over': ('somewhat over-confident', 'makes them less extreme'),
+               'under': ('somewhat under-confident', 'makes them more extreme')}.get(
+            r['direction'], ('off the diagonal', 'moves them towards it'))
+        return f'{ex["label"]}: raw scores {how[0]}; the fitted function {how[1]}'
+    if not r['miscalibrated']:
+        return f'{ex["label"]}: raw scores already close to calibrated; the fitted function changes them little'
+    return f'{ex["label"]}: raw scores off the diagonal, and still after the fitted function'
+
+
+def fig_FINAL_15_families(**kw: Any) -> None:
+    name = 'FINAL_15_families'
+    o = _o(name, kw)
+    master = {r['key']: r for r in _read('final_master')['rows']}
+    fin, _ = _final()
+    rows = [{'key': k, 'label': lab, 'accuracy': master[k]['accuracy'], 'acc_lo': master[k]['accuracy_ci'][0],
+             'acc_hi': master[k]['accuracy_ci'][1], 'auc': master[k]['auc'], 'auc_lo': master[k]['auc_ci'][0],
+             'auc_hi': master[k]['auc_ci'][1], 'final': k == fin} for k, lab in FAMILY_MODELS.items() if k in master]
+    df = pd.DataFrame(rows).sort_values('accuracy').reset_index(drop=True)        # the best at the top
+    fig, (a1, a2) = figure(o['width'], o['height'], 1, 2, sharey=True)
+    for ax, col, lo, hi, txt in ((a1, 'accuracy', 'acc_lo', 'acc_hi', lambda v: f'{100 * v:.1f} %'),
+                                 (a2, 'auc', 'auc_lo', 'auc_hi', lambda v: f'{v:.3f}')):
+        for i, r in df.iterrows():
+            c = SERIES if r['final'] else INK2
+            ax.plot([r[lo], r[hi]], [i, i], color=c, lw=1.8 if r['final'] else 1.0, solid_capstyle='butt')
+            ax.plot(r[col], i, 'o', color=c, ms=5.0 if r['final'] else 3.8)
+            ax.annotate(txt(r[col]), (r[col], i), xytext=(0, 3.5), textcoords='offset points', ha='center',
+                        va='bottom', fontsize=6.5, color=c, fontweight='bold' if r['final'] else 'normal')
+    a1.set_xlim(0.70, 1.0)
+    a1.xaxis.set_major_formatter(lambda v, _: f'{100 * v:.0f} %')
+    a1.set_xlabel('accuracy (LOSO, 95 % CI)')
+    a2.set_xlim(0.80, 1.0)
+    a2.set_xlabel('area under the ROC curve (AUC, 95 % CI)')
+    a1.set_ylim(-0.6, len(df) - 0.25)
+    a1.set_yticks(range(len(df)), df['label'])
+    for t, (_, r) in zip(a1.get_yticklabels(), df.iterrows()):
+        t.set_color(SERIES if r['final'] else INK)
+        if r['final']:
+            t.set_fontweight('bold')
+    L.save_fig(fig, name, data=df,
+               caption=('One or two models of each family, each tested on participants it had never seen (leave-one-'
+                        'subject-out, LOSO): accuracy (left) and area under the ROC curve (right) with person-bootstrap '
+                        '95 % CIs. The 1D CNN, the final model (blue), scores highest on both; the intervals of the best '
+                        'models overlap.'),
+               decision='Shows which model family wins; the selection-aware estimate of the whole choice is the '
+                        'nested number (final/nested_accuracy), not the winner\'s own LOSO accuracy shown here.')
+
+
+def fig_FINAL_16_calibration(**kw: Any) -> None:
+    name = 'FINAL_16_calibration'
+    o = _o(name, kw)
+    import matplotlib.pyplot as plt
+    from matplotlib.lines import Line2D
+    from stage2.plotting import FULL_W, HALF_W, use_style
+    exs = calibration_examples()
+    use_style()
+    w = FULL_W if o['width'] == 'full' else HALF_W if o['width'] == 'half' else float(o['width'])
+    fig = plt.figure(figsize=(w, o['height']), layout='constrained')
+    subs = fig.subfigures(len(exs), 1, hspace=0.06, height_ratios=[1.07] + [1.0] * (len(exs) - 1))
+    grid = np.linspace(0.0005, 0.9995, 400)
+    zg = np.log(grid / (1 - grid))
+    raw_c, cal_c = INK2, SERIES
+    dashes = (0, (4.0, 2.5))      # long dashes, so the diagonal reads as dashed (not dotted) at print size
+    data = []
+    for row, (sub, ex) in enumerate(zip(np.atleast_1d(subs), exs)):
+        axes = sub.subplots(1, 3)
+        sub.suptitle(_cal_title(ex), fontsize=8, x=0.01, ha='left', fontweight='bold')
+        for ax, stage, c, xl in ((axes[0], 'raw', raw_c, 'raw score (model output)'),
+                                 (axes[2], 'platt', cal_c, 'calibrated probability')):
+            b = ex[stage]['bins']
+            ax.plot([0, 1], [0, 1], color=INK, lw=0.7, ls=dashes, zorder=1)
+            err = [np.clip(b['y_mean'] - b['y_lo'], 0, None), np.clip(b['y_hi'] - b['y_mean'], 0, None)]
+            ax.errorbar(b['p_mean'], b['y_mean'], yerr=err, fmt='o-', color=c, ms=3.0, lw=0.9, elinewidth=0.7,
+                        capsize=0, zorder=3)
+            # the calibration slope of these scores (1: calibrated; below 1: over-confident), as the numbers step
+            # registers it (final/calfig_<key>_<raw|platt>_slope)
+            ax.text(0.04, 0.96, f'slope {ex[stage]["slope"]:.2f}', transform=ax.transAxes, ha='left', va='top',
+                    fontsize=6.5, color=c)
+            ax.set_xlabel(xl)
+            ax.set_ylabel('observed share of\nright-hand trials')
+            data.append(b.assign(model=ex['label'], panel=stage, a=np.nan, b=np.nan, fold=np.nan))
+        ax = axes[1]
+        ax.plot([0, 1], [0, 1], color=INK, lw=0.7, ls=dashes, zorder=1)
+        for _, f in ex['folds'].iterrows():
+            ax.plot(grid, 1 / (1 + np.exp(-(f['a'] * zg + f['b']))), color=cal_c, lw=0.6, alpha=0.45, zorder=2)
+        ax.set_xlabel('raw score (model output)')
+        ax.set_ylabel('calibrated probability')
+        data.append(ex['folds'].assign(model=ex['label'], panel='function'))
+        for ax in axes:
+            ax.set_xlim(0, 1)
+            ax.set_ylim(0, 1)
+            ax.set_xticks([0, 0.5, 1], ['0', '0.5', '1'])
+            ax.set_yticks([0, 0.5, 1], ['0', '0.5', '1'])
+            ax.set_aspect('equal', adjustable='box')
+        if row == 0:
+            for ax, t in zip(axes, ('(a) raw scores', '(b) fitted calibration function', '(c) after calibration')):
+                ax.set_title(t, fontsize=7.5)
+    hs = [Line2D([], [], color=INK, lw=0.7, ls=dashes, label='perfect calibration'),
+          Line2D([], [], color=raw_c, marker='o', ms=3.0, lw=0.9, label='raw: a group of trials with similar scores, '
+                                                                          '95 % CI'),
+          Line2D([], [], color=cal_c, marker='o', ms=3.0, lw=0.9, label='after calibration: the same groups, 95 % CI'),
+          Line2D([], [], color=cal_c, lw=0.6, alpha=0.7, label='function fitted for one left-out participant')]
+    fig.legend(handles=hs, loc='outside lower center', ncol=2, fontsize=6.5, handlelength=1.8, columnspacing=1.5)
+    L.save_fig(fig, name, data=pd.concat(data, ignore_index=True),
+               caption=('Calibration before and after, for a model that needed it (top) and for the final model '
+                        '(bottom). (a) Raw scores against the observed share of right-hand trials, in ten equal-size '
+                        'groups of trials with similar scores (95 % person-bootstrap CI); the dashed diagonal is '
+                        'perfect calibration. (b) The fitted calibration function (Platt scaling, a logistic function '
+                        'of the score), fitted on the training participants of each LOSO fold. (c) The calibrated '
+                        'probabilities against the observed share.'),
+               decision='What calibration does, shown where it mattered and on the final model, whose raw scores '
+                        'were already close to calibrated.')
+
+
+def fig_FINAL_17_attempts(**kw: Any) -> None:
+    name = 'FINAL_17_attempts'
+    o = _o(name, kw)
+    ag = _read('final_aggregation')
+    rules = {'sum_tau': ('equation (1), our combination', SERIES, '-'),
+             'mean_p': ('averaged probabilities', INK2, '--')}
+    ks = sorted(int(k) for k in ag['rules'])
+    fig, (a1, a2) = figure(o['width'], o['height'], 1, 2)
+    data = []
+    for rule, (lab, c, ls) in rules.items():
+        v = [ag['rules'][str(k)][rule] for k in ks]
+        acc = [x['accuracy'] for x in v]
+        ll = [x['log_loss'] for x in v]
+        lo, hi = [x['log_loss_ci'][0] for x in v], [x['log_loss_ci'][1] for x in v]
+        a1.plot(ks, acc, marker='o', ls=ls, color=c, ms=3.2, lw=1.2, label=lab, zorder=3 if rule == 'sum_tau' else 4)
+        a2.fill_between(ks, lo, hi, color=c, alpha=0.13, lw=0)
+        a2.plot(ks, ll, marker='o', ls=ls, color=c, ms=3.2, lw=1.2, label=lab)
+        data.append(pd.DataFrame({'rule': rule, 'k': ks, 'accuracy': acc, 'log_loss': ll, 'log_loss_lo': lo,
+                                  'log_loss_hi': hi}))
+    a1.yaxis.set_major_formatter(lambda v, _: f'{100 * v:.0f} %')
+    a1.set_ylabel('accuracy')
+    a2.set_ylabel('log loss (lower is better)')
+    a2.set_ylim(0, None)
+    for a in (a1, a2):
+        a.set_xticks(ks)
+        a.set_xlabel('attempts combined (k)')
+    a1.legend(loc='lower right', fontsize=6.5)
+    L.save_fig(fig, name, data=pd.concat(data, ignore_index=True),
+               caption=(f'Combining k attempts of the same participant and hand ({len(ag["persons"])} participants with '
+                        f'at least {max(ks)} attempts of each hand; random draws of k attempts, each participant left '
+                        f'out in turn): accuracy (left) and log loss (right, with 95 % person-bootstrap bands). The two '
+                        f'ways of combining give nearly the same answers, but the average of the probabilities does not '
+                        f'grow more confident as attempts accumulate, so its log loss stops improving.'),
+               decision='The page shows the scaled sum of evidence; the mean P(right) is not shown.')
+
+
+def fig_FINAL_18_persons(**kw: Any) -> None:
+    name = 'FINAL_18_persons'
+    o = _o(name, kw)
+    from matplotlib.lines import Line2D
+    from matplotlib.patches import Patch
+    br = _read('final_breakdown')
+    pp = pd.DataFrame(br['persons']).sort_values(['accuracy', 'person_id']).reset_index(drop=True)
+    fig, ax = figure(o['width'], o['height'])
+    # platform by fill, in neutral tones that print in black and white and do not read as the hand colours (red =
+    # left, blue = right): Android dark grey, iPhone white with grey hatching
+    styles = {'android': {'facecolor': INK2, 'edgecolor': INK2, 'hatch': None, 'label': 'Android'},
+              'ios': {'facecolor': 'white', 'edgecolor': INK2, 'hatch': '//////', 'label': 'iPhone'}}
+    for i, (acc, plat) in enumerate(zip(pp['accuracy'], pp['platform'])):
+        st = styles.get(str(plat).lower(), styles['android'])
+        ax.bar(i, acc, width=0.72, facecolor=st['facecolor'], edgecolor=st['edgecolor'], hatch=st['hatch'],
+               linewidth=0.6)
+    ax.axhline(0.8, color=INK, lw=0.7, ls='--', zorder=3)          # drawn over the bars, so it shows on every one
+    left = pp['handedness'].astype(str).str.lower() == 'left'
+    for i in np.flatnonzero(left.to_numpy()):
+        ax.text(i, pp['accuracy'].iloc[i] + 0.015, 'L', ha='center', va='bottom', fontsize=7, color=INK,
+                fontweight='bold')
+    ax.set_xticks(range(len(pp)), pp['person_id'], rotation=90, fontsize=6)
+    ax.set_xlim(-0.6, len(pp) - 0.4)
+    ax.set_ylim(0, 1.12)
+    ax.set_yticks([0, 0.2, 0.4, 0.6, 0.8, 1.0])
+    ax.yaxis.set_major_formatter(lambda v, _: f'{100 * v:.0f} %')
+    ax.set_ylabel('accuracy when left out')
+    ax.grid(axis='x', visible=False)
+    hs = [Patch(facecolor=styles[k]['facecolor'], edgecolor=styles[k]['edgecolor'], hatch=styles[k]['hatch'],
+                linewidth=0.6, label=styles[k]['label']) for k in ('android', 'ios')]
+    hs.append(Line2D([], [], color='none', label='L: left-handed'))
+    ax.legend(handles=hs, fontsize=6.5, loc='lower left', bbox_to_anchor=(0.0, 1.0), ncol=3, borderaxespad=0.1,
+              frameon=False, handlelength=1.6, handleheight=1.0, columnspacing=1.0)
+    n_below = int((pp['accuracy'] < 0.8).sum())
+    L.save_fig(fig, name, data=pp,
+               caption=(f'Accuracy of the final model on each participant when that participant was left out (LOSO), '
+                        f'sorted; dark bars: Android, hatched: iPhone; L: the {int(left.sum())} left-handed '
+                        f'participants; dashed: 80 %, which {n_below} participants fall below.'),
+               decision='Who the final model fails on.')
+
+
+def fig_FINAL_19_learning_curve(**kw: Any) -> None:
+    name = 'FINAL_19_learning_curve'
+    o = _o(name, kw)
+    from matplotlib.lines import Line2D
+    from matplotlib.ticker import MultipleLocator
+    fin, _ = _final()
+    v = _read('final_learning')[fin]
+    pts, s, f = pd.DataFrame(v['points']), pd.DataFrame(v['summary']), v['fit']
+    g = np.asarray(f['grid'], dtype=float)
+    keep = g <= 40
+    fig, ax = figure(o['width'], o['height'])
+    ax.fill_between(g[keep], np.asarray(f['lo'])[keep], np.asarray(f['hi'])[keep], color=SERIES, alpha=0.15, lw=0)
+    ax.plot(g[keep], np.asarray(f['fit'])[keep], color=SERIES, lw=1.0, ls='--')
+    ax.scatter(pts['n'], pts['accuracy'], s=9, color=INK2, alpha=0.55, lw=0, zorder=3)
+    ax.plot(s['n'], s['acc_mean'], 'o-', color=INK, ms=3.2, lw=1.0, zorder=4)
+    at = f['at_40']
+    ax.errorbar([40], [at[0]], yerr=[[at[0] - at[1]], [at[2] - at[0]]], fmt='D', color=SERIES, ms=4, capsize=2,
+                elinewidth=1.0, zorder=5)
+    ax.annotate(f'{100 * at[0]:.1f} %', (40, at[2]), xytext=(0, 2), textcoords='offset points', ha='center',
+                va='bottom', fontsize=6.5, color=SERIES)
+    n_all = int(v['n_all'])
+    ax.axvline(n_all, color=MUTED, lw=0.6, ls=':', zorder=1)
+    for t, ha, dx in (('measured', 'right', -3), ('extrapolated', 'left', 3)):
+        ax.annotate(t, (n_all, 0.918), xytext=(dx, 0), textcoords='offset points', ha=ha, va='center', fontsize=6.0,
+                    color=INK2)
+    ax.set_xlim(0, 43)
+    ax.set_xticks([3, 9, 15, n_all, 30, 40])
+    ax.set_ylim(0.80, 0.925)
+    ax.yaxis.set_major_locator(MultipleLocator(0.02))
+    ax.yaxis.set_major_formatter(lambda y, _: f'{100 * y:.0f} %')
+    ax.set_xlabel('participants used for training')
+    ax.set_ylabel('accuracy (LOSO)')
+    hs = [Line2D([], [], color=INK2, marker='o', ls='', ms=3, alpha=0.55, label='one random draw'),
+          Line2D([], [], color=INK, marker='o', ms=3.2, lw=1.0, label='mean of the draws'),
+          Line2D([], [], color=SERIES, lw=1.0, ls='--', label='fitted curve, 95 % band'),
+          Line2D([], [], color=SERIES, marker='D', ls='', ms=4, label='extrapolated to 40')]
+    ax.legend(handles=hs, fontsize=6.0, loc='lower right', handlelength=1.6, borderaxespad=0.2)
+    curve = pd.DataFrame({'n': g[keep], 'accuracy': np.asarray(f['fit'])[keep], 'lo': np.asarray(f['lo'])[keep],
+                          'hi': np.asarray(f['hi'])[keep]})
+    data = pd.concat([pts.assign(kind='draw'), s[['n', 'acc_mean']].rename(columns={'acc_mean': 'accuracy'}).assign(
+        kind='mean'), curve.assign(kind='fitted curve')], ignore_index=True)
+    L.save_fig(fig, name, data=data,
+               caption=(f'Learning curve of the 1D CNN: inside every LOSO fold the model was retrained on '
+                        f'{int(s["reps"].iloc[0])} random draws of training participants of each size (grey dots; '
+                        f'black: their mean; the point at {n_all} uses every training participant). Dashed: the fitted '
+                        f'inverse power law with a 95 % band from resampling the draws; it extrapolates to '
+                        f'{100 * at[0]:.1f} % at 40 participants.'),
+               decision='Whether recording more participants of the same kind looks worthwhile.')
+
+
 FIGURE_FUNCTIONS = {k: globals()[f'fig_{k}'] for k in FIGURES}
 
 
@@ -606,10 +950,19 @@ NEEDS: dict[str, tuple[str, str | None]] = {
     'FINAL_03_nested_selection': ('final_nested', 'frequency'), 'FINAL_08_calibration': ('final_calibration', 'methods'),
     'FINAL_09_remedies': ('final_calibration', 'methods'), 'FINAL_10_attempts': ('final_aggregation', 'rules'),
     'FINAL_12_learning_curve': ('final_learning', None), 'FINAL_13_segmentation': ('final_variants', 'rows'),
+    'FINAL_15_families': ('final_master', 'rows'), 'FINAL_17_attempts': ('final_aggregation', 'rules'),
+    'FINAL_18_persons': ('final_breakdown', 'persons'), 'FINAL_19_learning_curve': ('final_learning', None),
+}
+#: figures that also read other lanes' saved files (tables/<lane>/<name>.json)
+NEEDS_OTHER: dict[str, tuple[tuple[str, str], ...]] = {
+    'FINAL_16_calibration': tuple((lane, fname) for *_, lane, fname in CAL_EXAMPLES),
 }
 
 
 def _ready(name: str) -> bool:
+    from stage2 import config as C
+    if any(not (C.TAB_DIR / lane / f'{fname}.json').exists() for lane, fname in NEEDS_OTHER.get(name, ())):
+        return False
     src, field = NEEDS.get(name, (None, None))
     if src is None:
         return True

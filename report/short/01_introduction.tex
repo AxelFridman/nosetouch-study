@@ -1,63 +1,88 @@
-% short/01_introduction.tex: the question, why it is hard, the approach, the status, related work (about 1 page
-% with Figures 1 and 2). Full version: sections/01_introduction.tex. The status paragraph is the ONLY place that
-% states the audit status of the final-model lane.
+% short/01_introduction.tex: the question, why it is hard, the approach in brief (Figures 1 and 2 in one float),
+% related work. Literature numbers are quoted as their papers report them (not results of ours; they match the
+% full report's literature table). Numbers of ours only through \R keys.
 \section{Introduction}\label{sec:intro}
 
-\paragraph{The question.} A person holds a smartphone at arm's length and brings it to the nose with the left or
-the right hand (Figure~\ref{fig:gesture}). The task, set by the principal investigator (PI), is to predict which
-hand from the motion sensors that the browser's DeviceMotion interface delivers at about
-60~Hz~\cite{w3c2025deviceorientation}, as a calibrated probability \pright{} that the right hand moved the phone
-(of the touches given 80\,\%, about 80\,\% should be right-hand touches), for persons the model has never seen.
+\paragraph{The question.} A person holds a smartphone at arm's length and brings it to touch the nose, with the
+left or the right hand (Figure~\ref{fig:gesture}). The task, set by the principal investigator, is to predict
+which hand it was from the phone's motion sensors alone. A phone has two such sensors: the accelerometer, which measures
+the phone's acceleration and also feels gravity, and the gyroscope, which measures how fast the phone rotates. Our
+recording app is a web page, and a web page can read both sensors~\cite{w3c2025deviceorientation}, on our
+participants' phones about \R{describe/rate_hz_median_whole} times per second. The answer should be a probability,
+\pright{}, that the right hand moved the phone, and it should be calibrated: of the movements given 80\,\%, about
+80\,\% should really be right-hand movements. Above all, it must work for people the model has never seen, since
+that is how it will be used.
 
-% Figures 1 and 2 share one float (the gesture frames stacked beside the diagram), placed here so that it lands at
-% the top of the next page and the introduction flows on below it.
+% Figures 1 and 2 share one float (the gesture frames stacked beside the diagram).
 \begin{figure}[tbp]
 \centering
 \begin{minipage}[c]{0.34\linewidth}\centering
-  \begin{subfigure}{\linewidth}\centering
-    \repoimage{gesture-a}{../docs/img/gesture/right_upright_natural_start.png}\caption{Arm extended, still}
-  \end{subfigure}\\[3pt]
-  \begin{subfigure}{\linewidth}\centering
-    \repoimage{gesture-b}{../docs/img/gesture/right_upright_natural_halfway.png}\caption{The approach}
-  \end{subfigure}\\[3pt]
-  \begin{subfigure}{\linewidth}\centering
-    \repoimage{gesture-c}{../docs/img/gesture/right_upright_natural_touch.png}\caption{Nose touch and hold}
-  \end{subfigure}
+  \repoimage{gesture-a}{../docs/img/gesture/right_upright_natural_start.png}\\[4pt]
+  \repoimage{gesture-b}{../docs/img/gesture/right_upright_natural_halfway.png}\\[4pt]
+  \repoimage{gesture-c}{../docs/img/gesture/right_upright_natural_touch.png}
 \end{minipage}\hfill
 \begin{minipage}[c]{0.58\linewidth}\centering
-  \input{short/diagram_pipeline}
+  \input{short/diagram_overview}
 \end{minipage}\par\medskip
 \captionsetup{format=plain,justification=raggedright,singlelinecheck=false}
 \begin{minipage}[t]{0.34\linewidth}
-  \caption{The gesture as the app shows it (right hand, upright grip, natural speed). The model reads the
-    approach.}
+  \caption{The movement as the app's instructions draw it (right hand, phone upright, natural speed): arm extended
+    and still (top), on the way (middle), touch and hold (bottom); left of each frame the person seen from the
+    side, right of it the phone as the person sees it. (The arm's colour is the app's; in our figures red marks
+    the left hand and blue the right.)}
   \label{fig:gesture}
 \end{minipage}\hfill
 \begin{minipage}[t]{0.58\linewidth}
-  \caption{From sensors to an answer. Steps 3--5 are evaluated on the stored approach windows by leaving one person
-    out; the dashed cue-free steps were simulated with lane m4's reference classifier, not yet with the final
-    model.}
-  \label{fig:pipeline}
+  \caption{From a movement to an answer: the steps of the final pipeline. Section~\ref{sec:data} explains step 1
+    and the app's markers, Section~\ref{sec:processing} steps 2 and 3, and Section~\ref{sec:methods} steps 4
+    to 6. Bottom bar: the answer, \pright{}, from 0 (left hand) to 1 (right hand); the middle line, 0.5,
+    separates a left answer from a right one.}
+  \label{fig:overview}
 \end{minipage}
 \end{figure}
 
-\paragraph{Why it is hard.} Persons, phones and grips differ, and the device axes turn with the grip. The two hands
-make mirror-image movements, so most simple descriptors (speed, duration, path length) are the same for both, and
-in production there is no start cue: the page must find the approach in a continuous stream.
+\paragraph{Why it is hard.} People differ in arm length, speed and style, and the model sees no movement of the
+person it is tested on. Phones differ in their sensors and in how the browser reports
+them~\cite{stisen2015heterogeneity}. The sensors measure along the phone's own axes, which turn with the way the
+phone is held, so the same arm movement gives different raw signals when the phone is held upright or sideways. Most
+importantly, the two arms are mirror images of each other, so simple descriptions of a movement, such as its speed,
+its duration or the length of its path, are about the same for both hands.
 
-\paragraph{The approach.} The left--right mirror symmetry of the body shows which quantities can carry the hand
-(Section~\ref{sec:physics}). Each trial is standardised into a gravity frame and a heading-following body frame, four
-model families are compared by leave-one-person-out (LOSO) cross-validation, a pre-specified rule picks the final
-model, and a simulation then removes the start cue (Figure~\ref{fig:pipeline}).
+\paragraph{Our approach in brief.} Figure~\ref{fig:overview} shows the steps from one movement to an answer. We built
+a web app that guides a participant through many such movements, asking each time for the left or the right hand,
+and records the two sensors. Each recording is then cleaned and expressed relative to gravity and to the direction
+the screen faces instead of the phone's own axes, so that it no longer depends on how the phone sits in the hand.
+Physics tells us where to look: because the arms are mirror images, the hand should show mainly in quantities that a
+mirror reverses, above all the direction in which the phone turns about the vertical. Early in the movement the phone
+should turn counter-clockwise (seen from above) in the right hand and clockwise in the left, and the recordings
+confirm this. Since this one quantity is not enough on its own, we trained several kinds of models, from a simple
+rule to a small neural network, and tested each one only on participants it had never seen. Finally, we checked that
+the predicted probabilities are calibrated, and we combined several movements made by the same person with the same
+hand into one answer.
 
-\paragraph{Status.} This preliminary version shortens the full report (report/main.pdf in
-\url{https://github.com/AxelFridman/nosetouch-study}), which states every decision with its evidence. The analysis ran in lanes: the three model-family lanes (m1--m3), preprocessing (p1) and the
-production simulation (m4) each passed two independent audits; the final-model lane is a first pass, not yet
-independently audited, and the final model has not yet run in the cue-free simulation.
-
-\paragraph{Related work.} Most prior studies infer the hand from touch traces or grip during ordinary phone use, and
-several split the data by trial or at random, which overstates the accuracy for new
-persons~\cite{goel2012gripsense,guo2016operating,fernandez2021implicit,saeb2017usecase,little2017crossvalidation}.
-Opposite rotation senses of the two hands were seen with wrist sensors in a clinical finger-to-nose test, without a
-classifier~\cite{mohammadighazi2022ataxia}, and modern classifiers are often over-confident~\cite{guo2017calibration},
-so this study evaluates person-wise and checks calibration.
+\paragraph{Related work.} Several studies have detected the hand that holds or operates a phone, or a user's dominant
+hand, mostly to adapt the screen to that hand. Goel et al.'s GripSense used the touchscreen, the gyroscope and the
+vibration motor to recognise how the phone is held (84.26\,\% of the hand postures recognised
+correctly, 10 participants)~\cite{goel2012gripsense}. Löchtefeld et al.\ recognised the hand used for the unlock gesture from the
+phone's sensors during that gesture, with a nearest-neighbour classifier, which gives a new example the label of the
+most similar recorded one (98.51\,\% for 12 participants, all right-handed)~\cite{lochtefeld2015handedness}. Guo
+et al.\ recognised the operating hand from the finger's traces on the touchscreen, and changes of hand from the
+accelerometer and the gyroscope (about 94\,\% of the detections correct, 14 participants)~\cite{guo2016operating}.
+Nelavelli and Ploetz used a single number that, like the turn of our phone, reverses between the hands: the direction
+in which a swipe on the screen curves (99.53\,\% agreement with the hand, 12 users)~\cite{nelavelli2018adaptive}.
+Fernández et al.\ used touch measurements of 174 participants (a detection rate of up to 99.92\,\% after seven
+interactions)~\cite{fernandez2021implicit}, Chen et al.\ the motion sensors with a neural network that reads the signal step by step (an LSTM;
+from 89.2\,\% in real life to 97.4\,\% while sitting)~\cite{chen2023handedness}, and Singh and Singh the
+accelerometer, gyroscope and orientation sensor with a classifier built from many decision trees (XGBoost; 85.04\,\%, with three possible
+answers rather than two)~\cite{singh2025dominant}. These numbers are hard to compare with ours, because several of
+these evaluations let the same person appear in both the training and the test data: Guo et al.\ and Fernández et al.\
+split their data at random, Nelavelli and Ploetz held out no users, and for Chen et al.\ and Singh and Singh it is
+unclear. A model can then recognise the person rather than the hand, which overstates the accuracy for new
+people~\cite{little2017crossvalidation,chaibubneto2019subject}: in a review of sensor and smartphone studies, the median
+reported error was 5.6\,\% with random splits and 13.0\,\% when whole participants were held out~\cite{saeb2017usecase}, and
+even the movement that brings a phone to the ear can identify its owner~\cite{conti2011mind}. With few participants, an
+estimate also has wide error bars~\cite{varoquaux2018cvfailure}. The closest work to ours is clinical: in the
+finger-to-nose test of a neurological examination, Mohammadi-Ghazi et al.\ saw with wrist motion sensors that the wrist
+rotates in opposite senses for the two hands (17 participants), but built no classifier~\cite{mohammadighazi2022ataxia}.
+Finally, modern neural networks are often over-confident~\cite{guo2017calibration}, so a predicted probability must be
+checked for calibration.

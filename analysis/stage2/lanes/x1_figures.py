@@ -64,6 +64,33 @@ FIGURES: dict[str, dict[str, Any]] = {
                                  null_set='prespecified', null_variant='like_for_like'),
     'X1_09_multivariate': dict(width='full', height=2.9, label_top=6, width_ratios=(1.15, 0.85, 1.25),
                                loco_label_chars=34),
+    # the plain overview of the short report (half a page wide): (a) the pre-specified characteristics in which the
+    # case lies beyond every reference person, and the declared "expected to differ" ones (x1_report), each row
+    # rescaled to the reference range; (b) the like-for-like count of each person (the null reference of the count)
+    'X1_10_pd01_vs_reference': dict(width='half', row_h=0.122, top_h=0.72, count_h=1.42, label_size=6.4,
+                                    title_size=7.4, case_s=18, inside_keys=XR.EXPECTED_TO_DIFFER, jitter=0.17,
+                                    null_set='prespecified', null_variant='like_for_like', box_w=0.9, box_h=0.80,
+                                    box_text=6.3),
+}
+
+#: Plain row labels of X1_10 (for a reader who has not seen the analysis); a characteristic without one falls back to
+#: its analysis label. "Wobble" is the angular-velocity RMS in a band: band power, never called a tremor.
+PLAIN_LABELS: dict[str, str] = {
+    'hold_wait_s': 'Hold: time to hold still', 'false_starts': 'Hold: false starts', 'rt_s': 'Reaction time',
+    'pre_rms_3_7': 'Hold: wobble at 3–7 Hz', 'pre_rms_7_12': 'Hold: wobble at 7–12 Hz',
+    'pre_ratio_db': 'Hold: share at 3–12 Hz', 'pre_sway_gyro': 'Hold: overall sway',
+    'duration_s': 'Reach: duration', 'peak_speed': 'Reach: peak turning speed, raw',
+    'peak_speed_mv': 'Reach: peak turning speed', 'mean_speed_mv': 'Reach: mean turning speed',
+    'peak_acc': 'Reach: peak acceleration', 'rotation_total_mv': 'Reach: total turn',
+    'rotation_net': 'Reach: net turn', 'tilt_change': 'Reach: change of tilt',
+    'ldlj': 'Reach: smoothness (jerk)', 'sparc': 'Reach: smoothness (spectral)', 'hesitations': 'Reach: pauses',
+    'app_rms_3_7': 'Reach: wobble at 3–7 Hz', 'app_rms_7_12': 'Reach: wobble at 7–12 Hz',
+    'app_ratio_db': 'Reach: share at 3–12 Hz', 'nose_rms_3_7': 'At nose: wobble at 3–7 Hz',
+    'nose_rms_7_12': 'At nose: wobble at 7–12 Hz', 'cv_duration': 'Repeats: duration variability',
+    'seq_peak_speed_mv': 'Repeats: peak-speed change', 'seq_duration': 'Repeats: duration change',
+    'speed_ratio': 'Slow-to-fast duration ratio', 'fhy_hand': 'Hand cue: first-half yaw',
+    'net_yaw_hand': 'Hand cue: net yaw', 'attempts_per_accepted': 'Attempts per accepted trial',
+    'nose_no_return': 'End: phone kept at the nose',
 }
 
 # ───────────────────────────── saved inputs ─────────────────────────────
@@ -633,6 +660,135 @@ def fig_X1_09_multivariate(**kw: Any) -> None:
     L.save_fig(fig, 'X1_09_multivariate', data=pd.DataFrame(rows), caption=tx['caption'], decision=tx['decision'])
 
 
+def _rescaled(key: str) -> tuple[pd.DataFrame, float, bool]:
+    """One characteristic's reference persons and the case, rescaled so that the lowest reference person sits at 0
+    and the highest at 1, on the characteristic's declared scale (log for right-skewed quantities). A display
+    transform of the saved person values (main variant): the case lies outside [0, 1] exactly when it is beyond
+    every reference person. Returns (reference rows with 'pos', the case's position, whether the log scale was
+    used)."""
+    ref, case = _person_values(key)
+    y = ref['value'].to_numpy(dtype=float)
+    cv = float(case['value']) if pd.notna(case['value']) else math.nan
+    log = XS.BY_KEY[key].scale == 'log' and bool(np.all(y > 0)) and (not math.isfinite(cv) or cv > 0)
+    f = np.log if log else (lambda v: np.asarray(v, dtype=float))
+    ty = f(y)
+    lo, hi = float(np.min(ty)), float(np.max(ty))
+    span = hi - lo if hi > lo else 1.0
+    cpos = float((f(np.array([cv]))[0] - lo) / span) if math.isfinite(cv) else math.nan
+    return ref.assign(pos=(ty - lo) / span), cpos, log
+
+
+def _count_panel(ax: Any, nn: dict[str, Any], o: dict[str, Any]) -> list[dict[str, Any]]:
+    """One labelled box per person, stacked at the person's count of characteristics beyond all others (reference
+    persons grey, the case highlighted on top of its column)."""
+    pp = pd.DataFrame(nn['per_person'])
+    ref = pp[pp['group'] == 'reference'].sort_values(['n_characteristics', 'person_id'])
+    case = pp[pp['group'] == 'exploratory'].iloc[0]
+    w, h = float(o['box_w']), float(o['box_h'])
+    height: dict[int, int] = {}
+    rows = []
+    for _, r in [*ref.iterrows(), (None, case)]:
+        c = int(r['n_characteristics'])
+        k = height.get(c, 0)
+        height[c] = k + 1
+        is_case = r['group'] == 'exploratory'
+        ax.add_patch(Rectangle((c - w / 2, k - h / 2), w, h, facecolor=COLORS['case'] if is_case else COLORS['shade'],
+                               edgecolor=INK if is_case else COLORS['ref'], lw=0.8 if is_case else 0.5, zorder=3))
+        ax.text(c, k, str(r['person_id']), ha='center', va='center', fontsize=o['box_text'], zorder=4,
+                color=INK if is_case else INK2, fontweight='bold' if is_case else 'normal')
+        rows.append({'panel': 'b', 'person_id': r['person_id'], 'person_group': r['group'],
+                     'n_characteristics': c, 'n_phenomena': int(r['n_phenomena']), 'stack_position': k})
+    top = max(height.values())
+    cmax = max(height)
+    ax.set_xlim(-0.6, cmax + 0.6)
+    ax.set_ylim(-0.6, top - 0.4)
+    ax.set_xticks(range(cmax + 1))
+    ax.set_yticks([])
+    ax.grid(False)
+    ax.spines['left'].set_visible(False)
+    ax.tick_params(axis='x', length=0, labelsize=6.5)
+    return rows
+
+
+def fig_X1_10_pd01_vs_reference(**kw: Any) -> None:
+    o = {**FIGURES['X1_10_pd01_vs_reference'], **kw}
+    case_id = _case()
+    main = _main()
+    pre = main[~main['post_hoc'].astype(bool)]
+    order = {c.key: i for i, c in enumerate(XS.CHARACTERISTICS)}
+    outside, inside = XT.overview_rows(main, tuple(o['inside_keys']))
+    n_ref = int(main['n_ref'].max())
+    groups = ((f'Outside the range of all {n_ref}', 'outside', outside), ('Within their range', 'inside', inside))
+    n_lines = sum(len(keys) + 1 for _, _, keys in groups)
+    fig = figure(o['width'], o['top_h'] + o['row_h'] * n_lines + o['count_h'])[0]
+    fig.clf()
+    top, bottom = fig.subfigures(2, 1, height_ratios=[o['top_h'] + o['row_h'] * n_lines, o['count_h']],
+                                 hspace=0.0)
+    ax = top.subplots()
+    ax.axvspan(0.0, 1.0, color=COLORS['shade'], lw=0, zorder=0)
+    y, ticks, labels, bold, data = 0, [], [], [], []
+    for title, gkey, keys in groups:
+        ticks.append(y)
+        labels.append(title)
+        bold.append(True)
+        y += 1
+        for k in keys:
+            ref, cpos, log = _rescaled(k)
+            rng = np.random.default_rng(order[k])                  # deterministic jitter per row
+            ax.scatter(ref['pos'], y + rng.uniform(-o['jitter'], o['jitter'], len(ref)), s=7, color=COLORS['ref'],
+                       edgecolors=COLORS['ref_edge'], linewidths=0.3, zorder=3)
+            ax.plot([np.median(ref['pos'])] * 2, [y - 0.32, y + 0.32], color=COLORS['ref_median'], lw=1.1, zorder=4,
+                    solid_capstyle='butt')
+            if math.isfinite(cpos):
+                ax.scatter([cpos], [y], **{**CASE_MARKER, 's': o['case_s']})
+            if len(ref) < n_ref:                                     # a row that compares fewer reference persons
+                ax.text(1.02, y, f'n = {len(ref)}', transform=ax.get_yaxis_transform(), ha='left', va='center',
+                        fontsize=6.2, color=INK2, clip_on=False)
+            ticks.append(y)
+            labels.append(PLAIN_LABELS.get(k, XS.BY_KEY[k].label))
+            bold.append(False)
+            _, case = _person_values(k)
+            data += [{'panel': 'a', 'row_group': gkey, 'key': k, 'label': labels[-1], 'scale': 'log' if log else 'linear',
+                      'person_id': r['person_id'], 'person_group': 'reference', 'value': r['value'], 'position': r['pos']}
+                     for _, r in ref.iterrows()]
+            data.append({'panel': 'a', 'row_group': gkey, 'key': k, 'label': labels[-1],
+                         'scale': 'log' if log else 'linear', 'person_id': case_id, 'person_group': 'exploratory',
+                         'value': float(case['value']), 'position': cpos})
+            y += 1
+    pos = [d['position'] for d in data if math.isfinite(d['position'])]
+    ax.set_xlim(min(-0.3, min(pos) - 0.12), max(1.3, max(pos) + 0.12))
+    ax.set_ylim(y - 0.5, -0.7)
+    ax.set_yticks(ticks, labels)
+    for t, b in zip(ax.get_yticklabels(), bold):
+        if b:
+            t.set_fontweight('bold')
+            t.set_color(INK)
+    ax.tick_params(axis='y', length=0, labelsize=o['label_size'])
+    ax.set_xticks([0.0, 1.0], ['lowest', 'highest'])
+    ax.tick_params(axis='x', labelsize=6.5)
+    ax.grid(axis='y', visible=False)
+    ax.set_xlabel('Position relative to the reference range', fontsize=6.8)
+    from matplotlib.lines import Line2D
+    handles = [Line2D([0], [0], marker='o', ls='', ms=3.2, mfc=COLORS['ref'], mec=COLORS['ref_edge'], mew=0.3,
+                      label='reference participant'),
+               Line2D([0], [0], marker='|', ls='', ms=6, mec=COLORS['ref_median'], mew=1.1, label='their median'),
+               Line2D([0], [0], marker='D', ls='', ms=4.2, mfc=COLORS['case'], mec=INK, mew=0.6, label=case_id)]
+    top.suptitle(f'a   {case_id} among the {n_ref} reference participants', x=0.02, ha='left',
+                 fontsize=o['title_size'], fontweight='bold')
+    top.legend(handles=handles, loc='outside lower center', ncol=3, fontsize=6.2, handletextpad=0.2,
+               columnspacing=1.0, borderaxespad=0.1)
+    bx = bottom.subplots()
+    nn = _characteristics()['null'][o['null_set']][o['null_variant']]
+    data += _count_panel(bx, nn, o)
+    n_pre = len(pre)
+    bx.set_xlabel(f'Characteristics (of {n_pre}) outside the range of all the others', fontsize=6.8)
+    bottom.suptitle('b   Each person against all the others', x=0.02, ha='left', fontsize=o['title_size'],
+                    fontweight='bold')
+    tx = XT.texts('X1_10_pd01_vs_reference')
+    L.save_fig(fig, 'X1_10_pd01_vs_reference', data=pd.DataFrame(data), caption=tx['caption'],
+               decision=tx['decision'])
+
+
 FIGURE_FUNCTIONS = {
     'X1_01_example_traces': fig_X1_01_example_traces,
     'X1_02_preparation': fig_X1_02_preparation,
@@ -643,6 +799,7 @@ FIGURE_FUNCTIONS = {
     'X1_07_hand_signature': fig_X1_07_hand_signature,
     'X1_08_zscore_summary': fig_X1_08_zscore_summary,
     'X1_09_multivariate': fig_X1_09_multivariate,
+    'X1_10_pd01_vs_reference': fig_X1_10_pd01_vs_reference,
 }
 assert tuple(FIGURE_FUNCTIONS) == XT.FIGURE_NAMES
 

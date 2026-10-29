@@ -1,0 +1,117 @@
+% short/06_results.tex: which model is best (Figure 8: one version of each of the six models of Section 5, mapped to
+% their families in the caption; the CNN's lead stated through the paired comparisons, not through overlapping CIs) and
+% the honest estimate; calibration before and after (Figure 9: gradient boosting, where it mattered, with the
+% calibration slope that the eye can check, and the final CNN, whose raw outputs were already close to calibrated);
+% several attempts (Figure 10); who it fails on (Figure 11); would more participants help (Figure 12, with how the
+% extrapolation was computed: b in points and the curve's own value at 19, the base of the gain). Numbers only
+% through \R keys.
+\section{Results}\label{sec:results}
+
+\begin{figure}[tbp]
+\centering
+\genfig{final/FINAL_15_families}
+\caption{One version of each of the six models of Section~\ref{sec:methods} (\R{final/n_candidates} models were
+compared in all), each tested on participants it had never seen (LOSO): the yaw baseline, the physics model, two
+models on summary numbers (gradient boosting and the stack) and two that read the whole time series (MiniRocket and
+the 1D CNN). Accuracy (left) and AUC (right) with their 95\,\% CIs. The 1D CNN, the final model (blue), scores
+highest on both.}
+\label{fig:families}
+\end{figure}
+
+\paragraph{Which model is best.} Every model separates the hands far better than chance, and every other model scores
+higher than the yaw baseline (Figure~\ref{fig:families}). The yaw baseline itself does no better than the sign of the
+first-half yaw alone (\R{describe/fhy_sign_rule_accuracy}, Section~\ref{sec:physics}): reading the yaw at more
+moments adds little, and the models that do better also read other channels. The 1D CNN performed best: in its own
+LOSO run (the slightly flattering score of Section~\ref{sec:methods}) its accuracy is \Rci{final/m3_deep_accuracy}
+and its AUC \Rcib{final/m3_deep_auc}, against \Rci{final/ref_accuracy} and \Rcib{final/ref_auc} for the yaw baseline.
+Its lead over the next models is small: compared with it on the same trials, participant by participant, the stack
+and gradient boosting could not be told apart from it, while MiniRocket, the physics model and the yaw baseline did
+detectably worse. Repeating the choice of the model inside every LOSO round gives the honest estimate for a new
+participant: an accuracy of \Rci{final/nested_accuracy}, an AUC of \Rcib{final/nested_auc} and a log loss of
+\Rcib{final/nested_log_loss}.
+
+\begin{figure}[tbp]
+\centering
+\genfig{final/FINAL_16_calibration}
+\caption{Calibration before and after, for a model that needed it (top: gradient boosting) and for the final model
+(bottom: the 1D CNN). (a) Raw scores (the uncalibrated \pright{} $= \sigma(s)$) against the observed share of
+right-hand trials, in \R{final/calfig_cnn_groups} groups of trials with similar scores (bars: 95\,\% CIs), with the
+calibration slope; the dashed diagonal is perfect calibration. (b) The fitted calibration function, one curve per LOSO
+round, each fitted on that round's training participants. (c) The calibrated probabilities against the observed
+share, with the calibration slope.}
+\label{fig:calibration}
+\end{figure}
+
+\paragraph{Calibration.} Gradient boosting, for example, was over-confident: groups of trials with an uncalibrated
+\pright{} near 0 held more right-hand trials than claimed, and groups near 1 fewer (Figure~\ref{fig:calibration}, top left). One number
+summarises this pattern, the \emph{calibration slope}: the $a$ of a single Platt function fitted to all the pooled
+scores at once (1: nothing to correct; below 1: over-confident). For gradient boosting it is
+\Rcib{final/calfig_gbm_raw_slope}. Its \R{final/calfig_gbm_folds} fitted functions, one per LOSO round ($a$ from
+\R{final/calfig_gbm_a_min} to \R{final/calfig_gbm_a_max}), pull the scores towards 50\,\% (top middle). Afterwards the
+groups scatter on both sides of the diagonal instead of lying above it at low scores and below it at high ones
+(top right), and the slope is \R{final/calfig_gbm_platt_slope}; the log loss changes little
+(\R{final/calfig_gbm_raw_ll} before, \R{final/calfig_gbm_platt_ll} after). The final CNN's raw outputs were already close to calibrated (bottom left; slope
+\R{final/calfig_cnn_raw_slope}): its fitted functions stay near the diagonal ($a$ from \R{final/calfig_cnn_a_min} to
+\R{final/calfig_cnn_a_max}), change its \pright{} by \R{final/calfig_cnn_change} percentage points on average and leave
+its log loss practically unchanged (\R{final/calfig_cnn_raw_ll} before, \R{final/calfig_cnn_platt_ll} after). We kept
+this step, planned for this model before the results, and the CNN's numbers in this report include it.
+
+\begin{figure}[tbp]
+\centering
+\genfig{final/FINAL_17_attempts}
+\caption{Combining $k$ attempts of the same participant and hand (the \R{final/agg_persons} participants with at
+least \R{final/att_k_max} attempts of each hand; random draws of $k$ attempts, each participant left out in turn;
+accuracy averaged over participants and hands): accuracy (left) and log loss (right, with 95\,\% bands), for the
+combination of equation~\eqref{eq:aggregate} (blue, solid) and for a plain average of the probabilities (grey,
+dashed).}
+\label{fig:attempts}
+\end{figure}
+
+\paragraph{Several attempts.} Combining attempts with equation~\eqref{eq:aggregate} helps (Figure~\ref{fig:attempts}).
+This test uses the \R{final/agg_persons} participants with at least \R{final/att_k_max} trials of each hand and
+averages the accuracy over participants and hands, so a single attempt scores \R{final/att_k1_used_acc} here rather
+than the \R{final/m3_deep_accuracy} above. The accuracy rises from \R{final/att_k1_used_acc} with one attempt to
+\R{final/att_k3_used_acc} with three and \R{final/att_k5_used_acc} with five, and the log loss falls from
+\R{final/att_k1_used_ll} to \R{final/att_k3_used_ll} and \R{final/att_k5_used_ll}. A plain average of the
+probabilities of the attempts gives nearly the same answers, but its log loss levels off near
+\R{final/att_k3_avg_ll} from three attempts on: an average does not become more confident as the evidence
+accumulates. Like the CNN's own score above, these numbers are slightly flattering, because the CNN was chosen on the
+same participants.
+
+\begin{figure}[tbp]
+\centering
+\begin{minipage}[t]{0.49\linewidth}\centering
+  \genfig{final/FINAL_18_persons}
+  \caption{Accuracy of the final model for each participant when that participant was left out, sorted; dark bars:
+  Android, hatched: iPhone; L: the two left-handed participants; dashed: \R{final/person_threshold}.}
+  \label{fig:persons}
+\end{minipage}\hfill
+\begin{minipage}[t]{0.49\linewidth}\centering
+  \genfig{final/FINAL_19_learning_curve}
+  \caption{Accuracy of the 1D CNN trained on fewer participants (grey: one random draw; black: the mean of the
+  draws), the fitted curve with its 95\,\% band, and its extrapolation to \R{final/lc_extrapolation_n}
+  participants.}
+  \label{fig:learning}
+\end{minipage}
+\end{figure}
+
+\paragraph{Who it fails on.} The accuracy differs between participants (Figure~\ref{fig:persons}). The median
+participant scores \R{final/brk_person_median}, \R{final/brk_n_perfect} participants have every trial right, and
+\R{final/brk_below80} fall below \R{final/person_threshold}, the lowest being \R{final/brk_low_person_id} at
+\R{final/brk_low_person} (\R{final/brk_low_person_n} trials). The two left-handed participants score
+\R{final/brk_left_p11} (P11) and \R{final/brk_left_p17} (P17). The accuracy is \R{final/brk_android_acc} on Android
+phones and \R{final/brk_ios_acc} on iPhones.
+
+\paragraph{Would more participants help?} We retrained the CNN inside every LOSO round on random subsets of
+\R{final/lc_sizes} of the training participants, drawing each size \R{final/lc_m3_deep_reps} times
+(Figure~\ref{fig:learning}). The mean accuracy rises from \R{final/lc_m3_deep_acc_n03} with \R{final/lc_m3_deep_n0}
+training participants to \R{final/lc_m3_deep_acc_n19} with all \R{final/lc_m3_deep_nall}, and flattens. We fitted a
+curve that rises quickly and then levels off towards a ceiling $A$, the inverse power law
+$\mathrm{accuracy}(n) = A - B\,n^{-C}$ for $n$ training participants ($A$ = \R{final/lc_m3_deep_asym},
+$B$ = \Rb{final/lc_m3_deep_b_pts} percentage points, $C$ = \R{final/lc_m3_deep_c}), and read it at $n$ =
+\R{final/lc_extrapolation_n}: \Rci{final/lc_m3_deep_at40}, only \Rb{final/lc_m3_deep_gain40}~points above the
+curve's own value at \R{final/lc_m3_deep_nall} participants (\R{final/lc_m3_deep_fit_nall}). The interval, from
+refitting the curve \R{final/lc_m3_deep_nboot} times on resampled draws, understates the uncertainty, because all
+draws come from the same \R{describe/n_persons} people and the curve is extended beyond the measured sizes. More
+participants of the same kind would therefore add little accuracy; new ones would matter mainly to check the accuracy
+in groups we barely sampled, such as left-handed or older people and other phones, and for other kinds of movement.

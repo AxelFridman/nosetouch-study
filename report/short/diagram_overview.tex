@@ -1,0 +1,36 @@
+% short/diagram_overview.tex: the overview diagram of the final report (short.tex only; the brief keeps
+% short/diagram_pipeline.tex, which this file does not change). TikZ at a fixed size (about 7.4 cm wide, explicit
+% 7.5/8.5-pt fonts). Plain words only: every step is explained in the section named in the figure's caption.
+% Numbers only through \R keys.
+\begin{tikzpicture}[
+    node distance=2.0mm,
+    stage/.style={draw=black!55, rounded corners=1.5pt, fill=black!3, text width=6.8cm, inner sep=2.2pt,
+      align=left, font=\fontsize{7.5}{9}\selectfont},
+    flow/.style={-{Latex[length=1.5mm,width=1.3mm]}, black!65, semithick}]
+  \def\stagehead#1{{\fontsize{8.5}{10}\selectfont\bfseries #1}}
+  \node[stage] (rec) {\stagehead{1\enspace Record}\enspace accelerometer and gyroscope, about
+    \R{describe/rate_hz_median_whole} times per second};
+  \node[stage, below=of rec] (cut) {\stagehead{2\enspace Cut out}\enspace the movement to the nose, as the app
+    marked it};
+  \node[stage, below=of cut] (std) {\stagehead{3\enspace Standardise}\enspace relative to gravity and to the
+    direction the screen faces, not to the phone's own axes: \R{final/cnn_n_channels} signals of
+    \R{describe/n_norm} time points};
+  \node[stage, below=of std] (model) {\stagehead{4\enspace Model}\enspace a small neural network (a one-dimensional
+    convolutional network, 1D CNN), trained only on other participants};
+  \node[stage, below=of model] (cal) {\stagehead{5\enspace Calibrate}\enspace turn its output into a probability
+    \pright{} that can be taken at face value};
+  \node[stage, below=of cal] (agg) {\stagehead{6\enspace Combine attempts}\enspace (optional) add up the evidence of
+    several movements of the same hand\\[13pt]\mbox{}};
+  % The answer bar inside box 6 (schematic): below 0.5 the answer is LEFT, above it RIGHT.
+  \begin{scope}[shift={(agg.south west)}, xshift=2.5mm, yshift=1.4mm, font=\fontsize{7.5}{9}\selectfont]
+    \fill[handleft!30]  (0,0) rectangle (3.15,0.30);
+    \fill[handright!30] (3.15,0) rectangle (6.3,0.30);
+    \draw[black!50] (0,0) rectangle (6.3,0.30);
+    \draw[black!60] (3.15,0) -- (3.15,0.30);
+    \node[text=handleft]  at (1.575,0.15) {\sffamily\bfseries LEFT};
+    \node[text=handright] at (4.725,0.15) {\sffamily\bfseries RIGHT};
+    \node[text=black!70, anchor=south, inner sep=1pt] at (3.15,0.30) {$\pright = 0.5$};
+  \end{scope}
+  \foreach \a/\b in {rec/cut, cut/std, std/model, model/cal, cal/agg}
+    \draw[flow] (\a) -- (\b);
+\end{tikzpicture}%

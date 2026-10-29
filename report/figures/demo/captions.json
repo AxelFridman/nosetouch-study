@@ -8,5 +8,10 @@
   "caption": "The base-rate effect. Balanced accuracy on the primary set (both hands for every person) and right-hand recall on the 20 natural-use trials (every reported free-choice hand so far is the right hand, so a constant 'right' answer is never wrong there). Fixed rules that answer the usual phone hand, or always right, look excellent on natural use and sit at chance on the primary set: a phone-hand prior gains nothing in discrimination. The covariates-only model is at chance on the primary set.",
   "decision": "Natural-use recall is never read as a gain in discrimination; the add-on test is judged on the primary set.",
   "file": "DEMO_02_base_rate.pdf"
+ },
+ "DEMO_02_simple": {
+  "caption": "Change in accuracy for each of the participants when their age, sex, height, handedness and usual phone hand are combined with the final model's output (top), and when they may also change how strongly that output counts (bottom), against the same combination without them (leave-one-subject-out). Most participants do not change, more get worse than better, and both means lie below zero: the demographics do not improve the prediction.",
+  "decision": "The plain form of DEMO_01 for the short report: demographics are not added.",
+  "file": "DEMO_02_simple.pdf"
  }
 }

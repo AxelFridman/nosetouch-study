@@ -37,6 +37,7 @@ demo/inter_nat_flips	3	demo_cov_inter: natural-use trials whose answer changes	t
 demo/inter_nat_recall	70.0\,\%	+ covariates and covariate x logit: natural-use right-hand recall (every free-choice trial is right-hand; not a balanced accuracy)	results/demo_cov_inter.json
 demo/inter_nat_right	14	+ covariates and covariate x logit: natural-use trials answered right	results/demo_cov_inter.json
 demo/inter_nat_ties	0	+ covariates and covariate x logit: natural-use ties (half credit)	results/demo_cov_inter.json
+demo/inter_same	10	demo_cov_inter: persons whose accuracy does not change with the covariates	tables/demo/demo_derived.json
 demo/inter_worse	8	demo_cov_inter: persons less accurate with the covariates	tables/demo/demo_derived.json
 demo/main_acc	86.5\,\%	+ covariates (main effects): LOSO accuracy	results/demo_cov_main.json
 demo/main_acc_hi	91.1\,\%	+ covariates (main effects): accuracy 95% CI high	results/demo_cov_main.json
@@ -60,6 +61,7 @@ demo/main_nat_flips	1	demo_cov_main: natural-use trials whose answer changes	tab
 demo/main_nat_recall	80.0\,\%	+ covariates (main effects): natural-use right-hand recall (every free-choice trial is right-hand; not a balanced accuracy)	results/demo_cov_main.json
 demo/main_nat_right	16	+ covariates (main effects): natural-use trials answered right	results/demo_cov_main.json
 demo/main_nat_ties	0	+ covariates (main effects): natural-use ties (half credit)	results/demo_cov_main.json
+demo/main_same	12	demo_cov_main: persons whose accuracy does not change with the covariates	tables/demo/demo_derived.json
 demo/main_worse	7	demo_cov_main: persons less accurate with the covariates	tables/demo/demo_derived.json
 demo/nat_n	20	natural-use headline trials (one per person)	tables/demo/demo_derived.json
 demo/primary_right_share	49.5\,\%	share of right-hand trials in the primary set	results/demo_cov_only.json
@@ -121,7 +123,10 @@ demo/stack_vs_shipped_dacc	+0.2	sensor-only second stage minus shipped	tables/de
 demo/stack_vs_shipped_dll	+0.006	sensor-only stage minus shipped: log loss	tables/demo/demo_derived.json
 demo/stack_vs_shipped_p_acc	1.000	sign-flip p, accuracy (unadjusted, descriptive)	tables/demo/demo_derived.json
 demo/stack_vs_shipped_p_ll	0.624	sign-flip p (unadjusted, descriptive)	tables/demo/demo_derived.json
+describe/acc_power_below_5hz	81\,\%	accelerometer power of the approach below 5 Hz	tables/describe_summary.json
 describe/acc_power_below_lowpass	98.4\,\%	accelerometer power of the approach below 15 Hz	tables/describe_summary.json
+describe/accel_sign_flipped_android	0	Android sessions whose accelerometer values were negated	tables/normalisation_per_session.csv
+describe/accel_sign_flipped_ios	9	iOS sessions whose accelerometer values were negated	tables/normalisation_per_session.csv
 describe/age_max	29	oldest (years)	tables/describe_summary.json
 describe/age_mean	25.1	mean age (years)	tables/describe_summary.json
 describe/age_min	19	youngest (years)	tables/describe_summary.json
@@ -134,6 +139,7 @@ describe/android_interval_p99_ms	18.5	99th-percentile sample interval, android (
 describe/android_peak_gyro_median	94	peak |w|, median, android (deg/s)	tables/describe_summary.json
 describe/android_rest_acc_sd	0.154	hand-held specific-force SD at rest, android (m/s^2)	tables/describe_summary.json
 describe/android_rest_gyro_sd	2.5	hand-held angular-velocity SD at rest, android (deg/s)	tables/describe_summary.json
+describe/approach_samples_median	99	samples of a median-length approach on the 60 Hz grid	tables/describe/describe_primary_trials.csv
 describe/attempts_per_accepted	1.26	attempts per accepted trial	tables/describe_summary.json
 describe/attempts_total	878	trial attempts in the snapshot	tables/describe_summary.json
 describe/bonus_taken_completed	7	completed visits that took the bonus tier	tables/describe_summary.json
@@ -179,13 +185,22 @@ describe/flag_repeated_samples	126	primary trials flagged repeated_samples	table
 describe/flag_screen_rotated	2	primary trials flagged screen_rotated	tables/describe_summary.json
 describe/flag_seg_disagree_100ms	115	primary trials flagged seg_disagree_100ms	tables/describe_summary.json
 describe/free_choice_trials	23	free-choice trials moved to the natural-use set (E3)	tables/describe_summary.json
+describe/fs_hz	60	uniform sampling grid (Hz)	stage2/config.py
+describe/gap_window_pad_s	0.5	margin around the approach checked for gaps (s)	stage2/config.py
 describe/gate_g1_failing	16	primary trials failing gate_g1	tables/describe_summary.json
 describe/gate_g2_failing	13	primary trials failing gate_g2	tables/describe_summary.json
 describe/gate_pass_failing	28	primary trials failing gate_pass	tables/describe_summary.json
+describe/gyro_power_below_5hz	76\,\%	gyroscope power of the approach below 5 Hz	tables/describe_summary.json
 describe/gyro_power_below_lowpass	99.2\,\%	gyroscope power of the approach below 15 Hz	tables/describe_summary.json
 describe/height_mean	168.8	mean height (cm)	tables/describe_summary.json
+describe/height_mean_female	164.2	mean height of the women who gave one (cm)	tables/participants.csv
+describe/height_mean_male	177.2	mean height of the men who gave one (cm)	tables/participants.csv
 describe/height_n	17	persons who gave a height	tables/describe_summary.json
+describe/height_n_female	11	women who gave a height	tables/participants.csv
+describe/height_n_male	6	men who gave a height	tables/participants.csv
 describe/height_sd	8.8	SD of height (cm)	tables/describe_summary.json
+describe/height_sd_female	6.5	SD of height, women who gave one (cm)	tables/participants.csv
+describe/height_sd_male	5.7	SD of height, men who gave one (cm)	tables/participants.csv
 describe/ios_closure_median_deg	0.8	gyro-gravity closure, median, ios (deg)	tables/describe_summary.json
 describe/ios_duration_median_s	1.42	approach duration, median, ios (s)	tables/describe_summary.json
 describe/ios_gap_median_ms	314	median gap > 50 ms, ios (ms)	tables/describe_summary.json
@@ -200,6 +215,14 @@ describe/ios_peak_gyro_median	100	peak |w|, median, ios (deg/s)	tables/describe_
 describe/ios_rest_acc_sd	0.147	hand-held specific-force SD at rest, ios (m/s^2)	tables/describe_summary.json
 describe/ios_rest_gyro_sd	2.8	hand-held angular-velocity SD at rest, ios (deg/s)	tables/describe_summary.json
 describe/label_blocks	193	planned blocks of the primary trials	tables/describe_summary.json
+describe/lowpass_gain_10hz	98.8\,\%	share of a 10 Hz component's amplitude kept by the zero-phase low-pass	stage2/config.py
+describe/lowpass_gain_15hz	50.0\,\%	share of a 15 Hz component's amplitude kept by the zero-phase low-pass	stage2/config.py
+describe/lowpass_gain_20hz	1.2\,\%	share of a 20 Hz component's amplitude kept by the zero-phase low-pass	stage2/config.py
+describe/lowpass_hz	15	low-pass cut-off (Hz)	stage2/config.py
+describe/lowpass_order	4	order of the Butterworth low-pass	stage2/config.py
+describe/max_gap_ms	100	longest sampling gap bridged by interpolation (ms)	stage2/config.py
+describe/min_duration_s	0.25	shortest approach kept (s)	stage2/config.py
+describe/min_peak_gyro_dps	30	lowest peak rotation speed kept (deg/s)	stage2/config.py
 describe/mirror_persons	20	persons with both hands (mirror check)	tables/describe_summary.json
 describe/mirror_persons_closer	18	persons whose right mean is closer to the mirrored left	tables/describe_summary.json
 describe/mirror_rms_yaw_rate	3.4	RMS mirrored-left vs right mean yaw rate (deg/s)	tables/describe_summary.json
@@ -208,6 +231,7 @@ describe/n_device_models	14	device models of the included sessions	tables/descri
 describe/n_female	12	women	tables/describe_summary.json
 describe/n_left_handed	2	left-handed persons (self-report)	tables/describe_summary.json
 describe/n_male	8	men	tables/describe_summary.json
+describe/n_norm	64	samples of a time-normalised approach	stage2/config.py
 describe/n_persons	20	persons in the primary set	tables/describe_summary.json
 describe/n_persons_multi_session	3	persons with several included sessions	tables/describe_summary.json
 describe/n_phone_hand_both	2	usual phone hand: both	tables/describe_summary.json
@@ -231,7 +255,18 @@ describe/primary_per_person_min	8	fewest primary trials of one person	tables/par
 describe/primary_right	296	primary trials, right hand	tables/describe_summary.json
 describe/primary_trials	598	primary trials	tables/describe_summary.json
 describe/quantisation_noise_sd	0.029	SD of Chrome's 0.1-unit rounding	tables/describe_summary.json
+describe/rate_hz_max	60.0	native motion rate of the fastest phone (session median, Hz)	tables/sampling_per_trial.csv
+describe/rate_hz_max_platform	Android	platform of the fastest phone	tables/sampling_per_trial.csv
+describe/rate_hz_median	60.0	native motion rate, median over sessions (Hz)	tables/sampling_per_trial.csv
+describe/rate_hz_median_whole	60	native motion rate, median over sessions, to the nearest whole number (Hz)	tables/sampling_per_trial.csv
+describe/rate_hz_min	59.9	native motion rate of the slowest phone (session median, Hz)	tables/sampling_per_trial.csv
+describe/rate_hz_min_platform	iOS	platform of the slowest phone	tables/sampling_per_trial.csv
+describe/rate_hz_recording_min	56.4	lowest mean rate of a single recording, its gaps included (Hz)	tables/sampling_per_trial.csv
+describe/rate_hz_recording_min_platform	iOS	platform of that recording	tables/sampling_per_trial.csv
+describe/rate_hz_recordings	675	complete recordings in the rate summary	tables/sampling_per_trial.csv
+describe/rate_hz_sessions	24	sessions (one phone each) in the rate summary	tables/sampling_per_trial.csv
 describe/reaction_median_ms	575	reaction time from GO to onset, median (ms)	tables/describe_summary.json
+describe/rest_ms	300	rest window that measures gravity before and after the approach (ms)	stage2/config.py
 describe/return_auc_first_half	0.11	first-half yaw AUC on the return	tables/describe_summary.json
 describe/return_auc_net	0.09	net yaw AUC on the return	tables/describe_summary.json
 describe/return_rule_acc_approach	76\,\%	first-half yaw sign rule on the approach	tables/describe_summary.json
@@ -254,6 +289,7 @@ describe/still_before_onset_median_s	2.4	stillness before the approach, median (
 describe/still_before_onset_share_1s	94\,\%	approaches after at least 1 s of stillness (gyro)	tables/describe_summary.json
 describe/still_both_median_s	1.8	the same with the accelerometer still too, median (s)	tables/describe_summary.json
 describe/still_both_share_1s	90\,\%	the same with the accelerometer still too, share >= 1 s	tables/describe_summary.json
+describe/still_gyro_dps	20	rotation speed below which a rest sample counts as still (deg/s)	stage2/config.py
 describe/street_visits	23	included street visits (protocol 2.0.0)	tables/describe_summary.json
 describe/stress_keep0ms_share_approach	10\,\%	cue-free v0 finds the approach first, stillness 0	tables/describe_summary.json
 describe/stress_keep1000ms_share_approach	53\,\%	cue-free v0 finds the approach first, stillness 1	tables/describe_summary.json
@@ -318,6 +354,74 @@ final/agg_k5_sum_tau_over_hi	+0.028	k=5 sum_tau: over-confidence: 95 % CI high	t
 final/agg_k5_sum_tau_over_lo	\ensuremath{-}0.018	k=5 sum_tau: over-confidence: 95 % CI low	tables/final/final_aggregation.json
 final/agg_persons	19	persons with enough trials of each hand	tables/final/final_aggregation.json
 final/agg_tau3	1.54	median tau_3 over the outer folds	tables/final/final_aggregation.json
+final/att_draws	200	random draws of k attempts per person, hand and k	tables/final/final_aggregation.json
+final/att_k1_avg_acc	89.2\,\%	k = 1 attempts, mean of the probabilities: accuracy per person and hand	tables/final/final_aggregation.json
+final/att_k1_avg_conf	88.0\,\%	k = 1 attempts, mean of the probabilities: mean confidence in the answer given	tables/final/final_aggregation.json
+final/att_k1_avg_ll	0.287	k = 1 attempts, mean of the probabilities: log loss	tables/final/final_aggregation.json
+final/att_k1_avg_ll_hi	0.414	k = 1 attempts, mean of the probabilities: log loss: 95 % CI high	tables/final/final_aggregation.json
+final/att_k1_avg_ll_lo	0.200	k = 1 attempts, mean of the probabilities: log loss: 95 % CI low	tables/final/final_aggregation.json
+final/att_k1_used_acc	89.2\,\%	k = 1 attempts, scaled sum of logits sigmoid(sum z / tau_k), the displayed combination: accuracy per person and hand	tables/final/final_aggregation.json
+final/att_k1_used_conf	88.0\,\%	k = 1 attempts, scaled sum of logits sigmoid(sum z / tau_k), the displayed combination: mean confidence in the answer given	tables/final/final_aggregation.json
+final/att_k1_used_ll	0.287	k = 1 attempts, scaled sum of logits sigmoid(sum z / tau_k), the displayed combination: log loss	tables/final/final_aggregation.json
+final/att_k1_used_ll_hi	0.414	k = 1 attempts, scaled sum of logits sigmoid(sum z / tau_k), the displayed combination: log loss: 95 % CI high	tables/final/final_aggregation.json
+final/att_k1_used_ll_lo	0.200	k = 1 attempts, scaled sum of logits sigmoid(sum z / tau_k), the displayed combination: log loss: 95 % CI low	tables/final/final_aggregation.json
+final/att_k2_avg_acc	94.2\,\%	k = 2 attempts, mean of the probabilities: accuracy per person and hand	tables/final/final_aggregation.json
+final/att_k2_avg_conf	84.6\,\%	k = 2 attempts, mean of the probabilities: mean confidence in the answer given	tables/final/final_aggregation.json
+final/att_k2_avg_ll	0.219	k = 2 attempts, mean of the probabilities: log loss	tables/final/final_aggregation.json
+final/att_k2_avg_ll_hi	0.282	k = 2 attempts, mean of the probabilities: log loss: 95 % CI high	tables/final/final_aggregation.json
+final/att_k2_avg_ll_lo	0.165	k = 2 attempts, mean of the probabilities: log loss: 95 % CI low	tables/final/final_aggregation.json
+final/att_k2_used_acc	94.2\,\%	k = 2 attempts, scaled sum of logits sigmoid(sum z / tau_k), the displayed combination: accuracy per person and hand	tables/final/final_aggregation.json
+final/att_k2_used_conf	92.8\,\%	k = 2 attempts, scaled sum of logits sigmoid(sum z / tau_k), the displayed combination: mean confidence in the answer given	tables/final/final_aggregation.json
+final/att_k2_used_ll	0.169	k = 2 attempts, scaled sum of logits sigmoid(sum z / tau_k), the displayed combination: log loss	tables/final/final_aggregation.json
+final/att_k2_used_ll_hi	0.276	k = 2 attempts, scaled sum of logits sigmoid(sum z / tau_k), the displayed combination: log loss: 95 % CI high	tables/final/final_aggregation.json
+final/att_k2_used_ll_lo	0.084	k = 2 attempts, scaled sum of logits sigmoid(sum z / tau_k), the displayed combination: log loss: 95 % CI low	tables/final/final_aggregation.json
+final/att_k3_avg_acc	96.3\,\%	k = 3 attempts, mean of the probabilities: accuracy per person and hand	tables/final/final_aggregation.json
+final/att_k3_avg_conf	84.1\,\%	k = 3 attempts, mean of the probabilities: mean confidence in the answer given	tables/final/final_aggregation.json
+final/att_k3_avg_ll	0.204	k = 3 attempts, mean of the probabilities: log loss	tables/final/final_aggregation.json
+final/att_k3_avg_ll_hi	0.252	k = 3 attempts, mean of the probabilities: log loss: 95 % CI high	tables/final/final_aggregation.json
+final/att_k3_avg_ll_lo	0.159	k = 3 attempts, mean of the probabilities: log loss: 95 % CI low	tables/final/final_aggregation.json
+final/att_k3_used_acc	96.3\,\%	k = 3 attempts, scaled sum of logits sigmoid(sum z / tau_k), the displayed combination: accuracy per person and hand	tables/final/final_aggregation.json
+final/att_k3_used_conf	95.5\,\%	k = 3 attempts, scaled sum of logits sigmoid(sum z / tau_k), the displayed combination: mean confidence in the answer given	tables/final/final_aggregation.json
+final/att_k3_used_ll	0.115	k = 3 attempts, scaled sum of logits sigmoid(sum z / tau_k), the displayed combination: log loss	tables/final/final_aggregation.json
+final/att_k3_used_ll_hi	0.220	k = 3 attempts, scaled sum of logits sigmoid(sum z / tau_k), the displayed combination: log loss: 95 % CI high	tables/final/final_aggregation.json
+final/att_k3_used_ll_lo	0.044	k = 3 attempts, scaled sum of logits sigmoid(sum z / tau_k), the displayed combination: log loss: 95 % CI low	tables/final/final_aggregation.json
+final/att_k4_avg_acc	96.8\,\%	k = 4 attempts, mean of the probabilities: accuracy per person and hand	tables/final/final_aggregation.json
+final/att_k4_avg_conf	83.4\,\%	k = 4 attempts, mean of the probabilities: mean confidence in the answer given	tables/final/final_aggregation.json
+final/att_k4_avg_ll	0.204	k = 4 attempts, mean of the probabilities: log loss	tables/final/final_aggregation.json
+final/att_k4_avg_ll_hi	0.258	k = 4 attempts, mean of the probabilities: log loss: 95 % CI high	tables/final/final_aggregation.json
+final/att_k4_avg_ll_lo	0.161	k = 4 attempts, mean of the probabilities: log loss: 95 % CI low	tables/final/final_aggregation.json
+final/att_k4_used_acc	96.9\,\%	k = 4 attempts, scaled sum of logits sigmoid(sum z / tau_k), the displayed combination: accuracy per person and hand	tables/final/final_aggregation.json
+final/att_k4_used_conf	96.5\,\%	k = 4 attempts, scaled sum of logits sigmoid(sum z / tau_k), the displayed combination: mean confidence in the answer given	tables/final/final_aggregation.json
+final/att_k4_used_ll	0.094	k = 4 attempts, scaled sum of logits sigmoid(sum z / tau_k), the displayed combination: log loss	tables/final/final_aggregation.json
+final/att_k4_used_ll_hi	0.194	k = 4 attempts, scaled sum of logits sigmoid(sum z / tau_k), the displayed combination: log loss: 95 % CI high	tables/final/final_aggregation.json
+final/att_k4_used_ll_lo	0.030	k = 4 attempts, scaled sum of logits sigmoid(sum z / tau_k), the displayed combination: log loss: 95 % CI low	tables/final/final_aggregation.json
+final/att_k5_avg_acc	97.5\,\%	k = 5 attempts, mean of the probabilities: accuracy per person and hand	tables/final/final_aggregation.json
+final/att_k5_avg_conf	83.3\,\%	k = 5 attempts, mean of the probabilities: mean confidence in the answer given	tables/final/final_aggregation.json
+final/att_k5_avg_ll	0.201	k = 5 attempts, mean of the probabilities: log loss	tables/final/final_aggregation.json
+final/att_k5_avg_ll_hi	0.251	k = 5 attempts, mean of the probabilities: log loss: 95 % CI high	tables/final/final_aggregation.json
+final/att_k5_avg_ll_lo	0.155	k = 5 attempts, mean of the probabilities: log loss: 95 % CI low	tables/final/final_aggregation.json
+final/att_k5_used_acc	97.3\,\%	k = 5 attempts, scaled sum of logits sigmoid(sum z / tau_k), the displayed combination: accuracy per person and hand	tables/final/final_aggregation.json
+final/att_k5_used_conf	97.4\,\%	k = 5 attempts, scaled sum of logits sigmoid(sum z / tau_k), the displayed combination: mean confidence in the answer given	tables/final/final_aggregation.json
+final/att_k5_used_ll	0.092	k = 5 attempts, scaled sum of logits sigmoid(sum z / tau_k), the displayed combination: log loss	tables/final/final_aggregation.json
+final/att_k5_used_ll_hi	0.216	k = 5 attempts, scaled sum of logits sigmoid(sum z / tau_k), the displayed combination: log loss: 95 % CI high	tables/final/final_aggregation.json
+final/att_k5_used_ll_lo	0.018	k = 5 attempts, scaled sum of logits sigmoid(sum z / tau_k), the displayed combination: log loss: 95 % CI low	tables/final/final_aggregation.json
+final/att_k_max	5	largest k; the persons kept have at least this many trials of each hand	tables/final/final_aggregation.json
+final/att_mult2	1.5	k / tau_2: the factor that multiplies the mean logit of 2 attempts (1 = averaging, 2 = independent attempts)	tables/final/final_aggregation.json
+final/att_mult3	1.9	k / tau_3: the factor that multiplies the mean logit of 3 attempts (1 = averaging, 3 = independent attempts)	tables/final/final_aggregation.json
+final/att_mult4	2.3	k / tau_4: the factor that multiplies the mean logit of 4 attempts (1 = averaging, 4 = independent attempts)	tables/final/final_aggregation.json
+final/att_mult5	2.7	k / tau_5: the factor that multiplies the mean logit of 5 attempts (1 = averaging, 5 = independent attempts)	tables/final/final_aggregation.json
+final/att_tau2	1.34	tau_2: median over the outer folds	tables/final/final_aggregation.json
+final/att_tau2_max	1.60	tau_2: largest over the outer folds	tables/final/final_aggregation.json
+final/att_tau2_min	1.15	tau_2: smallest over the outer folds	tables/final/final_aggregation.json
+final/att_tau3	1.54	tau_3: median over the outer folds	tables/final/final_aggregation.json
+final/att_tau3_max	1.77	tau_3: largest over the outer folds	tables/final/final_aggregation.json
+final/att_tau3_min	1.35	tau_3: smallest over the outer folds	tables/final/final_aggregation.json
+final/att_tau4	1.71	tau_4: median over the outer folds	tables/final/final_aggregation.json
+final/att_tau4_max	2.18	tau_4: largest over the outer folds	tables/final/final_aggregation.json
+final/att_tau4_min	1.35	tau_4: smallest over the outer folds	tables/final/final_aggregation.json
+final/att_tau5	1.87	tau_5: median over the outer folds	tables/final/final_aggregation.json
+final/att_tau5_max	2.33	tau_5: largest over the outer folds	tables/final/final_aggregation.json
+final/att_tau5_min	1.19	tau_5: smallest over the outer folds	tables/final/final_aggregation.json
 final/brk_android_acc	90.6\,\%	accuracy	tables/final/final_breakdown.json
 final/brk_android_hi	94.1\,\%	android: accuracy: 95 % CI high	tables/final/final_breakdown.json
 final/brk_android_lo	86.6\,\%	android: accuracy: 95 % CI low	tables/final/final_breakdown.json
@@ -333,6 +437,9 @@ final/brk_conf_p20	5	confident errors of P20	tables/final/final_breakdown.json
 final/brk_conf_speed_fast	3	confident errors by speed	tables/final/final_breakdown.json
 final/brk_conf_speed_natural	21	confident errors by speed	tables/final/final_breakdown.json
 final/brk_err	64	errors	tables/final/final_breakdown.json
+final/brk_fewest_trials	8	trials of the person with the fewest trials	tables/final/final_breakdown.json
+final/brk_fewest_trials_acc	100.0\,\%	accuracy of the person with the fewest trials	tables/final/final_breakdown.json
+final/brk_fewest_trials_id	P04	the person with the fewest trials	tables/final/final_breakdown.json
 final/brk_ios_acc	87.0\,\%	accuracy	tables/final/final_breakdown.json
 final/brk_ios_hi	94.1\,\%	ios: accuracy: 95 % CI high	tables/final/final_breakdown.json
 final/brk_ios_lo	77.0\,\%	ios: accuracy: 95 % CI low	tables/final/final_breakdown.json
@@ -340,6 +447,11 @@ final/brk_ios_n	215	trials	tables/final/final_breakdown.json
 final/brk_left_p11	96.4\,\%	left-handed person accuracy	tables/final/final_breakdown.json
 final/brk_left_p17	88.0\,\%	left-handed person accuracy	tables/final/final_breakdown.json
 final/brk_low_person	61.8\,\%	lowest person accuracy	tables/final/final_breakdown.json
+final/brk_low_person_id	P09	the person with the lowest accuracy	tables/final/final_breakdown.json
+final/brk_low_person_n	34	trials of the person with the lowest accuracy	tables/final/final_breakdown.json
+final/brk_n_perfect	2	persons with every trial right	tables/final/final_breakdown.json
+final/brk_n_persons	20	persons in the per-person breakdown	tables/final/final_breakdown.json
+final/brk_person_median	90.8\,\%	median accuracy of a person (LOSO)	tables/final/final_breakdown.json
 final/brk_worst_cell	86.5\,\%	weakest grip x speed cell	tables/final/final_breakdown.json
 final/brk_worst_cell_hi	94.6\,\%	weakest grip x speed cell: 95 % CI high	tables/final/final_breakdown.json
 final/brk_worst_cell_lo	76.7\,\%	weakest grip x speed cell: 95 % CI low	tables/final/final_breakdown.json
@@ -405,6 +517,73 @@ final/cal_temperature_dll	+0.0020	temperature: log loss minus none	tables/final/
 final/cal_temperature_dll_hi	+0.0106	temperature: log-loss difference: 95 % CI high	tables/final/final_calibration.json
 final/cal_temperature_dll_lo	\ensuremath{-}0.0087	temperature: log-loss difference: 95 % CI low	tables/final/final_calibration.json
 final/cal_temperature_holm	1.000	temperature: Holm p	tables/final/final_calibration.json
+final/calfig_cnn_a_max	1.24	1D CNN (final model): Platt slope a of the fold functions, largest	results/m3_cal_deep_platt.json
+final/calfig_cnn_a_min	0.84	1D CNN (final model): Platt slope a of the fold functions, smallest	results/m3_cal_deep_platt.json
+final/calfig_cnn_b_max	+0.18	1D CNN (final model): Platt offset b of the fold functions, largest	results/m3_cal_deep_platt.json
+final/calfig_cnn_b_min	\ensuremath{-}0.25	1D CNN (final model): Platt offset b of the fold functions, smallest	results/m3_cal_deep_platt.json
+final/calfig_cnn_change	1.6	1D CNN (final model): mean change of P(right) per trial made by the Platt function (points)	results/m3_cal_deep_platt.json
+final/calfig_cnn_changed	7	1D CNN (final model): trials whose answer (right or left) the Platt function changed	results/m3_cal_deep_platt.json
+final/calfig_cnn_folds	20	1D CNN (final model): fitted Platt functions (one per LOSO fold)	results/m3_cal_deep_platt.json
+final/calfig_cnn_group_max	60	1D CNN (final model): trials per group, most	tables/m3/m3_calibration.json
+final/calfig_cnn_group_min	59	1D CNN (final model): trials per group, fewest	tables/m3/m3_calibration.json
+final/calfig_cnn_groups	10	1D CNN (final model): equal-count groups of trials in the reliability curves	tables/m3/m3_calibration.json
+final/calfig_cnn_platt_acc	89.3\,\%	1D CNN (final model), after Platt scaling: LOSO accuracy	tables/m3/m3_calibration.json
+final/calfig_cnn_platt_ece	0.026	1D CNN (final model), after Platt scaling: expected calibration error (ten equal-count bins)	tables/m3/m3_calibration.json
+final/calfig_cnn_platt_ece_null	0.040	1D CNN (final model), after Platt scaling: 95th percentile of the ECE that a perfectly calibrated model shows by chance	tables/m3/m3_calibration.json
+final/calfig_cnn_platt_ece_p	0.473	1D CNN (final model), after Platt scaling: p of its ECE against the perfect-calibration null	tables/m3/m3_calibration.json
+final/calfig_cnn_platt_int	+0.07	1D CNN (final model), after Platt scaling: calibration intercept (0 = calibrated)	tables/m3/m3_calibration.json
+final/calfig_cnn_platt_int_hi	+0.41	1D CNN (final model), after Platt scaling: calibration intercept: 95 % CI high	tables/m3/m3_calibration.json
+final/calfig_cnn_platt_int_lo	\ensuremath{-}0.25	1D CNN (final model), after Platt scaling: calibration intercept: 95 % CI low	tables/m3/m3_calibration.json
+final/calfig_cnn_platt_ll	0.291	1D CNN (final model), after Platt scaling: log loss	tables/m3/m3_calibration.json
+final/calfig_cnn_platt_slope	0.97	1D CNN (final model), after Platt scaling: calibration slope (1 = calibrated, below 1 = over-confident)	tables/m3/m3_calibration.json
+final/calfig_cnn_platt_slope_hi	1.53	1D CNN (final model), after Platt scaling: calibration slope: 95 % CI high	tables/m3/m3_calibration.json
+final/calfig_cnn_platt_slope_lo	0.69	1D CNN (final model), after Platt scaling: calibration slope: 95 % CI low	tables/m3/m3_calibration.json
+final/calfig_cnn_raw_acc	89.1\,\%	1D CNN (final model), raw scores (no calibration): LOSO accuracy	tables/m3/m3_calibration.json
+final/calfig_cnn_raw_ece	0.029	1D CNN (final model), raw scores (no calibration): expected calibration error (ten equal-count bins)	tables/m3/m3_calibration.json
+final/calfig_cnn_raw_ece_null	0.038	1D CNN (final model), raw scores (no calibration): 95th percentile of the ECE that a perfectly calibrated model shows by chance	tables/m3/m3_calibration.json
+final/calfig_cnn_raw_ece_p	0.288	1D CNN (final model), raw scores (no calibration): p of its ECE against the perfect-calibration null	tables/m3/m3_calibration.json
+final/calfig_cnn_raw_int	\ensuremath{-}0.01	1D CNN (final model), raw scores (no calibration): calibration intercept (0 = calibrated)	tables/m3/m3_calibration.json
+final/calfig_cnn_raw_int_hi	+0.28	1D CNN (final model), raw scores (no calibration): calibration intercept: 95 % CI high	tables/m3/m3_calibration.json
+final/calfig_cnn_raw_int_lo	\ensuremath{-}0.34	1D CNN (final model), raw scores (no calibration): calibration intercept: 95 % CI low	tables/m3/m3_calibration.json
+final/calfig_cnn_raw_ll	0.290	1D CNN (final model), raw scores (no calibration): log loss	tables/m3/m3_calibration.json
+final/calfig_cnn_raw_slope	0.94	1D CNN (final model), raw scores (no calibration): calibration slope (1 = calibrated, below 1 = over-confident)	tables/m3/m3_calibration.json
+final/calfig_cnn_raw_slope_hi	1.50	1D CNN (final model), raw scores (no calibration): calibration slope: 95 % CI high	tables/m3/m3_calibration.json
+final/calfig_cnn_raw_slope_lo	0.67	1D CNN (final model), raw scores (no calibration): calibration slope: 95 % CI low	tables/m3/m3_calibration.json
+final/calfig_gbm_a_max	0.79	Gradient boosting: Platt slope a of the fold functions, largest	results/p1_calib_gbm_platt.json
+final/calfig_gbm_a_min	0.69	Gradient boosting: Platt slope a of the fold functions, smallest	results/p1_calib_gbm_platt.json
+final/calfig_gbm_b_max	\ensuremath{-}0.05	Gradient boosting: Platt offset b of the fold functions, largest	results/p1_calib_gbm_platt.json
+final/calfig_gbm_b_min	\ensuremath{-}0.20	Gradient boosting: Platt offset b of the fold functions, smallest	results/p1_calib_gbm_platt.json
+final/calfig_gbm_change	4.2	Gradient boosting: mean change of P(right) per trial made by the Platt function (points)	results/p1_calib_gbm_platt.json
+final/calfig_gbm_changed	12	Gradient boosting: trials whose answer (right or left) the Platt function changed	results/p1_calib_gbm_platt.json
+final/calfig_gbm_folds	20	Gradient boosting: fitted Platt functions (one per LOSO fold)	results/p1_calib_gbm_platt.json
+final/calfig_gbm_group_max	60	Gradient boosting: trials per group, most	tables/p1/p1_calibration.json
+final/calfig_gbm_group_min	59	Gradient boosting: trials per group, fewest	tables/p1/p1_calibration.json
+final/calfig_gbm_groups	10	Gradient boosting: equal-count groups of trials in the reliability curves	tables/p1/p1_calibration.json
+final/calfig_gbm_platt_acc	85.6\,\%	Gradient boosting, after Platt scaling: LOSO accuracy	tables/p1/p1_calibration.json
+final/calfig_gbm_platt_ece	0.039	Gradient boosting, after Platt scaling: expected calibration error (ten equal-count bins)	tables/p1/p1_calibration.json
+final/calfig_gbm_platt_ece_null	0.046	Gradient boosting, after Platt scaling: 95th percentile of the ECE that a perfectly calibrated model shows by chance	tables/p1/p1_calibration.json
+final/calfig_gbm_platt_ece_p	0.200	Gradient boosting, after Platt scaling: p of its ECE against the perfect-calibration null	tables/p1/p1_calibration.json
+final/calfig_gbm_platt_ll	0.359	Gradient boosting, after Platt scaling: log loss	tables/p1/p1_calibration.json
+final/calfig_gbm_platt_slope	1.00	Gradient boosting, after Platt scaling: calibration slope (1 = calibrated, below 1 = over-confident)	tables/p1/p1_calibration.json
+final/calfig_gbm_platt_slope_hi	1.31	Gradient boosting, after Platt scaling: calibration slope: 95 % CI high	tables/p1/p1_calibration.json
+final/calfig_gbm_platt_slope_lo	0.81	Gradient boosting, after Platt scaling: calibration slope: 95 % CI low	tables/p1/p1_calibration.json
+final/calfig_gbm_raw_acc	85.6\,\%	Gradient boosting, raw scores (no calibration): LOSO accuracy	tables/p1/p1_calibration.json
+final/calfig_gbm_raw_ece	0.049	Gradient boosting, raw scores (no calibration): expected calibration error (ten equal-count bins)	tables/p1/p1_calibration.json
+final/calfig_gbm_raw_ece_null	0.039	Gradient boosting, raw scores (no calibration): 95th percentile of the ECE that a perfectly calibrated model shows by chance	tables/p1/p1_calibration.json
+final/calfig_gbm_raw_ece_p	0.003	Gradient boosting, raw scores (no calibration): p of its ECE against the perfect-calibration null	tables/p1/p1_calibration.json
+final/calfig_gbm_raw_ll	0.369	Gradient boosting, raw scores (no calibration): log loss	tables/p1/p1_calibration.json
+final/calfig_gbm_raw_slope	0.76	Gradient boosting, raw scores (no calibration): calibration slope (1 = calibrated, below 1 = over-confident)	tables/p1/p1_calibration.json
+final/calfig_gbm_raw_slope_hi	0.99	Gradient boosting, raw scores (no calibration): calibration slope: 95 % CI high	tables/p1/p1_calibration.json
+final/calfig_gbm_raw_slope_lo	0.61	Gradient boosting, raw scores (no calibration): calibration slope: 95 % CI low	tables/p1/p1_calibration.json
+final/cnn_kernels	7, 5 and 3	1D CNN: widths of the convolution filters (time points)	stage2/lanes/m3_nets.py
+final/cnn_n_bins	8	1D CNN: time segments that the last layer averages over	stage2/lanes/m3_deep.py
+final/cnn_n_body	4	1D CNN: body-frame input channels	stage2/lanes/m3_body.py
+final/cnn_n_channels	12	1D CNN: input channels	stage2/lanes/m3_body.py
+final/cnn_n_gravity	8	1D CNN: gravity-frame input channels	stage2/lanes/m3_body.py
+final/cnn_n_layers	3	1D CNN: convolution layers	stage2/lanes/m3_nets.py
+final/cnn_n_members	4	1D CNN: networks in the ensemble (their logits are averaged)	results/m3_cal_deep_platt.json
+final/cnn_n_params	11329	1D CNN: fitted weights of one network	results/m3_cal_deep_platt.json
+final/cnn_width	32	1D CNN: filters per layer	stage2/lanes/m3_deep.py
 final/concl_cnn_vs_lrtc_same	+3.8	CNN minus engineered model on the same input: accuracy (points)	tables/final/final_input_class.json
 final/concl_cnn_vs_m2_same12	+4.3	CNN minus engineered model on the same input: accuracy (points)	tables/final/final_input_class.json
 final/concl_flip_fail	11	candidates with a Holm-significant screen-away drop	tables/final/final_decision.json
@@ -421,6 +600,8 @@ final/ens_mean3_accuracy	89.3\,\%		tables/final/final_master.json
 final/ens_mean3_accuracy_hi	93.0\,\%	ensemble: mean logit of 3 lanes: accuracy: 95 % CI high	tables/final/final_master.json
 final/ens_mean3_accuracy_lo	85.3\,\%	ensemble: mean logit of 3 lanes: accuracy: 95 % CI low	tables/final/final_master.json
 final/ens_mean3_auc	0.946	ensemble: mean logit of 3 lanes: AUC	tables/final/final_master.json
+final/ens_mean3_auc_hi	0.977	ensemble: mean logit of 3 lanes: AUC: 95 % CI high	tables/final/final_master.json
+final/ens_mean3_auc_lo	0.905	ensemble: mean logit of 3 lanes: AUC: 95 % CI low	tables/final/final_master.json
 final/ens_mean3_configs	1	configs	tables/final/final_master.json
 final/ens_mean3_ece	0.053	ECE	tables/final/final_master.json
 final/ens_mean3_ece_null_q	0.046	ECE null	tables/final/final_master.json
@@ -435,6 +616,7 @@ final/export_maxdp	2.2e-16	largest |dP| of the reference implementation	tables/f
 final/export_ms	20.05	ms per prediction (numpy reference)	tables/final/final_export.json
 final/export_params	46084	fitted numbers of the model	tables/final/final_export.json
 final/export_rows	618	trials checked	tables/final/final_export.json
+final/families_n_models	6	models in the family comparison (FINAL_15)	stage2/lanes/final_figures.py
 final/fig_flip_fail	11	candidates whose accuracy drops on the screen-away twins (Holm p below 0.05)	tables/final/final_robustness.json
 final/fig_flip_fixed	11	candidates that the rest-pose check brings back within 5 points of the recorded accuracy	tables/final/final_robustness.json
 final/fig_flip_tested	11	candidates whose inputs change under the screen flip	tables/final/final_robustness.json
@@ -513,6 +695,10 @@ final/flipaug_twins_d	+57.8	augmentation: change on the twins (points)	tables/fi
 final/flipaug_twins_d_hi	+64.7	augmentation: change on the twins: 95 % CI high (points)	tables/final/final_remedies.json
 final/flipaug_twins_d_lo	+50.4	augmentation: change on the twins: 95 % CI low (points)	tables/final/final_remedies.json
 final/flipaug_twins_holm	< 0.001	augmentation on the twins: Holm p	tables/final/final_remedies.json
+final/gbm_n_channels	17	gradient boosting: channels	results/p1_calib_gbm_auto.json
+final/gbm_n_features	238	gradient boosting: summary features per trial	results/p1_calib_gbm_auto.json
+final/gbm_n_leaves	15	gradient boosting: leaves per tree	results/p1_calib_gbm_auto.json
+final/gbm_n_trees	100	gradient boosting: trees	results/p1_calib_gbm_auto.json
 final/ic_cnn_vs_lrtc_same_acc	+3.8	cnn_vs_lrtc_same: accuracy difference (points)	tables/final/final_input_class.json
 final/ic_cnn_vs_lrtc_same_acc_hi	+6.2	cnn_vs_lrtc_same: 95 % CI high (points)	tables/final/final_input_class.json
 final/ic_cnn_vs_lrtc_same_acc_lo	+1.7	cnn_vs_lrtc_same: 95 % CI low (points)	tables/final/final_input_class.json
@@ -562,18 +748,31 @@ final/ic_m2_body12_vs_lrtc_ll	\ensuremath{-}0.056	m2_body12_vs_lrtc: log-loss di
 final/ic_m2_body12_vs_lrtc_ll_hi	\ensuremath{-}0.014	m2_body12_vs_lrtc: log loss: 95 % CI high	tables/final/final_input_class.json
 final/ic_m2_body12_vs_lrtc_ll_lo	\ensuremath{-}0.100	m2_body12_vs_lrtc: log loss: 95 % CI low	tables/final/final_input_class.json
 final/inner_ll_best	0.304	lowest mean inner log loss	tables/final/final_nested.json
+final/lc_extrapolation_n	40	training persons at which the fitted curve is read (the at_40 keys)	stage2/lanes/final_finalmodel.py
 final/lc_m3_deep_acc0	84.0\,\%	mean accuracy at the smallest size	tables/final/final_learning.json
+final/lc_m3_deep_acc_n03	84.0\,\%	mean accuracy with 3 training persons	tables/final/final_learning.json
+final/lc_m3_deep_acc_n06	87.1\,\%	mean accuracy with 6 training persons	tables/final/final_learning.json
+final/lc_m3_deep_acc_n09	88.0\,\%	mean accuracy with 9 training persons	tables/final/final_learning.json
+final/lc_m3_deep_acc_n12	88.5\,\%	mean accuracy with 12 training persons	tables/final/final_learning.json
+final/lc_m3_deep_acc_n15	88.8\,\%	mean accuracy with 15 training persons	tables/final/final_learning.json
+final/lc_m3_deep_acc_n19	89.3\,\%	mean accuracy with 19 training persons	tables/final/final_learning.json
 final/lc_m3_deep_accall	89.3\,\%	accuracy with all training persons	tables/final/final_learning.json
 final/lc_m3_deep_asym	90.1\,\%	fitted asymptote	tables/final/final_learning.json
 final/lc_m3_deep_at40	89.6\,\%	extrapolated accuracy at 40 persons	tables/final/final_learning.json
 final/lc_m3_deep_at40_hi	90.8\,\%	extrapolation at 40 persons: 95 % CI high	tables/final/final_learning.json
 final/lc_m3_deep_at40_lo	88.8\,\%	extrapolation at 40 persons: 95 % CI low	tables/final/final_learning.json
+final/lc_m3_deep_b	0.18	inverse power law a - b n^-c: b	tables/final/final_learning.json
+final/lc_m3_deep_b_pts	17.6	inverse power law a - b n^-c: b in percentage points (accuracy in %)	tables/final/final_learning.json
+final/lc_m3_deep_c	0.98	inverse power law a - b n^-c: c	tables/final/final_learning.json
+final/lc_m3_deep_fit_nall	89.1\,\%	the fitted curve read at all training persons (the base of the extrapolated gain to 40)	tables/final/final_learning.json
 final/lc_m3_deep_gain40	+0.5	extrapolated gain to 40 training persons (points)	tables/final/final_learning.json
 final/lc_m3_deep_gain40_hi	+1.3	extrapolated gain to 40 persons: 95 % CI high (points)	tables/final/final_learning.json
 final/lc_m3_deep_gain40_lo	+0.1	extrapolated gain to 40 persons: 95 % CI low (points)	tables/final/final_learning.json
 final/lc_m3_deep_n0	3	smallest training size	tables/final/final_learning.json
 final/lc_m3_deep_nall	19	all training persons	tables/final/final_learning.json
+final/lc_m3_deep_nboot	1000	bootstrap refits of the band	tables/final/final_learning.json
 final/lc_m3_deep_reps	5	repetitions per size	tables/final/final_learning.json
+final/lc_m3_deep_runs	25	random draws of training persons over every size	tables/final/final_learning.json
 final/lc_ref_acc0	72.6\,\%	mean accuracy at the smallest size	tables/final/final_learning.json
 final/lc_ref_accall	77.9\,\%	accuracy with all training persons	tables/final/final_learning.json
 final/lc_ref_asym	79.2\,\%	fitted asymptote	tables/final/final_learning.json
@@ -586,10 +785,14 @@ final/lc_ref_gain40_lo	+0.0	extrapolated gain to 40 persons: 95 % CI low (points
 final/lc_ref_n0	3	smallest training size	tables/final/final_learning.json
 final/lc_ref_nall	19	all training persons	tables/final/final_learning.json
 final/lc_ref_reps	5	repetitions per size	tables/final/final_learning.json
+final/lc_sizes	3, 6, 9, 12 and 15	training sizes drawn at random (persons)	tables/final/final_learning.json
+final/log_loss_chance	0.693	log loss of a model that always answers 0.5 (ln 2)	definition
 final/lr_body_tc_accuracy	85.6\,\%		tables/final/final_master.json
 final/lr_body_tc_accuracy_hi	90.0\,\%	logistic, body-frame time courses: accuracy: 95 % CI high	tables/final/final_master.json
 final/lr_body_tc_accuracy_lo	80.7\,\%	logistic, body-frame time courses: accuracy: 95 % CI low	tables/final/final_master.json
 final/lr_body_tc_auc	0.896	logistic, body-frame time courses: AUC	tables/final/final_master.json
+final/lr_body_tc_auc_hi	0.945	logistic, body-frame time courses: AUC: 95 % CI high	tables/final/final_master.json
+final/lr_body_tc_auc_lo	0.840	logistic, body-frame time courses: AUC: 95 % CI low	tables/final/final_master.json
 final/lr_body_tc_configs	1	configs	tables/final/final_master.json
 final/lr_body_tc_ece	0.101	ECE	tables/final/final_master.json
 final/lr_body_tc_ece_null_q	0.052	ECE null	tables/final/final_master.json
@@ -604,6 +807,8 @@ final/m1_gam_accuracy	81.6\,\%		tables/final/final_master.json
 final/m1_gam_accuracy_hi	85.9\,\%	m1 PHYS6 GAM: accuracy: 95 % CI high	tables/final/final_master.json
 final/m1_gam_accuracy_lo	77.1\,\%	m1 PHYS6 GAM: accuracy: 95 % CI low	tables/final/final_master.json
 final/m1_gam_auc	0.886	m1 PHYS6 GAM: AUC	tables/final/final_master.json
+final/m1_gam_auc_hi	0.928	m1 PHYS6 GAM: AUC: 95 % CI high	tables/final/final_master.json
+final/m1_gam_auc_lo	0.839	m1 PHYS6 GAM: AUC: 95 % CI low	tables/final/final_master.json
 final/m1_gam_configs	6	configs	tables/final/final_master.json
 final/m1_gam_ece	0.028	ECE	tables/final/final_master.json
 final/m1_gam_ece_null_q	0.052	ECE null	tables/final/final_master.json
@@ -617,6 +822,8 @@ final/m1_phys6_accuracy	83.3\,\%		tables/final/final_master.json
 final/m1_phys6_accuracy_hi	87.6\,\%	m1 PHYS6 logistic: accuracy: 95 % CI high	tables/final/final_master.json
 final/m1_phys6_accuracy_lo	79.2\,\%	m1 PHYS6 logistic: accuracy: 95 % CI low	tables/final/final_master.json
 final/m1_phys6_auc	0.890	m1 PHYS6 logistic: AUC	tables/final/final_master.json
+final/m1_phys6_auc_hi	0.934	m1 PHYS6 logistic: AUC: 95 % CI high	tables/final/final_master.json
+final/m1_phys6_auc_lo	0.843	m1 PHYS6 logistic: AUC: 95 % CI low	tables/final/final_master.json
 final/m1_phys6_configs	1	configs	tables/final/final_master.json
 final/m1_phys6_ece	0.047	ECE	tables/final/final_master.json
 final/m1_phys6_ece_null_q	0.052	ECE null	tables/final/final_master.json
@@ -630,6 +837,8 @@ final/m1_rule_accuracy	78.9\,\%		tables/final/final_master.json
 final/m1_rule_accuracy_hi	83.8\,\%	m1 rule: first-half yaw sign: accuracy: 95 % CI high	tables/final/final_master.json
 final/m1_rule_accuracy_lo	73.5\,\%	m1 rule: first-half yaw sign: accuracy: 95 % CI low	tables/final/final_master.json
 final/m1_rule_auc	0.729	m1 rule: first-half yaw sign: AUC	tables/final/final_master.json
+final/m1_rule_auc_hi	0.804	m1 rule: first-half yaw sign: AUC: 95 % CI high	tables/final/final_master.json
+final/m1_rule_auc_lo	0.663	m1 rule: first-half yaw sign: AUC: 95 % CI low	tables/final/final_master.json
 final/m1_rule_configs	1	configs	tables/final/final_master.json
 final/m1_rule_ece	0.097	ECE	tables/final/final_master.json
 final/m1_rule_ece_null_q	0.059	ECE null	tables/final/final_master.json
@@ -643,6 +852,8 @@ final/m2_all21_lr_accuracy	88.0\,\%		tables/final/final_master.json
 final/m2_all21_lr_accuracy_hi	93.3\,\%	m2 logistic + body frame (21 ch.): accuracy: 95 % CI high	tables/final/final_master.json
 final/m2_all21_lr_accuracy_lo	82.0\,\%	m2 logistic + body frame (21 ch.): accuracy: 95 % CI low	tables/final/final_master.json
 final/m2_all21_lr_auc	0.928	m2 logistic + body frame (21 ch.): AUC	tables/final/final_master.json
+final/m2_all21_lr_auc_hi	0.969	m2 logistic + body frame (21 ch.): AUC: 95 % CI high	tables/final/final_master.json
+final/m2_all21_lr_auc_lo	0.876	m2 logistic + body frame (21 ch.): AUC: 95 % CI low	tables/final/final_master.json
 final/m2_all21_lr_configs	1	configs	tables/final/final_master.json
 final/m2_all21_lr_ece	0.057	ECE	tables/final/final_master.json
 final/m2_all21_lr_ece_null_q	0.045	ECE null	tables/final/final_master.json
@@ -656,6 +867,8 @@ final/m2_body12_lr_accuracy	85.1\,\%		tables/final/final_master.json
 final/m2_body12_lr_accuracy_hi	90.0\,\%	m2 logistic on the CNN input (12 ch.): accuracy: 95 % CI high	tables/final/final_master.json
 final/m2_body12_lr_accuracy_lo	80.1\,\%	m2 logistic on the CNN input (12 ch.): accuracy: 95 % CI low	tables/final/final_master.json
 final/m2_body12_lr_auc	0.908	m2 logistic on the CNN input (12 ch.): AUC	tables/final/final_master.json
+final/m2_body12_lr_auc_hi	0.951	m2 logistic on the CNN input (12 ch.): AUC: 95 % CI high	tables/final/final_master.json
+final/m2_body12_lr_auc_lo	0.859	m2 logistic on the CNN input (12 ch.): AUC: 95 % CI low	tables/final/final_master.json
 final/m2_body12_lr_configs	1	configs	tables/final/final_master.json
 final/m2_body12_lr_ece	0.060	ECE	tables/final/final_master.json
 final/m2_body12_lr_ece_null_q	0.050	ECE null	tables/final/final_master.json
@@ -669,6 +882,8 @@ final/m2_lgbm_accuracy	85.6\,\%		tables/final/final_master.json
 final/m2_lgbm_accuracy_hi	90.8\,\%	m2 LightGBM: accuracy: 95 % CI high	tables/final/final_master.json
 final/m2_lgbm_accuracy_lo	80.3\,\%	m2 LightGBM: accuracy: 95 % CI low	tables/final/final_master.json
 final/m2_lgbm_auc	0.930	m2 LightGBM: AUC	tables/final/final_master.json
+final/m2_lgbm_auc_hi	0.969	m2 LightGBM: AUC: 95 % CI high	tables/final/final_master.json
+final/m2_lgbm_auc_lo	0.885	m2 LightGBM: AUC: 95 % CI low	tables/final/final_master.json
 final/m2_lgbm_configs	12	configs	tables/final/final_master.json
 final/m2_lgbm_ece	0.022	ECE	tables/final/final_master.json
 final/m2_lgbm_ece_null_q	0.046	ECE null	tables/final/final_master.json
@@ -682,6 +897,8 @@ final/m2_lr_accuracy	85.5\,\%		tables/final/final_master.json
 final/m2_lr_accuracy_hi	90.6\,\%	m2 logistic (691 features): accuracy: 95 % CI high	tables/final/final_master.json
 final/m2_lr_accuracy_lo	79.8\,\%	m2 logistic (691 features): accuracy: 95 % CI low	tables/final/final_master.json
 final/m2_lr_auc	0.920	m2 logistic (691 features): AUC	tables/final/final_master.json
+final/m2_lr_auc_hi	0.957	m2 logistic (691 features): AUC: 95 % CI high	tables/final/final_master.json
+final/m2_lr_auc_lo	0.872	m2 logistic (691 features): AUC: 95 % CI low	tables/final/final_master.json
 final/m2_lr_configs	12	configs	tables/final/final_master.json
 final/m2_lr_ece	0.048	ECE	tables/final/final_master.json
 final/m2_lr_ece_null_q	0.048	ECE null	tables/final/final_master.json
@@ -696,6 +913,8 @@ final/m2_stack_accuracy	88.1\,\%		tables/final/final_master.json
 final/m2_stack_accuracy_hi	92.9\,\%	m2 stack (LR + SVM + LGBM): accuracy: 95 % CI high	tables/final/final_master.json
 final/m2_stack_accuracy_lo	82.9\,\%	m2 stack (LR + SVM + LGBM): accuracy: 95 % CI low	tables/final/final_master.json
 final/m2_stack_auc	0.936	m2 stack (LR + SVM + LGBM): AUC	tables/final/final_master.json
+final/m2_stack_auc_hi	0.973	m2 stack (LR + SVM + LGBM): AUC: 95 % CI high	tables/final/final_master.json
+final/m2_stack_auc_lo	0.893	m2 stack (LR + SVM + LGBM): AUC: 95 % CI low	tables/final/final_master.json
 final/m2_stack_configs	12	configs	tables/final/final_master.json
 final/m2_stack_ece	0.025	ECE	tables/final/final_master.json
 final/m2_stack_ece_null_q	0.043	ECE null	tables/final/final_master.json
@@ -709,6 +928,8 @@ final/m3_deep_accuracy	89.3\,\%		tables/final/final_master.json
 final/m3_deep_accuracy_hi	93.1\,\%	m3 1D CNN, body frame: accuracy: 95 % CI high	tables/final/final_master.json
 final/m3_deep_accuracy_lo	85.0\,\%	m3 1D CNN, body frame: accuracy: 95 % CI low	tables/final/final_master.json
 final/m3_deep_auc	0.951	m3 1D CNN, body frame: AUC	tables/final/final_master.json
+final/m3_deep_auc_hi	0.980	m3 1D CNN, body frame: AUC: 95 % CI high	tables/final/final_master.json
+final/m3_deep_auc_lo	0.912	m3 1D CNN, body frame: AUC: 95 % CI low	tables/final/final_master.json
 final/m3_deep_configs	16	configs	tables/final/final_master.json
 final/m3_deep_ece	0.026	ECE	tables/final/final_master.json
 final/m3_deep_ece_null_q	0.039	ECE null	tables/final/final_master.json
@@ -722,6 +943,8 @@ final/m3_mr_accuracy	82.3\,\%		tables/final/final_master.json
 final/m3_mr_accuracy_hi	86.8\,\%	m3 MiniRocket: accuracy: 95 % CI high	tables/final/final_master.json
 final/m3_mr_accuracy_lo	77.4\,\%	m3 MiniRocket: accuracy: 95 % CI low	tables/final/final_master.json
 final/m3_mr_auc	0.879	m3 MiniRocket: AUC	tables/final/final_master.json
+final/m3_mr_auc_hi	0.919	m3 MiniRocket: AUC: 95 % CI high	tables/final/final_master.json
+final/m3_mr_auc_lo	0.837	m3 MiniRocket: AUC: 95 % CI low	tables/final/final_master.json
 final/m3_mr_configs	4	configs	tables/final/final_master.json
 final/m3_mr_ece	0.049	ECE	tables/final/final_master.json
 final/m3_mr_ece_null_q	0.054	ECE null	tables/final/final_master.json
@@ -735,6 +958,8 @@ final/m3_tf_accuracy	83.1\,\%		tables/final/final_master.json
 final/m3_tf_accuracy_hi	87.4\,\%	m3 2D CNN on STFT: accuracy: 95 % CI high	tables/final/final_master.json
 final/m3_tf_accuracy_lo	79.2\,\%	m3 2D CNN on STFT: accuracy: 95 % CI low	tables/final/final_master.json
 final/m3_tf_auc	0.871	m3 2D CNN on STFT: AUC	tables/final/final_master.json
+final/m3_tf_auc_hi	0.914	m3 2D CNN on STFT: AUC: 95 % CI high	tables/final/final_master.json
+final/m3_tf_auc_lo	0.827	m3 2D CNN on STFT: AUC: 95 % CI low	tables/final/final_master.json
 final/m3_tf_configs	3	configs	tables/final/final_master.json
 final/m3_tf_ece	0.085	ECE	tables/final/final_master.json
 final/m3_tf_ece_null_q	0.054	ECE null	tables/final/final_master.json
@@ -744,11 +969,14 @@ final/m3_tf_log_loss_hi	0.548	m3 2D CNN on STFT: log loss: 95 % CI high	tables/f
 final/m3_tf_log_loss_lo	0.401	m3 2D CNN on STFT: log loss: 95 % CI low	tables/final/final_master.json
 final/m3_tf_nat_recall	80.0\,\%	natural-use right-hand recall	tables/final/final_master.json
 final/m3_tf_slope	0.89	m3 2D CNN on STFT: calibration slope	tables/final/final_master.json
+final/mr_n_features_max	3948	MiniRocket: random-kernel features, most over folds	results/m3_cal_mr_platt.json
+final/mr_n_features_min	3948	MiniRocket: random-kernel features, fewest over folds	results/m3_cal_mr_platt.json
 final/n_candidates	17	candidates of the cross-lane selection	tables/final/final_master.json
 final/n_exploratory_candidates	7	candidates chosen on the outer folds in their lane (n_configs_tried > 1)	tables/final/final_master.json
 final/n_flip_below_chance	5	candidates below chance on the screen-away twins without the check	tables/final/final_robustness.json
 final/n_left_handed	2	left-handed persons	tables/final/final_breakdown.json
 final/n_not_run	4	planned experiments without a saved result	results/registry_final.csv
+final/n_train_persons	19	training persons in every LOSO fold (all but the one left out)	tables/final/final_learning.json
 final/naive_accuracy	89.3\,\%	best on the outer folds: accuracy	tables/final/final_nested.json
 final/naive_vs_nested_acc	+0.9	naive minus nested: mean per-person accuracy (points)	tables/final/final_nested.json
 final/naive_vs_nested_acc_hi	+2.4	naive minus nested: 95 % CI high (points)	tables/final/final_nested.json
@@ -894,6 +1122,7 @@ final/nested_accuracy_lo	84.1\,\%	nested selection: accuracy: 95 % CI low	tables
 final/nested_auc	0.945	nested selection: AUC	tables/final/final_nested.json
 final/nested_auc_hi	0.975	nested selection: AUC: 95 % CI high	tables/final/final_nested.json
 final/nested_auc_lo	0.906	nested selection: AUC: 95 % CI low	tables/final/final_nested.json
+final/nested_inner_folds	5	inner folds over the training persons in which the nested selection compares the candidates	stage2/config.py
 final/nested_log_loss	0.307	nested selection: log loss	tables/final/final_nested.json
 final/nested_log_loss_hi	0.432	nested selection: log loss: 95 % CI high	tables/final/final_nested.json
 final/nested_log_loss_lo	0.212	nested selection: log loss: 95 % CI low	tables/final/final_nested.json
@@ -910,6 +1139,8 @@ final/p1_gbm_accuracy	85.5\,\%		tables/final/final_master.json
 final/p1_gbm_accuracy_hi	89.5\,\%	p1 LightGBM + calibrator: accuracy: 95 % CI high	tables/final/final_master.json
 final/p1_gbm_accuracy_lo	81.0\,\%	p1 LightGBM + calibrator: accuracy: 95 % CI low	tables/final/final_master.json
 final/p1_gbm_auc	0.921	p1 LightGBM + calibrator: AUC	tables/final/final_master.json
+final/p1_gbm_auc_hi	0.958	p1 LightGBM + calibrator: AUC: 95 % CI high	tables/final/final_master.json
+final/p1_gbm_auc_lo	0.877	p1 LightGBM + calibrator: AUC: 95 % CI low	tables/final/final_master.json
 final/p1_gbm_configs	1	configs	tables/final/final_master.json
 final/p1_gbm_ece	0.032	ECE	tables/final/final_master.json
 final/p1_gbm_ece_null_q	0.043	ECE null	tables/final/final_master.json
@@ -924,6 +1155,8 @@ final/p1_lr_accuracy	81.4\,\%		tables/final/final_master.json
 final/p1_lr_accuracy_hi	85.4\,\%	p1 logistic (chiral bins): accuracy: 95 % CI high	tables/final/final_master.json
 final/p1_lr_accuracy_lo	77.5\,\%	p1 logistic (chiral bins): accuracy: 95 % CI low	tables/final/final_master.json
 final/p1_lr_auc	0.868	p1 logistic (chiral bins): AUC	tables/final/final_master.json
+final/p1_lr_auc_hi	0.906	p1 logistic (chiral bins): AUC: 95 % CI high	tables/final/final_master.json
+final/p1_lr_auc_lo	0.825	p1 logistic (chiral bins): AUC: 95 % CI low	tables/final/final_master.json
 final/p1_lr_configs	1	configs	tables/final/final_master.json
 final/p1_lr_ece	0.069	ECE	tables/final/final_master.json
 final/p1_lr_ece_null_q	0.053	ECE null	tables/final/final_master.json
@@ -937,6 +1170,8 @@ final/p1_mr_accuracy	80.6\,\%		tables/final/final_master.json
 final/p1_mr_accuracy_hi	85.1\,\%	p1 MiniRocket + ridge: accuracy: 95 % CI high	tables/final/final_master.json
 final/p1_mr_accuracy_lo	76.5\,\%	p1 MiniRocket + ridge: accuracy: 95 % CI low	tables/final/final_master.json
 final/p1_mr_auc	0.872	p1 MiniRocket + ridge: AUC	tables/final/final_master.json
+final/p1_mr_auc_hi	0.910	p1 MiniRocket + ridge: AUC: 95 % CI high	tables/final/final_master.json
+final/p1_mr_auc_lo	0.835	p1 MiniRocket + ridge: AUC: 95 % CI low	tables/final/final_master.json
 final/p1_mr_configs	1	configs	tables/final/final_master.json
 final/p1_mr_ece	0.055	ECE	tables/final/final_master.json
 final/p1_mr_ece_null_q	0.053	ECE null	tables/final/final_master.json
@@ -951,6 +1186,7 @@ final/paired_best_sep	11	candidates separated from the best	tables/final/final_p
 final/paired_ref_better	11	candidates more accurate than the reference after Holm	tables/final/final_paired.json
 final/paired_ref_m	16	comparisons against the reference	tables/final/final_paired.json
 final/person_threshold	80\,\%	person accuracy threshold of the breakdown count	final_summary_body
+final/phys6_n_features	6	physics model: features (yaw, roll and sideways velocity at the half and at the end of the approach)	results/m1_lr_phys6_nested.json
 final/plat_ctl_acc	89.3\,\%	final model: size-matched control	tables/final/final_remedies.json
 final/plat_only_acc	86.5\,\%	final model: other platform only	tables/final/final_remedies.json
 final/plat_vs_ctl_d	\ensuremath{-}2.3	other platform minus control: accuracy (points)	tables/final/final_remedies.json
@@ -965,6 +1201,8 @@ final/ref_accuracy	77.9\,\%		tables/final/final_master.json
 final/ref_accuracy_hi	82.9\,\%	reference: yaw logistic: accuracy: 95 % CI high	tables/final/final_master.json
 final/ref_accuracy_lo	73.1\,\%	reference: yaw logistic: accuracy: 95 % CI low	tables/final/final_master.json
 final/ref_auc	0.855	reference: yaw logistic: AUC	tables/final/final_master.json
+final/ref_auc_hi	0.896	reference: yaw logistic: AUC: 95 % CI high	tables/final/final_master.json
+final/ref_auc_lo	0.813	reference: yaw logistic: AUC: 95 % CI low	tables/final/final_master.json
 final/ref_configs	1	configs	tables/final/final_master.json
 final/ref_ece	0.072	ECE	tables/final/final_master.json
 final/ref_ece_null_q	0.057	ECE null	tables/final/final_master.json
@@ -972,6 +1210,7 @@ final/ref_kthree	87.2\,\%	k = 3	tables/final/final_master.json
 final/ref_log_loss	0.512	reference: yaw logistic: log loss	tables/final/final_master.json
 final/ref_log_loss_hi	0.579	reference: yaw logistic: log loss: 95 % CI high	tables/final/final_master.json
 final/ref_log_loss_lo	0.449	reference: yaw logistic: log loss: 95 % CI low	tables/final/final_master.json
+final/ref_n_instants	8	yaw baseline: instants of the approach at which the cumulative yaw is read (every 8th of the time-normalised samples)	stage2/scripts/reference.py
 final/ref_nat_recall	75.0\,\%	natural-use right-hand recall	tables/final/final_master.json
 final/ref_slope	0.88	reference: yaw logistic: calibration slope	tables/final/final_master.json
 final/repro_max_dp	0.0e+00	largest difference to the saved predictions	tables/final/final_reproduction.json
@@ -1140,6 +1379,7 @@ final/simple_vs_best_acc	\ensuremath{-}5.9	simplest robust candidate minus the b
 final/simple_vs_best_holm_acc	0.008	simplest robust minus best: Holm p accuracy	tables/final/final_decision.json
 final/simple_vs_best_holm_ll	0.006	simplest robust minus best: Holm p log loss	tables/final/final_decision.json
 final/simple_vs_best_ll	+0.136	simplest robust minus best: log loss	tables/final/final_decision.json
+final/stack_n_models	3	stack: models whose outputs a logistic regression combines	results/m2_ens_stack.json
 final/var_bjit100_d	\ensuremath{-}0.4	bjit100: accuracy change (points)	tables/final/final_variants.json
 final/var_bjit100_d_hi	+0.4	bjit100: 95 % CI high (points)	tables/final/final_variants.json
 final/var_bjit100_d_lo	\ensuremath{-}1.4	bjit100: 95 % CI low (points)	tables/final/final_variants.json
@@ -24200,6 +24440,7 @@ x1/active_s_qone	1.08	reference 25th percentile: Active movement time	results/x1
 x1/active_s_qthree	2.42	reference 75th percentile: Active movement time	results/x1_characteristics.json
 x1/active_s_robust	0	1 = beyond all and robust to every check that can fail: Active movement time	results/x1_characteristics.json
 x1/active_s_unavailable		checks that could not be made (too few case trials left): Active movement time	results/x1_characteristics.json
+x1/active_s_x_med	1.2	case value / reference median ("n times the typical value"): Active movement time	results/x1_characteristics.json
 x1/active_s_z	+0.4	robust z on the declared (log) scale: Active movement time	results/x1_characteristics.json
 x1/active_s_zlin	+0.4	robust z, linear: Active movement time	results/x1_characteristics.json
 x1/active_s_zloo	+0.3	smallest |robust z| with one reference person left out: Active movement time	results/x1_characteristics.json
@@ -24246,6 +24487,7 @@ x1/active_speed_ratio_qone	1.24	reference 25th percentile: Slow-to-fast active-t
 x1/active_speed_ratio_qthree	3.61	reference 75th percentile: Slow-to-fast active-time ratio	results/x1_characteristics.json
 x1/active_speed_ratio_robust	0	1 = beyond all and robust to every check that can fail: Slow-to-fast active-time ratio	results/x1_characteristics.json
 x1/active_speed_ratio_unavailable		checks that could not be made (too few case trials left): Slow-to-fast active-time ratio	results/x1_characteristics.json
+x1/active_speed_ratio_x_med	0.4	case value / reference median ("n times the typical value"): Slow-to-fast active-time ratio	results/x1_characteristics.json
 x1/active_speed_ratio_z	\ensuremath{-}1.4	robust z on the declared (log) scale: Slow-to-fast active-time ratio	results/x1_characteristics.json
 x1/active_speed_ratio_zlin	\ensuremath{-}1.0	robust z, linear: Slow-to-fast active-time ratio	results/x1_characteristics.json
 x1/active_speed_ratio_zloo	\ensuremath{-}1.3	smallest |robust z| with one reference person left out: Slow-to-fast active-time ratio	results/x1_characteristics.json
@@ -24293,6 +24535,7 @@ x1/app_7_12_per_speed_qone	0.21	reference 25th percentile: Reach 7-12 Hz RMS per
 x1/app_7_12_per_speed_qthree	0.39	reference 75th percentile: Reach 7-12 Hz RMS per peak speed	results/x1_characteristics.json
 x1/app_7_12_per_speed_robust	0	1 = beyond all and robust to every check that can fail: Reach 7-12 Hz RMS per peak speed	results/x1_characteristics.json
 x1/app_7_12_per_speed_unavailable		checks that could not be made (too few case trials left): Reach 7-12 Hz RMS per peak speed	results/x1_characteristics.json
+x1/app_7_12_per_speed_x_med	1.7	case value / reference median ("n times the typical value"): Reach 7-12 Hz RMS per peak speed	results/x1_characteristics.json
 x1/app_7_12_per_speed_z	+1.1	robust z on the declared (log) scale: Reach 7-12 Hz RMS per peak speed	results/x1_characteristics.json
 x1/app_7_12_per_speed_zlin	+1.5	robust z, linear: Reach 7-12 Hz RMS per peak speed	results/x1_characteristics.json
 x1/app_7_12_per_speed_zloo	+1.0	smallest |robust z| with one reference person left out: Reach 7-12 Hz RMS per peak speed	results/x1_characteristics.json
@@ -24431,6 +24674,7 @@ x1/app_rms_3_7_qone	14.2	reference 25th percentile: Reach 3-7 Hz band RMS	result
 x1/app_rms_3_7_qthree	24.0	reference 75th percentile: Reach 3-7 Hz band RMS	results/x1_characteristics.json
 x1/app_rms_3_7_robust	0	1 = beyond all and robust to every check that can fail: Reach 3-7 Hz band RMS	results/x1_characteristics.json
 x1/app_rms_3_7_unavailable		checks that could not be made (too few case trials left): Reach 3-7 Hz band RMS	results/x1_characteristics.json
+x1/app_rms_3_7_x_med	1.5	case value / reference median ("n times the typical value"): Reach 3-7 Hz band RMS	results/x1_characteristics.json
 x1/app_rms_3_7_z	+1.1	robust z on the declared (log) scale: Reach 3-7 Hz band RMS	results/x1_characteristics.json
 x1/app_rms_3_7_zlin	+1.4	robust z, linear: Reach 3-7 Hz band RMS	results/x1_characteristics.json
 x1/app_rms_3_7_zloo	+0.9	smallest |robust z| with one reference person left out: Reach 3-7 Hz band RMS	results/x1_characteristics.json
@@ -24477,6 +24721,7 @@ x1/app_rms_7_12_qone	11.7	reference 25th percentile: Reach 7-12 Hz band RMS	resu
 x1/app_rms_7_12_qthree	20.7	reference 75th percentile: Reach 7-12 Hz band RMS	results/x1_characteristics.json
 x1/app_rms_7_12_robust	1	1 = beyond all and robust to every check that can fail: Reach 7-12 Hz band RMS	results/x1_characteristics.json
 x1/app_rms_7_12_unavailable		checks that could not be made (too few case trials left): Reach 7-12 Hz band RMS	results/x1_characteristics.json
+x1/app_rms_7_12_x_med	3.0	case value / reference median ("n times the typical value"): Reach 7-12 Hz band RMS	results/x1_characteristics.json
 x1/app_rms_7_12_z	+2.3	robust z on the declared (log) scale: Reach 7-12 Hz band RMS	results/x1_characteristics.json
 x1/app_rms_7_12_zlin	+4.1	robust z, linear: Reach 7-12 Hz band RMS	results/x1_characteristics.json
 x1/app_rms_7_12_zloo	+2.2	smallest |robust z| with one reference person left out: Reach 7-12 Hz band RMS	results/x1_characteristics.json
@@ -24523,6 +24768,7 @@ x1/attempts_per_accepted_qone	1.09	reference 25th percentile: Attempts per accep
 x1/attempts_per_accepted_qthree	1.33	reference 75th percentile: Attempts per accepted trial	results/x1_characteristics.json
 x1/attempts_per_accepted_robust	0	1 = beyond all and robust to every check that can fail: Attempts per accepted trial	results/x1_characteristics.json
 x1/attempts_per_accepted_unavailable		checks that could not be made (too few case trials left): Attempts per accepted trial	results/x1_characteristics.json
+x1/attempts_per_accepted_x_med	1.2	case value / reference median ("n times the typical value"): Attempts per accepted trial	results/x1_characteristics.json
 x1/attempts_per_accepted_z	+1.5	robust z on the declared (log) scale: Attempts per accepted trial	results/x1_characteristics.json
 x1/attempts_per_accepted_zlin	+1.7	robust z, linear: Attempts per accepted trial	results/x1_characteristics.json
 x1/attempts_per_accepted_zloo	+1.3	smallest |robust z| with one reference person left out: Attempts per accepted trial	results/x1_characteristics.json
@@ -24663,6 +24909,7 @@ x1/cv_duration_qone	0.12	reference 25th percentile: Duration variability (CV)	re
 x1/cv_duration_qthree	0.24	reference 75th percentile: Duration variability (CV)	results/x1_characteristics.json
 x1/cv_duration_robust	0	1 = beyond all and robust to every check that can fail: Duration variability (CV)	results/x1_characteristics.json
 x1/cv_duration_unavailable		checks that could not be made (too few case trials left): Duration variability (CV)	results/x1_characteristics.json
+x1/cv_duration_x_med	1.0	case value / reference median ("n times the typical value"): Duration variability (CV)	results/x1_characteristics.json
 x1/cv_duration_z	+0.1	robust z on the declared (log) scale: Duration variability (CV)	results/x1_characteristics.json
 x1/cv_duration_zlin	+0.1	robust z, linear: Duration variability (CV)	results/x1_characteristics.json
 x1/cv_duration_zloo	\ensuremath{-}0.3	smallest |robust z| with one reference person left out: Duration variability (CV)	results/x1_characteristics.json
@@ -24711,6 +24958,7 @@ x1/cv_peak_speed_mv_qone	0.23	reference 25th percentile: Peak-speed variability 
 x1/cv_peak_speed_mv_qthree	0.37	reference 75th percentile: Peak-speed variability (CV)	results/x1_characteristics.json
 x1/cv_peak_speed_mv_robust	0	1 = beyond all and robust to every check that can fail: Peak-speed variability (CV)	results/x1_characteristics.json
 x1/cv_peak_speed_mv_unavailable		checks that could not be made (too few case trials left): Peak-speed variability (CV)	results/x1_characteristics.json
+x1/cv_peak_speed_mv_x_med	1.5	case value / reference median ("n times the typical value"): Peak-speed variability (CV)	results/x1_characteristics.json
 x1/cv_peak_speed_mv_z	+1.2	robust z on the declared (log) scale: Peak-speed variability (CV)	results/x1_characteristics.json
 x1/cv_peak_speed_mv_zlin	+1.4	robust z, linear: Peak-speed variability (CV)	results/x1_characteristics.json
 x1/cv_peak_speed_mv_zloo	+0.7	smallest |robust z| with one reference person left out: Peak-speed variability (CV)	results/x1_characteristics.json
@@ -24766,6 +25014,7 @@ x1/duration_s_qone	1.44	reference 25th percentile: Approach duration	results/x1_
 x1/duration_s_qthree	2.63	reference 75th percentile: Approach duration	results/x1_characteristics.json
 x1/duration_s_robust	0	1 = beyond all and robust to every check that can fail: Approach duration	results/x1_characteristics.json
 x1/duration_s_unavailable		checks that could not be made (too few case trials left): Approach duration	results/x1_characteristics.json
+x1/duration_s_x_med	1.4	case value / reference median ("n times the typical value"): Approach duration	results/x1_characteristics.json
 x1/duration_s_z	+0.8	robust z on the declared (log) scale: Approach duration	results/x1_characteristics.json
 x1/duration_s_zlin	+0.9	robust z, linear: Approach duration	results/x1_characteristics.json
 x1/duration_s_zloo	+0.7	smallest |robust z| with one reference person left out: Approach duration	results/x1_characteristics.json
@@ -24951,6 +25200,7 @@ x1/hold_wait_s_qone	3.3	reference 25th percentile: Time to a valid hold	results/
 x1/hold_wait_s_qthree	5.2	reference 75th percentile: Time to a valid hold	results/x1_characteristics.json
 x1/hold_wait_s_robust	0	1 = beyond all and robust to every check that can fail: Time to a valid hold	results/x1_characteristics.json
 x1/hold_wait_s_unavailable		checks that could not be made (too few case trials left): Time to a valid hold	results/x1_characteristics.json
+x1/hold_wait_s_x_med	1.5	case value / reference median ("n times the typical value"): Time to a valid hold	results/x1_characteristics.json
 x1/hold_wait_s_z	+1.0	robust z on the declared (log) scale: Time to a valid hold	results/x1_characteristics.json
 x1/hold_wait_s_zlin	+1.1	robust z, linear: Time to a valid hold	results/x1_characteristics.json
 x1/hold_wait_s_zloo	+1.0	smallest |robust z| with one reference person left out: Time to a valid hold	results/x1_characteristics.json
@@ -25043,6 +25293,7 @@ x1/mean_speed_mv_qone	19	reference 25th percentile: Mean angular speed, movement
 x1/mean_speed_mv_qthree	33	reference 75th percentile: Mean angular speed, movement band	results/x1_characteristics.json
 x1/mean_speed_mv_robust	0	1 = beyond all and robust to every check that can fail: Mean angular speed, movement band	results/x1_characteristics.json
 x1/mean_speed_mv_unavailable		checks that could not be made (too few case trials left): Mean angular speed, movement band	results/x1_characteristics.json
+x1/mean_speed_mv_x_med	1.5	case value / reference median ("n times the typical value"): Mean angular speed, movement band	results/x1_characteristics.json
 x1/mean_speed_mv_z	+1.0	robust z on the declared (log) scale: Mean angular speed, movement band	results/x1_characteristics.json
 x1/mean_speed_mv_zlin	+1.4	robust z, linear: Mean angular speed, movement band	results/x1_characteristics.json
 x1/mean_speed_mv_zloo	+1.0	smallest |robust z| with one reference person left out: Mean angular speed, movement band	results/x1_characteristics.json
@@ -25075,6 +25326,8 @@ x1/mv_pc_two_var	31\,\%	variance explained by PC2	results/x1_multivariate.json
 x1/n_beyond_post_hoc	5	post hoc characteristics with the case beyond every reference person	results/x1_characteristics.json
 x1/n_beyond_prespecified	9	pre-specified characteristics with the case beyond every reference person	results/x1_characteristics.json
 x1/n_characteristics	55	characteristics compared	results/x1_characteristics.json
+x1/n_expected	8	declared characteristics a reader would expect to differ (rest-tremor band, smoothness, slowness, the hand cue)	results/x1_characteristics.json
+x1/n_expected_inside	8	of them, characteristics in which the case is NOT beyond every reference person (the lower rows of X1_10)	results/x1_characteristics.json
 x1/n_inside_iqr	16	characteristics with the case inside the reference IQR	results/x1_characteristics.json
 x1/n_phen_beyond_prespecified	7	phenomena with a pre-specified characteristic beyond all	results/x1_characteristics.json
 x1/n_phen_robust_prespecified	5	phenomena with a robust pre-specified characteristic	results/x1_characteristics.json
@@ -25178,6 +25431,7 @@ x1/net_yaw_abs_qone	2.9	reference 25th percentile: Net yaw, magnitude	results/x1
 x1/net_yaw_abs_qthree	7.6	reference 75th percentile: Net yaw, magnitude	results/x1_characteristics.json
 x1/net_yaw_abs_robust	0	1 = beyond all and robust to every check that can fail: Net yaw, magnitude	results/x1_characteristics.json
 x1/net_yaw_abs_unavailable		checks that could not be made (too few case trials left): Net yaw, magnitude	results/x1_characteristics.json
+x1/net_yaw_abs_x_med	0.5	case value / reference median ("n times the typical value"): Net yaw, magnitude	results/x1_characteristics.json
 x1/net_yaw_abs_z	\ensuremath{-}1.0	robust z on the declared (log) scale: Net yaw, magnitude	results/x1_characteristics.json
 x1/net_yaw_abs_zlin	\ensuremath{-}0.8	robust z, linear: Net yaw, magnitude	results/x1_characteristics.json
 x1/net_yaw_abs_zloo	\ensuremath{-}0.9	smallest |robust z| with one reference person left out: Net yaw, magnitude	results/x1_characteristics.json
@@ -25408,6 +25662,7 @@ x1/nose_rms_3_7_qone	2.60	reference 25th percentile: Nose 3-7 Hz band RMS	result
 x1/nose_rms_3_7_qthree	4.26	reference 75th percentile: Nose 3-7 Hz band RMS	results/x1_characteristics.json
 x1/nose_rms_3_7_robust	0	1 = beyond all and robust to every check that can fail: Nose 3-7 Hz band RMS	results/x1_characteristics.json
 x1/nose_rms_3_7_unavailable		checks that could not be made (too few case trials left): Nose 3-7 Hz band RMS	results/x1_characteristics.json
+x1/nose_rms_3_7_x_med	0.9	case value / reference median ("n times the typical value"): Nose 3-7 Hz band RMS	results/x1_characteristics.json
 x1/nose_rms_3_7_z	\ensuremath{-}0.4	robust z on the declared (log) scale: Nose 3-7 Hz band RMS	results/x1_characteristics.json
 x1/nose_rms_3_7_zlin	\ensuremath{-}0.4	robust z, linear: Nose 3-7 Hz band RMS	results/x1_characteristics.json
 x1/nose_rms_3_7_zloo	\ensuremath{-}0.4	smallest |robust z| with one reference person left out: Nose 3-7 Hz band RMS	results/x1_characteristics.json
@@ -25454,6 +25709,7 @@ x1/nose_rms_7_12_qone	2.58	reference 25th percentile: Nose 7-12 Hz band RMS	resu
 x1/nose_rms_7_12_qthree	4.06	reference 75th percentile: Nose 7-12 Hz band RMS	results/x1_characteristics.json
 x1/nose_rms_7_12_robust	0	1 = beyond all and robust to every check that can fail: Nose 7-12 Hz band RMS	results/x1_characteristics.json
 x1/nose_rms_7_12_unavailable		checks that could not be made (too few case trials left): Nose 7-12 Hz band RMS	results/x1_characteristics.json
+x1/nose_rms_7_12_x_med	0.9	case value / reference median ("n times the typical value"): Nose 7-12 Hz band RMS	results/x1_characteristics.json
 x1/nose_rms_7_12_z	\ensuremath{-}0.2	robust z on the declared (log) scale: Nose 7-12 Hz band RMS	results/x1_characteristics.json
 x1/nose_rms_7_12_zlin	\ensuremath{-}0.2	robust z, linear: Nose 7-12 Hz band RMS	results/x1_characteristics.json
 x1/nose_rms_7_12_zloo	\ensuremath{-}0.2	smallest |robust z| with one reference person left out: Nose 7-12 Hz band RMS	results/x1_characteristics.json
@@ -25471,6 +25727,7 @@ x1/null_all_lfl_p_phen	0.048	"beyond all" count, all characteristics, like for l
 x1/null_all_lfl_ref_max	13	"beyond all" count, all characteristics, like for like: reference maximum	results/x1_characteristics.json
 x1/null_all_lfl_ref_max_phen	8	"beyond all" count, all characteristics, like for like: reference maximum, phenomena	results/x1_characteristics.json
 x1/null_all_lfl_ref_median	6.0	"beyond all" count, all characteristics, like for like: reference median	results/x1_characteristics.json
+x1/null_all_lfl_ref_min	1	"beyond all" count, all characteristics, like for like: reference minimum	results/x1_characteristics.json
 x1/null_all_lfl_subset_max	17	"beyond all" count, all characteristics, like for like: the case against each (n - 1)-subset, maximum	results/x1_characteristics.json
 x1/null_all_lfl_subset_min	14	"beyond all" count, all characteristics, like for like: the case against each (n - 1)-subset, minimum	results/x1_characteristics.json
 x1/null_all_lfl_top	P06	"beyond all" count, all characteristics, like for like: reference person with the most	results/x1_characteristics.json
@@ -25486,6 +25743,7 @@ x1/null_all_main_p_phen	0.048	"beyond all" count, all characteristics, main: ran
 x1/null_all_main_ref_max	13	"beyond all" count, all characteristics, main: reference maximum	results/x1_characteristics.json
 x1/null_all_main_ref_max_phen	8	"beyond all" count, all characteristics, main: reference maximum, phenomena	results/x1_characteristics.json
 x1/null_all_main_ref_median	6.0	"beyond all" count, all characteristics, main: reference median	results/x1_characteristics.json
+x1/null_all_main_ref_min	1	"beyond all" count, all characteristics, main: reference minimum	results/x1_characteristics.json
 x1/null_all_main_subset_max	17	"beyond all" count, all characteristics, main: the case against each (n - 1)-subset, maximum	results/x1_characteristics.json
 x1/null_all_main_subset_min	14	"beyond all" count, all characteristics, main: the case against each (n - 1)-subset, minimum	results/x1_characteristics.json
 x1/null_all_main_top	P06	"beyond all" count, all characteristics, main: reference person with the most	results/x1_characteristics.json
@@ -25501,6 +25759,7 @@ x1/null_pre_lfl_p_phen	0.095	"beyond all" count, prespecified characteristics, l
 x1/null_pre_lfl_ref_max	9	"beyond all" count, prespecified characteristics, like for like: reference maximum	results/x1_characteristics.json
 x1/null_pre_lfl_ref_max_phen	7	"beyond all" count, prespecified characteristics, like for like: reference maximum, phenomena	results/x1_characteristics.json
 x1/null_pre_lfl_ref_median	4.0	"beyond all" count, prespecified characteristics, like for like: reference median	results/x1_characteristics.json
+x1/null_pre_lfl_ref_min	0	"beyond all" count, prespecified characteristics, like for like: reference minimum	results/x1_characteristics.json
 x1/null_pre_lfl_subset_max	10	"beyond all" count, prespecified characteristics, like for like: the case against each (n - 1)-subset, maximum	results/x1_characteristics.json
 x1/null_pre_lfl_subset_min	9	"beyond all" count, prespecified characteristics, like for like: the case against each (n - 1)-subset, minimum	results/x1_characteristics.json
 x1/null_pre_lfl_top	P09	"beyond all" count, prespecified characteristics, like for like: reference person with the most	results/x1_characteristics.json
@@ -25516,6 +25775,7 @@ x1/null_pre_main_p_phen	0.048	"beyond all" count, prespecified characteristics, 
 x1/null_pre_main_ref_max	8	"beyond all" count, prespecified characteristics, main: reference maximum	results/x1_characteristics.json
 x1/null_pre_main_ref_max_phen	6	"beyond all" count, prespecified characteristics, main: reference maximum, phenomena	results/x1_characteristics.json
 x1/null_pre_main_ref_median	3.5	"beyond all" count, prespecified characteristics, main: reference median	results/x1_characteristics.json
+x1/null_pre_main_ref_min	0	"beyond all" count, prespecified characteristics, main: reference minimum	results/x1_characteristics.json
 x1/null_pre_main_subset_max	10	"beyond all" count, prespecified characteristics, main: the case against each (n - 1)-subset, maximum	results/x1_characteristics.json
 x1/null_pre_main_subset_min	9	"beyond all" count, prespecified characteristics, main: the case against each (n - 1)-subset, minimum	results/x1_characteristics.json
 x1/null_pre_main_top	P06	"beyond all" count, prespecified characteristics, main: reference person with the most	results/x1_characteristics.json
@@ -25574,6 +25834,7 @@ x1/peak_acc_qone	3.2	reference 25th percentile: Peak linear acceleration	results
 x1/peak_acc_qthree	6.0	reference 75th percentile: Peak linear acceleration	results/x1_characteristics.json
 x1/peak_acc_robust	1	1 = beyond all and robust to every check that can fail: Peak linear acceleration	results/x1_characteristics.json
 x1/peak_acc_unavailable		checks that could not be made (too few case trials left): Peak linear acceleration	results/x1_characteristics.json
+x1/peak_acc_x_med	3.8	case value / reference median ("n times the typical value"): Peak linear acceleration	results/x1_characteristics.json
 x1/peak_acc_z	+3.2	robust z on the declared (log) scale: Peak linear acceleration	results/x1_characteristics.json
 x1/peak_acc_zlin	+7.5	robust z, linear: Peak linear acceleration	results/x1_characteristics.json
 x1/peak_acc_zloo	+2.6	smallest |robust z| with one reference person left out: Peak linear acceleration	results/x1_characteristics.json
@@ -25631,6 +25892,7 @@ x1/peak_speed_mv_qone	42	reference 25th percentile: Peak angular speed, movement
 x1/peak_speed_mv_qthree	77	reference 75th percentile: Peak angular speed, movement band	results/x1_characteristics.json
 x1/peak_speed_mv_robust	0	1 = beyond all and robust to every check that can fail: Peak angular speed, movement band	results/x1_characteristics.json
 x1/peak_speed_mv_unavailable		checks that could not be made (too few case trials left): Peak angular speed, movement band	results/x1_characteristics.json
+x1/peak_speed_mv_x_med	2.2	case value / reference median ("n times the typical value"): Peak angular speed, movement band	results/x1_characteristics.json
 x1/peak_speed_mv_z	+1.9	robust z on the declared (log) scale: Peak angular speed, movement band	results/x1_characteristics.json
 x1/peak_speed_mv_zlin	+3.2	robust z, linear: Peak angular speed, movement band	results/x1_characteristics.json
 x1/peak_speed_mv_zloo	+1.6	smallest |robust z| with one reference person left out: Peak angular speed, movement band	results/x1_characteristics.json
@@ -25666,6 +25928,7 @@ x1/peak_speed_qone	79	reference 25th percentile: Peak angular speed, as recorded
 x1/peak_speed_qthree	120	reference 75th percentile: Peak angular speed, as recorded	results/x1_characteristics.json
 x1/peak_speed_robust	0	1 = beyond all and robust to every check that can fail: Peak angular speed, as recorded	results/x1_characteristics.json
 x1/peak_speed_unavailable		checks that could not be made (too few case trials left): Peak angular speed, as recorded	results/x1_characteristics.json
+x1/peak_speed_x_med	1.8	case value / reference median ("n times the typical value"): Peak angular speed, as recorded	results/x1_characteristics.json
 x1/peak_speed_z	+2.0	robust z on the declared (log) scale: Peak angular speed, as recorded	results/x1_characteristics.json
 x1/peak_speed_zlin	+3.0	robust z, linear: Peak angular speed, as recorded	results/x1_characteristics.json
 x1/peak_speed_zloo	+1.6	smallest |robust z| with one reference person left out: Peak angular speed, as recorded	results/x1_characteristics.json
@@ -25809,6 +26072,7 @@ x1/pre_rms_05_3_qone	1.88	reference 25th percentile: Hold 0.5-3 Hz band RMS (slo
 x1/pre_rms_05_3_qthree	3.22	reference 75th percentile: Hold 0.5-3 Hz band RMS (slow sway)	results/x1_characteristics.json
 x1/pre_rms_05_3_robust	0	1 = beyond all and robust to every check that can fail: Hold 0.5-3 Hz band RMS (slow sway)	results/x1_characteristics.json
 x1/pre_rms_05_3_unavailable		checks that could not be made (too few case trials left): Hold 0.5-3 Hz band RMS (slow sway)	results/x1_characteristics.json
+x1/pre_rms_05_3_x_med	0.4	case value / reference median ("n times the typical value"): Hold 0.5-3 Hz band RMS (slow sway)	results/x1_characteristics.json
 x1/pre_rms_05_3_z	\ensuremath{-}2.5	robust z on the declared (log) scale: Hold 0.5-3 Hz band RMS (slow sway)	results/x1_characteristics.json
 x1/pre_rms_05_3_zlin	\ensuremath{-}1.5	robust z, linear: Hold 0.5-3 Hz band RMS (slow sway)	results/x1_characteristics.json
 x1/pre_rms_05_3_zloo	\ensuremath{-}2.2	smallest |robust z| with one reference person left out: Hold 0.5-3 Hz band RMS (slow sway)	results/x1_characteristics.json
@@ -25855,6 +26119,7 @@ x1/pre_rms_12_15_qone	0.57	reference 25th percentile: Hold 12-15 Hz band RMS	res
 x1/pre_rms_12_15_qthree	0.93	reference 75th percentile: Hold 12-15 Hz band RMS	results/x1_characteristics.json
 x1/pre_rms_12_15_robust	0	1 = beyond all and robust to every check that can fail: Hold 12-15 Hz band RMS	results/x1_characteristics.json
 x1/pre_rms_12_15_unavailable		checks that could not be made (too few case trials left): Hold 12-15 Hz band RMS	results/x1_characteristics.json
+x1/pre_rms_12_15_x_med	0.6	case value / reference median ("n times the typical value"): Hold 12-15 Hz band RMS	results/x1_characteristics.json
 x1/pre_rms_12_15_z	\ensuremath{-}1.8	robust z on the declared (log) scale: Hold 12-15 Hz band RMS	results/x1_characteristics.json
 x1/pre_rms_12_15_zlin	\ensuremath{-}1.4	robust z, linear: Hold 12-15 Hz band RMS	results/x1_characteristics.json
 x1/pre_rms_12_15_zloo	\ensuremath{-}1.8	smallest |robust z| with one reference person left out: Hold 12-15 Hz band RMS	results/x1_characteristics.json
@@ -25901,6 +26166,7 @@ x1/pre_rms_3_12_qone	2.66	reference 25th percentile: Hold 3-12 Hz band RMS	resul
 x1/pre_rms_3_12_qthree	4.72	reference 75th percentile: Hold 3-12 Hz band RMS	results/x1_characteristics.json
 x1/pre_rms_3_12_robust	0	1 = beyond all and robust to every check that can fail: Hold 3-12 Hz band RMS	results/x1_characteristics.json
 x1/pre_rms_3_12_unavailable		checks that could not be made (too few case trials left): Hold 3-12 Hz band RMS	results/x1_characteristics.json
+x1/pre_rms_3_12_x_med	1.0	case value / reference median ("n times the typical value"): Hold 3-12 Hz band RMS	results/x1_characteristics.json
 x1/pre_rms_3_12_z	\ensuremath{-}0.0	robust z on the declared (log) scale: Hold 3-12 Hz band RMS	results/x1_characteristics.json
 x1/pre_rms_3_12_zlin	\ensuremath{-}0.0	robust z, linear: Hold 3-12 Hz band RMS	results/x1_characteristics.json
 x1/pre_rms_3_12_zloo	\ensuremath{-}0.0	smallest |robust z| with one reference person left out: Hold 3-12 Hz band RMS	results/x1_characteristics.json
@@ -25947,6 +26213,7 @@ x1/pre_rms_3_7_qone	1.78	reference 25th percentile: Hold 3-7 Hz band RMS	results
 x1/pre_rms_3_7_qthree	3.31	reference 75th percentile: Hold 3-7 Hz band RMS	results/x1_characteristics.json
 x1/pre_rms_3_7_robust	0	1 = beyond all and robust to every check that can fail: Hold 3-7 Hz band RMS	results/x1_characteristics.json
 x1/pre_rms_3_7_unavailable		checks that could not be made (too few case trials left): Hold 3-7 Hz band RMS	results/x1_characteristics.json
+x1/pre_rms_3_7_x_med	1.1	case value / reference median ("n times the typical value"): Hold 3-7 Hz band RMS	results/x1_characteristics.json
 x1/pre_rms_3_7_z	+0.1	robust z on the declared (log) scale: Hold 3-7 Hz band RMS	results/x1_characteristics.json
 x1/pre_rms_3_7_zlin	+0.1	robust z, linear: Hold 3-7 Hz band RMS	results/x1_characteristics.json
 x1/pre_rms_3_7_zloo	+0.0	smallest |robust z| with one reference person left out: Hold 3-7 Hz band RMS	results/x1_characteristics.json
@@ -25993,6 +26260,7 @@ x1/pre_rms_7_12_qone	1.56	reference 25th percentile: Hold 7-12 Hz band RMS	resul
 x1/pre_rms_7_12_qthree	2.50	reference 75th percentile: Hold 7-12 Hz band RMS	results/x1_characteristics.json
 x1/pre_rms_7_12_robust	0	1 = beyond all and robust to every check that can fail: Hold 7-12 Hz band RMS	results/x1_characteristics.json
 x1/pre_rms_7_12_unavailable		checks that could not be made (too few case trials left): Hold 7-12 Hz band RMS	results/x1_characteristics.json
+x1/pre_rms_7_12_x_med	1.0	case value / reference median ("n times the typical value"): Hold 7-12 Hz band RMS	results/x1_characteristics.json
 x1/pre_rms_7_12_z	\ensuremath{-}0.1	robust z on the declared (log) scale: Hold 7-12 Hz band RMS	results/x1_characteristics.json
 x1/pre_rms_7_12_zlin	\ensuremath{-}0.1	robust z, linear: Hold 7-12 Hz band RMS	results/x1_characteristics.json
 x1/pre_rms_7_12_zloo	\ensuremath{-}0.0	smallest |robust z| with one reference person left out: Hold 7-12 Hz band RMS	results/x1_characteristics.json
@@ -26039,6 +26307,7 @@ x1/pre_sway_acc_qone	0.299	reference 25th percentile: Hold sway, acceleration	re
 x1/pre_sway_acc_qthree	0.359	reference 75th percentile: Hold sway, acceleration	results/x1_characteristics.json
 x1/pre_sway_acc_robust	0	1 = beyond all and robust to every check that can fail: Hold sway, acceleration	results/x1_characteristics.json
 x1/pre_sway_acc_unavailable		checks that could not be made (too few case trials left): Hold sway, acceleration	results/x1_characteristics.json
+x1/pre_sway_acc_x_med	1.0	case value / reference median ("n times the typical value"): Hold sway, acceleration	results/x1_characteristics.json
 x1/pre_sway_acc_z	+0.4	robust z on the declared (log) scale: Hold sway, acceleration	results/x1_characteristics.json
 x1/pre_sway_acc_zlin	+0.4	robust z, linear: Hold sway, acceleration	results/x1_characteristics.json
 x1/pre_sway_acc_zloo	+0.4	smallest |robust z| with one reference person left out: Hold sway, acceleration	results/x1_characteristics.json
@@ -26085,6 +26354,7 @@ x1/pre_sway_gyro_qone	4.42	reference 25th percentile: Hold sway, rotation	result
 x1/pre_sway_gyro_qthree	6.89	reference 75th percentile: Hold sway, rotation	results/x1_characteristics.json
 x1/pre_sway_gyro_robust	0	1 = beyond all and robust to every check that can fail: Hold sway, rotation	results/x1_characteristics.json
 x1/pre_sway_gyro_unavailable		checks that could not be made (too few case trials left): Hold sway, rotation	results/x1_characteristics.json
+x1/pre_sway_gyro_x_med	0.8	case value / reference median ("n times the typical value"): Hold sway, rotation	results/x1_characteristics.json
 x1/pre_sway_gyro_z	\ensuremath{-}0.7	robust z on the declared (log) scale: Hold sway, rotation	results/x1_characteristics.json
 x1/pre_sway_gyro_zlin	\ensuremath{-}0.6	robust z, linear: Hold sway, rotation	results/x1_characteristics.json
 x1/pre_sway_gyro_zloo	\ensuremath{-}0.6	smallest |robust z| with one reference person left out: Hold sway, rotation	results/x1_characteristics.json
@@ -26223,6 +26493,7 @@ x1/rotation_net_qone	7.0	reference 25th percentile: Net rotation	results/x1_char
 x1/rotation_net_qthree	14.4	reference 75th percentile: Net rotation	results/x1_characteristics.json
 x1/rotation_net_robust	0	1 = beyond all and robust to every check that can fail: Net rotation	results/x1_characteristics.json
 x1/rotation_net_unavailable		checks that could not be made (too few case trials left): Net rotation	results/x1_characteristics.json
+x1/rotation_net_x_med	0.4	case value / reference median ("n times the typical value"): Net rotation	results/x1_characteristics.json
 x1/rotation_net_z	\ensuremath{-}1.7	robust z on the declared (log) scale: Net rotation	results/x1_characteristics.json
 x1/rotation_net_zlin	\ensuremath{-}1.1	robust z, linear: Net rotation	results/x1_characteristics.json
 x1/rotation_net_zloo	\ensuremath{-}1.6	smallest |robust z| with one reference person left out: Net rotation	results/x1_characteristics.json
@@ -26269,6 +26540,7 @@ x1/rotation_total_mv_qone	32	reference 25th percentile: Rotation, movement band	
 x1/rotation_total_mv_qthree	58	reference 75th percentile: Rotation, movement band	results/x1_characteristics.json
 x1/rotation_total_mv_robust	0	1 = beyond all and robust to every check that can fail: Rotation, movement band	results/x1_characteristics.json
 x1/rotation_total_mv_unavailable		checks that could not be made (too few case trials left): Rotation, movement band	results/x1_characteristics.json
+x1/rotation_total_mv_x_med	1.8	case value / reference median ("n times the typical value"): Rotation, movement band	results/x1_characteristics.json
 x1/rotation_total_mv_z	+1.8	robust z on the declared (log) scale: Rotation, movement band	results/x1_characteristics.json
 x1/rotation_total_mv_zlin	+2.3	robust z, linear: Rotation, movement band	results/x1_characteristics.json
 x1/rotation_total_mv_zloo	+1.6	smallest |robust z| with one reference person left out: Rotation, movement band	results/x1_characteristics.json
@@ -26457,6 +26729,7 @@ x1/settle_s_qone	0.23	reference 25th percentile: Settling before the end	results
 x1/settle_s_qthree	0.45	reference 75th percentile: Settling before the end	results/x1_characteristics.json
 x1/settle_s_robust	0	1 = beyond all and robust to every check that can fail: Settling before the end	results/x1_characteristics.json
 x1/settle_s_unavailable		checks that could not be made (too few case trials left): Settling before the end	results/x1_characteristics.json
+x1/settle_s_x_med	1.9	case value / reference median ("n times the typical value"): Settling before the end	results/x1_characteristics.json
 x1/settle_s_z	+1.2	robust z on the declared (log) scale: Settling before the end	results/x1_characteristics.json
 x1/settle_s_zlin	+1.8	robust z, linear: Settling before the end	results/x1_characteristics.json
 x1/settle_s_zloo	+1.2	smallest |robust z| with one reference person left out: Settling before the end	results/x1_characteristics.json
@@ -26619,6 +26892,7 @@ x1/speed_peaks_qone	8.4	reference 25th percentile: Speed peaks, as recorded	resu
 x1/speed_peaks_qthree	17.3	reference 75th percentile: Speed peaks, as recorded	results/x1_characteristics.json
 x1/speed_peaks_robust	0	1 = beyond all and robust to every check that can fail: Speed peaks, as recorded	results/x1_characteristics.json
 x1/speed_peaks_unavailable		checks that could not be made (too few case trials left): Speed peaks, as recorded	results/x1_characteristics.json
+x1/speed_peaks_x_med	1.5	case value / reference median ("n times the typical value"): Speed peaks, as recorded	results/x1_characteristics.json
 x1/speed_peaks_z	+0.6	robust z on the declared (log) scale: Speed peaks, as recorded	results/x1_characteristics.json
 x1/speed_peaks_zlin	+0.9	robust z, linear: Speed peaks, as recorded	results/x1_characteristics.json
 x1/speed_peaks_zloo	+0.5	smallest |robust z| with one reference person left out: Speed peaks, as recorded	results/x1_characteristics.json
@@ -26665,6 +26939,7 @@ x1/speed_ratio_qone	1.87	reference 25th percentile: Slow-to-fast duration ratio	
 x1/speed_ratio_qthree	4.55	reference 75th percentile: Slow-to-fast duration ratio	results/x1_characteristics.json
 x1/speed_ratio_robust	0	1 = beyond all and robust to every check that can fail: Slow-to-fast duration ratio	results/x1_characteristics.json
 x1/speed_ratio_unavailable		checks that could not be made (too few case trials left): Slow-to-fast duration ratio	results/x1_characteristics.json
+x1/speed_ratio_x_med	0.6	case value / reference median ("n times the typical value"): Slow-to-fast duration ratio	results/x1_characteristics.json
 x1/speed_ratio_z	\ensuremath{-}0.9	robust z on the declared (log) scale: Slow-to-fast duration ratio	results/x1_characteristics.json
 x1/speed_ratio_zlin	\ensuremath{-}0.8	robust z, linear: Slow-to-fast duration ratio	results/x1_characteristics.json
 x1/speed_ratio_zloo	\ensuremath{-}0.9	smallest |robust z| with one reference person left out: Slow-to-fast duration ratio	results/x1_characteristics.json
@@ -26711,6 +26986,7 @@ x1/submovements_qone	2.2	reference 25th percentile: Sub-movements, movement band
 x1/submovements_qthree	6.1	reference 75th percentile: Sub-movements, movement band	results/x1_characteristics.json
 x1/submovements_robust	0	1 = beyond all and robust to every check that can fail: Sub-movements, movement band	results/x1_characteristics.json
 x1/submovements_unavailable		checks that could not be made (too few case trials left): Sub-movements, movement band	results/x1_characteristics.json
+x1/submovements_x_med	0.6	case value / reference median ("n times the typical value"): Sub-movements, movement band	results/x1_characteristics.json
 x1/submovements_z	\ensuremath{-}0.8	robust z on the declared (log) scale: Sub-movements, movement band	results/x1_characteristics.json
 x1/submovements_zlin	\ensuremath{-}0.7	robust z, linear: Sub-movements, movement band	results/x1_characteristics.json
 x1/submovements_zloo	\ensuremath{-}0.7	smallest |robust z| with one reference person left out: Sub-movements, movement band	results/x1_characteristics.json
@@ -26757,6 +27033,7 @@ x1/tilt_change_qone	6.7	reference 25th percentile: Tilt change	results/x1_charac
 x1/tilt_change_qthree	12.5	reference 75th percentile: Tilt change	results/x1_characteristics.json
 x1/tilt_change_robust	1	1 = beyond all and robust to every check that can fail: Tilt change	results/x1_characteristics.json
 x1/tilt_change_unavailable		checks that could not be made (too few case trials left): Tilt change	results/x1_characteristics.json
+x1/tilt_change_x_med	0.3	case value / reference median ("n times the typical value"): Tilt change	results/x1_characteristics.json
 x1/tilt_change_z	\ensuremath{-}2.3	robust z on the declared (log) scale: Tilt change	results/x1_characteristics.json
 x1/tilt_change_zlin	\ensuremath{-}1.6	robust z, linear: Tilt change	results/x1_characteristics.json
 x1/tilt_change_zloo	\ensuremath{-}2.1	smallest |robust z| with one reference person left out: Tilt change	results/x1_characteristics.json
@@ -26849,6 +27126,7 @@ x1/touch_acc_qone	2.4	reference 25th percentile: Acceleration at first touch	res
 x1/touch_acc_qthree	3.9	reference 75th percentile: Acceleration at first touch	results/x1_characteristics.json
 x1/touch_acc_robust	1	1 = beyond all and robust to every check that can fail: Acceleration at first touch	results/x1_characteristics.json
 x1/touch_acc_unavailable		checks that could not be made (too few case trials left): Acceleration at first touch	results/x1_characteristics.json
+x1/touch_acc_x_med	4.4	case value / reference median ("n times the typical value"): Acceleration at first touch	results/x1_characteristics.json
 x1/touch_acc_z	+3.9	robust z on the declared (log) scale: Acceleration at first touch	results/x1_characteristics.json
 x1/touch_acc_zlin	+9.7	robust z, linear: Acceleration at first touch	results/x1_characteristics.json
 x1/touch_acc_zloo	+3.9	smallest |robust z| with one reference person left out: Acceleration at first touch	results/x1_characteristics.json
@@ -26895,6 +27173,7 @@ x1/touch_s_qone	1.05	reference 25th percentile: Time to first screen touch	resul
 x1/touch_s_qthree	1.41	reference 75th percentile: Time to first screen touch	results/x1_characteristics.json
 x1/touch_s_robust	0	1 = beyond all and robust to every check that can fail: Time to first screen touch	results/x1_characteristics.json
 x1/touch_s_unavailable		checks that could not be made (too few case trials left): Time to first screen touch	results/x1_characteristics.json
+x1/touch_s_x_med	0.6	case value / reference median ("n times the typical value"): Time to first screen touch	results/x1_characteristics.json
 x1/touch_s_z	\ensuremath{-}2.5	robust z on the declared (log) scale: Time to first screen touch	results/x1_characteristics.json
 x1/touch_s_zlin	\ensuremath{-}1.9	robust z, linear: Time to first screen touch	results/x1_characteristics.json
 x1/touch_s_zloo	\ensuremath{-}1.9	smallest |robust z| with one reference person left out: Time to first screen touch	results/x1_characteristics.json

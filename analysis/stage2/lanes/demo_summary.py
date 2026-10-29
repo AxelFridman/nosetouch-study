@@ -132,6 +132,10 @@ Holm over the add-on variants within each metric:
   covariate x logit {verdict('inter')}.
 - `DEMO_02_base_rate`: primary balanced accuracy against natural-use right-hand recall per model. A phone-hand prior
   looks excellent on natural use for a trivial reason (the base rate).
+- `DEMO_02_simple`: the paired accuracy change of `DEMO_01_paired` in plain form (half a page wide, no test names):
+  one dot per person and the mean with its paired person-bootstrap {F('ci_level')} CI. + covariates: {F('main_worse')}
+  persons less accurate, {F('main_same')} unchanged, {F('main_better')} more accurate; + covariates and covariate x
+  logit: {F('inter_worse')} / {F('inter_same')} / {F('inter_better')}.
 
 ## Tables (tables/demo/)
 - `demo_models.csv|.tex`: every model with accuracy, balanced accuracy, log loss, AUC, natural-use recall, and the

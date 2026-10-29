@@ -43,5 +43,10 @@
   "caption": "Multivariate view of the pre-specified key characteristics (reaction time; hold 3-7 Hz band RMS; approach duration; peak angular speed, movement band; rotation, movement band; log dimensionless jerk; spectral arc length (SPARC); reach 3-7 Hz band RMS; reach 7-12 Hz band RMS; first-half yaw, hand-consistent) on their declared scales, robust-standardised against the 20 modelling persons. Left: their first two principal components (fitted on the reference persons; PD01 projected). Middle: Mahalanobis distances with a Ledoit-Wolf covariance, each reference person left out of its own standardisation and covariance; the line is PD01. Right: the number of reference persons at least as far as PD01 with each characteristic left out, on declared and on linear scales.",
   "decision": "Taken together: 4 of the 20 reference persons are at least as far from the reference centre as PD01 (rank p 0.238, floor 0.048); with one characteristic left out, 1 to 9. On linear scales 1 is (rank p 0.095), and without reach 7-12 Hz band RMS 5 are: the linear result depends on reach 7-12 Hz band RMS.",
   "file": "X1_09_multivariate.pdf"
+ },
+ "X1_10_pd01_vs_reference": {
+  "caption": "(a) PD01 and the 20 reference participants on the pre-specified characteristics in which PD01 lies outside the range of all of them (top) and on a declared selection in which a difference might be expected (bottom). Each row is rescaled so that the lowest reference participant sits at 0 and the highest at 1 (log scale for skewed quantities); a row that compares fewer reference participants (those who made enough trials) shows their number n. (b) For each person, the number of the 42 pre-specified characteristics in which that person lies outside the range of all the others, each reference participant judged on as many trials as PD01 made.",
+  "decision": "Unusual, not unique: PD01 lies outside the range of every reference participant compared in 9 of 42 pre-specified characteristics, and 2 of the 20 reference participants (P09, P14) reach that count too.",
+  "file": "X1_10_pd01_vs_reference.pdf"
  }
 }

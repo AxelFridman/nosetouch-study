@@ -1,0 +1,56 @@
+% short/diagram_frames.tex: the phone's own axes against the directions the analysis measures in (short.tex,
+% Section 3). TikZ at a fixed size (about 14 cm wide, explicit 8/9-pt fonts), used at full text width. Seen from the
+% person, who looks at the screen: "towards the face" points out of the page (a circled dot).
+% (a) upright grip: x to the right, y up. (b) sideways grip with the top of the phone to the person's LEFT: y to the
+% left, x up (x = y cross z, with z towards the face). The body-frame directions up / right / towards the face are the
+% same in (a) and (b). (c) seen from above: the turn about the vertical (yaw rate), positive counter-clockwise.
+\begin{tikzpicture}[
+    font=\fontsize{8}{9.5}\selectfont,
+    phone/.style={draw=black!70, fill=black!4, rounded corners=3pt, line width=0.7pt},
+    dev/.style={-{Latex[length=2mm,width=1.7mm]}, black!45, line width=1.1pt},
+    body/.style={-{Latex[length=2mm,width=1.7mm]}, black, line width=1.1pt},
+    devlab/.style={text=black!55, inner sep=1.5pt, font=\fontsize{9}{10}\selectfont},
+    panel/.style={anchor=north, font=\fontsize{8.5}{10}\selectfont, align=center}]
+  % \outofpage{point}{colour}: an arrow pointing out of the page, towards the viewer (a circled dot)
+  \def\outofpage#1#2{\fill[white] #1 circle (1.5mm); \draw[#2, line width=0.8pt] #1 circle (1.5mm);
+    \fill[#2] #1 circle (0.45mm);}
+  % ---------------------------------------------------------------- (a) upright
+  \begin{scope}
+    \draw[phone] (-0.55,-1.0) rectangle (0.55,1.0);
+    \draw[dev] (0,0) -- (1.0,0) node[devlab, right] {$x$};
+    \draw[dev] (0,0) -- (0,1.45) node[devlab, above] {$y$};
+    \outofpage{(0,0)}{black!45}
+    \node[devlab, anchor=north west] at (0.08,-0.10) {$z$};
+    \begin{scope}[shift={(2.15,-0.75)}]
+      \draw[body] (0,0) -- (0,1.15) node[above, inner sep=1.5pt] {up};
+      \draw[body] (0,0) -- (1.15,0) node[right, inner sep=1.5pt] {right};
+      \outofpage{(0,0)}{black}
+      \node[anchor=north, inner sep=2pt] at (0,-0.16) {towards the face};
+    \end{scope}
+    \node[panel] at (1.35,-1.55) {(a) phone upright};
+  \end{scope}
+  % ---------------------------------------------------------------- (b) sideways, top of the phone to the LEFT
+  \begin{scope}[shift={(6.15,0)}]
+    \draw[phone] (-1.0,-0.55) rectangle (1.0,0.55);
+    \draw[dev] (0,0) -- (0,1.45) node[devlab, above] {$x$};
+    \draw[dev] (0,0) -- (-1.45,0) node[devlab, left] {$y$};
+    \outofpage{(0,0)}{black!45}
+    \node[devlab, anchor=north west] at (0.08,-0.10) {$z$};
+    \begin{scope}[shift={(1.75,-0.75)}]
+      \draw[body] (0,0) -- (0,1.15) node[above, inner sep=1.5pt] {up};
+      \draw[body] (0,0) -- (1.15,0) node[right, inner sep=1.5pt] {right};
+      \outofpage{(0,0)}{black}
+      \node[anchor=north, inner sep=2pt] at (0,-0.16) {towards the face};
+    \end{scope}
+    \node[panel] at (0.55,-1.55) {(b) phone sideways (top to the left)};
+  \end{scope}
+  % ---------------------------------------------------------------- (c) seen from above: the turn about the vertical
+  \begin{scope}[shift={(12.0,0.05)}]
+    \draw[black!20, line width=0.6pt] (0,0) circle (0.85);
+    \draw[body] (-30:0.85) arc (-30:240:0.85);
+    \outofpage{(0,0)}{black}
+    \node[anchor=north, inner sep=2pt] at (0,-0.18) {up};
+    \node[font=\fontsize{11}{12}\selectfont\bfseries] at (1.0,0.75) {$+$};
+    \node[panel] at (0,-1.55) {(c) seen from above};
+  \end{scope}
+\end{tikzpicture}%
