@@ -1,0 +1,238 @@
+{
+ "cases": [
+  {
+   "bytes": 177379,
+   "bytes_json": 408713,
+   "decisions": {
+    "cnn": [
+     "confident",
+     0,
+     1
+    ],
+    "m4": [
+     "confident",
+     98,
+     2
+    ],
+    "phys6": [
+     "confident",
+     91,
+     2
+    ],
+    "yaw": [
+     "confident",
+     100,
+     1
+    ]
+   },
+   "engine": "blink",
+   "file": "syn01_android_right_3touch.json.gz",
+   "id": "syn01_android_right_3touch",
+   "kind": "synthetic",
+   "n_attempts": 3,
+   "n_attempts_live": 3,
+   "n_grid": 789,
+   "n_raw": 789,
+   "n_segments": 6,
+   "sha256": "eaffb32cca108c784ff833f84e5d29cead27e739081095750a7a672a162ceb55",
+   "tags": [
+    "android",
+    "blink",
+    "right",
+    "multi_touch",
+    "returns"
+   ],
+   "truth_hand": "right"
+  },
+  {
+   "bytes": 230004,
+   "bytes_json": 532330,
+   "decisions": {
+    "cnn": [
+     "confident",
+     97,
+     1
+    ],
+    "m4": [
+     "confident",
+     6,
+     2
+    ],
+    "phys6": [
+     "confident",
+     5,
+     2
+    ],
+    "yaw": [
+     "confident",
+     0,
+     1
+    ]
+   },
+   "engine": "webkit",
+   "file": "syn02_ios_left_gap_repeat.json.gz",
+   "id": "syn02_ios_left_gap_repeat",
+   "kind": "synthetic",
+   "n_attempts": 5,
+   "n_attempts_live": 5,
+   "n_grid": 1019,
+   "n_raw": 1000,
+   "n_segments": 8,
+   "sha256": "140b7d79d5c3e67661c05dc4ef2533d9736a2d0013ec42b16eaeed416a157fa3",
+   "tags": [
+    "ios",
+    "webkit",
+    "left",
+    "multi_touch",
+    "gap_314ms",
+    "repeated_sample",
+    "grips"
+   ],
+   "truth_hand": "left"
+  },
+  {
+   "bytes": 120131,
+   "bytes_json": 274231,
+   "decisions": {
+    "cnn": [
+     "grip",
+     50,
+     0
+    ],
+    "m4": [
+     "grip",
+     50,
+     0
+    ],
+    "phys6": [
+     "grip",
+     50,
+     0
+    ],
+    "yaw": [
+     "grip",
+     50,
+     0
+    ]
+   },
+   "engine": "blink",
+   "file": "syn03_android_screen_away.json.gz",
+   "id": "syn03_android_screen_away",
+   "kind": "synthetic",
+   "n_attempts": 0,
+   "n_attempts_live": 0,
+   "n_grid": 529,
+   "n_raw": 529,
+   "n_segments": 4,
+   "sha256": "577c09a71f8f9ef7b3dc9eefda0a4c718277037a0ce04b5a074029afb03cf533",
+   "tags": [
+    "android",
+    "blink",
+    "right",
+    "screen_away",
+    "grip_gate"
+   ],
+   "truth_hand": "right"
+  },
+  {
+   "bytes": 177355,
+   "bytes_json": 408353,
+   "decisions": {
+    "cnn": [
+     "confident",
+     97,
+     1
+    ],
+    "m4": [
+     "confident",
+     2,
+     2
+    ],
+    "phys6": [
+     "confident",
+     9,
+     2
+    ],
+    "yaw": [
+     "confident",
+     0,
+     1
+    ]
+   },
+   "engine": "blink",
+   "file": "syn04_android_mirror_of_syn01.json.gz",
+   "id": "syn04_android_mirror_of_syn01",
+   "kind": "synthetic",
+   "n_attempts": 3,
+   "n_attempts_live": 3,
+   "n_grid": 789,
+   "n_raw": 789,
+   "n_segments": 6,
+   "sha256": "6494902c04be65e55baf31cdabf8f462fa8d7136c0a49bef137b9e6751590373",
+   "tags": [
+    "android",
+    "blink",
+    "left",
+    "mirror",
+    "multi_touch"
+   ],
+   "truth_hand": "left"
+  },
+  {
+   "bytes": 260598,
+   "bytes_json": 640859,
+   "decisions": {
+    "cnn": [
+     "confident",
+     100,
+     1
+    ],
+    "m4": [
+     "confident",
+     6,
+     2
+    ],
+    "phys6": [
+     "confident",
+     9,
+     3
+    ],
+    "yaw": [
+     "confident",
+     1,
+     1
+    ]
+   },
+   "engine": "gecko",
+   "file": "syn05_gecko_left_edges.json.gz",
+   "id": "syn05_gecko_left_edges",
+   "kind": "synthetic",
+   "n_attempts": 3,
+   "n_attempts_live": 3,
+   "n_grid": 1324,
+   "n_raw": 1325,
+   "n_segments": 11,
+   "sha256": "af21a2b9365f9dbba50d702aabb00ba9eb48a85b0fff4bf04883598f473608b0",
+   "tags": [
+    "gecko",
+    "left",
+    "multi_touch",
+    "starts_moving",
+    "unended_last_bout",
+    "no_acc",
+    "speeds"
+   ],
+   "truth_hand": "left"
+  }
+ ],
+ "format": "nosetouch-fixtures-index-1",
+ "generated_by": "analysis/stage3 fixtures (python -m stage3 fixtures)",
+ "kind": "synthetic",
+ "models": {
+  "cnn": "eeb74a79d0339f17fb247bcedccf40ef0ec68ee479eb0d341e76edc90159e7cb",
+  "m4": "b7345137e16c1e5678a9a8a4e1d4fea8d11459cf7e4c5052a05b5d6e578a6567",
+  "phys6": "a641fc0b73bcc9563f118807d9127ad60666e638d63de984faa2fc83b9293637",
+  "yaw": "298d8084331ff8bbdc484e63b562538ad99ef98868128e46c8b23db90b3cd85d"
+ },
+ "note": "synthetic streams only (motionlab.synth): no participant data"
+}

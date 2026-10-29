@@ -1,0 +1,166 @@
+{
+ "C": 0.1,
+ "aggregation": {
+  "alpha": 0.25,
+  "kind": "sum_over_k_pow",
+  "rule": "P_k = sigmoid(sum of the k attempts' logits / k^alpha), logit with p clipped to [1e-6, 1 - 1e-6] (lane m1 fitted_alpha)"
+ },
+ "calibrator": {
+  "method": "none",
+  "p_clip_out": [
+   0.0,
+   1.0
+  ]
+ },
+ "centre": [
+  0.0,
+  0.0,
+  0.0,
+  0.0,
+  0.0,
+  0.0
+ ],
+ "coef": [
+  0.8288792303736573,
+  0.4724608041956768,
+  -0.10283127851786397,
+  -0.3604801417516789,
+  0.43792150612924063,
+  0.6469489240522418
+ ],
+ "coef_raw_store": [
+  0.13468195395060006,
+  0.07253854743629498,
+  -0.03689926768969858,
+  -0.13765689521911337,
+  3.8507717675454605,
+  3.4416389794510454
+ ],
+ "features": [
+  "yaw_q50",
+  "yaw_q100",
+  "roll_q50",
+  "roll_q100",
+  "latvel_q50",
+  "latvel_q100"
+ ],
+ "fit_intercept": false,
+ "format": "nosetouch-phys6-1",
+ "formula": "z_raw = sum_j coef_j * (W_j - centre_j) / scale_j with W_j = winsor_med_j + winsor_s_j * asinh((x_j - winsor_med_j) / winsor_s_j) (winsor asinh; clip: clip(x, lo, hi); none: x); p = sigmoid(z_raw); unavailable when any feature is not finite",
+ "id": "phys6",
+ "identity": {
+  "cache_version": "stage2_cache_v2",
+  "code": {
+   "motionlab_sha256": "8e6499135b67d94dc4e18201f1e562d64f627b75e4e70cc8326602253507f7c3",
+   "requirements_sha256": "3bc292af9bfa769a3539c3832b4e5e0e438e7e927d289e2509e55f7d27277d7b",
+   "stage2_scripts_sha256": "41b0539194ad9f72c3f54e09dade0820fe1c622ed439e04c19d28642ca69a916",
+   "stage2_sha256": "280f2618bef45a85a010b20bdf34ac7e923aa12ec5261629092a6bc5bcd43b1c",
+   "stage3_fit_sha16": "6638c1f7762e05b8"
+  },
+  "data_id": "11b6c9b51479331d70e9b72b9c6137d8371d5a1c39c33dc6e99485eb30a0ea41",
+  "snapshot_sha256": "7f49097a57918c892718b028ac2846314976b01c15f966167fc3b1d3e7246e2a"
+ },
+ "input": {
+  "body_frame": {
+   "definition": "h = e_z - (e_z.u) u, h /= |h| (NaN when |h| <= 1e-6), s = u x h; roll_rate = w.h, acc_lat = a.s (float64, NOT rounded to float32)",
+   "h_min": 1e-06,
+   "nan_below_h_min": true
+  },
+  "duration": "duration_s = (end_ms - onset_ms) / 1000 of the detected bounds; dt = duration_s / 63",
+  "features": {
+   "cumtrapz": "c[0] = 0, c[k + 1] = c[k] + (0.5 * (x[k + 1] + x[k])) * dt",
+   "latvel_q50 / latvel_q100": "the same of lat = cumtrapz(acc_lat, dt)",
+   "roll_q50 / roll_q100": "the same of roll = cumtrapz(roll_rate, dt)",
+   "yaw_q100": "yaw_cum[63]",
+   "yaw_q50": "0.5 * yaw_cum[31] + 0.5 * yaw_cum[32]"
+  },
+  "window": "the (17, 64) float32 approach window (standardize.time_normalised), read as float64"
+ },
+ "intercept": 0.0,
+ "label": "Physics logistic",
+ "logitEps": 1e-06,
+ "option": "asinh",
+ "scale": [
+  6.154345152118015,
+  6.513237732125843,
+  2.7868108219007306,
+  2.6186856908104015,
+  0.11372304892750847,
+  0.1879769865215301
+ ],
+ "scale_kind": "rms",
+ "short": "PHYS6: yaw, roll, lateral",
+ "sign": [
+  -1.0,
+  -1.0,
+  -1.0,
+  -1.0,
+  -1.0,
+  -1.0
+ ],
+ "stage2Name": "m1_lr_phys6_nested",
+ "training": {
+  "cap_per_person": 40,
+  "n_persons": 20,
+  "n_trials": 593,
+  "persons": [
+   "P01",
+   "P02",
+   "P03",
+   "P04",
+   "P05",
+   "P06",
+   "P07",
+   "P08",
+   "P09",
+   "P10",
+   "P11",
+   "P12",
+   "P13",
+   "P14",
+   "P15",
+   "P16",
+   "P17",
+   "P18",
+   "P19",
+   "P20"
+  ],
+  "seed": 20261027,
+  "sets": [
+   "primary"
+  ]
+ },
+ "winsor": "asinh",
+ "winsor_hi": [
+  null,
+  null,
+  null,
+  null,
+  null,
+  null
+ ],
+ "winsor_lo": [
+  null,
+  null,
+  null,
+  null,
+  null,
+  null
+ ],
+ "winsor_med": [
+  0.0,
+  0.0,
+  0.0,
+  0.0,
+  0.0,
+  0.0
+ ],
+ "winsor_s": [
+  5.327831983566284,
+  5.761941909790039,
+  2.2216745037008296,
+  2.0806906227989947,
+  0.0925887199963823,
+  0.16366176080694034
+ ]
+}

@@ -25,8 +25,8 @@ describe('constants', () => {
     expect(pattern.test(SCHEMA_VERSION)).toBe(true);
   });
 
-  it('v2 versions: app 0.2.1, schema 1.2.0, protocol 2.0.0, consent 2026-10-v3', () => {
-    expect([APP_VERSION, SCHEMA_VERSION, PROTOCOL_VERSION, CONSENT_VERSION_DEFAULT]).toEqual(['0.2.1', '1.2.0', '2.0.0', '2026-10-v3']);
+  it('v2 versions: app 0.3.0 (the predict page), schema 1.2.0, protocol 2.0.0, consent 2026-10-v3', () => {
+    expect([APP_VERSION, SCHEMA_VERSION, PROTOCOL_VERSION, CONSENT_VERSION_DEFAULT]).toEqual(['0.3.0', '1.2.0', '2.0.0', '2026-10-v3']);
   });
 
   it('orientation mirror map is an involution and matches the schema enum', () => {

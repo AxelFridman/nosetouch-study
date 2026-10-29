@@ -1,7 +1,7 @@
 {
   "name": "nose-touch-collector",
   "private": true,
-  "version": "0.2.1",
+  "version": "0.3.0",
   "description": "Progressive Web App that records phone motion sensors while participants bring the phone to their nose with the left or right hand.",
   "type": "module",
   "scripts": {

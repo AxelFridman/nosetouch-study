@@ -1,0 +1,78 @@
+{
+ "C": 1.0,
+ "aggregation": {
+  "calibrated_beyond_k1": false,
+  "kind": "mean_p",
+  "rule": "P_k = mean of the k attempts' P (the harness k-curve; never fitted, so P_k for k >= 2 is not calibrated)"
+ },
+ "calibrator": {
+  "method": "none"
+ },
+ "channel": "yaw_cum",
+ "coef": [
+  0.0,
+  -0.07798118144273758,
+  0.04957927390933037,
+  -0.000978411640971899,
+  0.086869977414608,
+  0.06271009147167206,
+  0.0510653555393219,
+  -0.0010524586541578174
+ ],
+ "coef_dtype": "float32",
+ "format": "nosetouch-yaw-ref-1",
+ "formula": "x = window[yaw_cum][0::8] (indices 0, 8, ..., 56); z_raw = coef . x + intercept (float64 with the float32-valued coefficients); p = 1 / (1 + exp(-z_raw)); unavailable when any x is not finite",
+ "id": "yaw",
+ "identity": {
+  "cache_version": "stage2_cache_v2",
+  "code": {
+   "motionlab_sha256": "8e6499135b67d94dc4e18201f1e562d64f627b75e4e70cc8326602253507f7c3",
+   "requirements_sha256": "3bc292af9bfa769a3539c3832b4e5e0e438e7e927d289e2509e55f7d27277d7b",
+   "stage2_scripts_sha256": "41b0539194ad9f72c3f54e09dade0820fe1c622ed439e04c19d28642ca69a916",
+   "stage2_sha256": "280f2618bef45a85a010b20bdf34ac7e923aa12ec5261629092a6bc5bcd43b1c",
+   "stage3_fit_sha16": "6638c1f7762e05b8"
+  },
+  "data_id": "11b6c9b51479331d70e9b72b9c6137d8371d5a1c39c33dc6e99485eb30a0ea41",
+  "snapshot_sha256": "7f49097a57918c892718b028ac2846314976b01c15f966167fc3b1d3e7246e2a"
+ },
+ "index": 15,
+ "intercept": 6.644264027855229e-10,
+ "label": "Yaw reference",
+ "n": 8,
+ "nan_to_num": false,
+ "precision_note": "fitted in float32 (scikit-learn keeps the float32 dtype of the cached windows): the evaluated predictions were float32 arithmetic; the page computes in float64 with the same coefficients (|dP| below 1e-6)",
+ "short": "logistic on yaw, 8 instants",
+ "stage2Name": "example_yaw_logreg",
+ "step": 8,
+ "training": {
+  "cap_per_person": 40,
+  "n_persons": 20,
+  "n_trials": 593,
+  "persons": [
+   "P01",
+   "P02",
+   "P03",
+   "P04",
+   "P05",
+   "P06",
+   "P07",
+   "P08",
+   "P09",
+   "P10",
+   "P11",
+   "P12",
+   "P13",
+   "P14",
+   "P15",
+   "P16",
+   "P17",
+   "P18",
+   "P19",
+   "P20"
+  ],
+  "seed": 20261027,
+  "sets": [
+   "primary"
+  ]
+ }
+}

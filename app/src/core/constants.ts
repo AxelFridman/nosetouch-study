@@ -8,7 +8,7 @@ import type {
 } from './types';
 
 /** Keep in sync with package.json "version" (a unit test checks this). */
-export const APP_VERSION = '0.2.1';
+export const APP_VERSION = '0.3.0';
 /** Data schema version (schema/records.schema.json). Minor bump = additive change. */
 export const SCHEMA_VERSION = '1.2.0';
 /**

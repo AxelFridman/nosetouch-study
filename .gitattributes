@@ -2,3 +2,5 @@
 * text=auto
 *.png binary
 *.gz binary
+# predict mode's bundled model files: manifest.json records the sha256 of these exact (LF) bytes
+app/src/predict/models/*.json -text

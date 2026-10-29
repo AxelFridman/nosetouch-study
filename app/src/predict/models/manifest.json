@@ -1,0 +1,179 @@
+{
+ "default": "cnn",
+ "detector": "m4",
+ "fit_seconds": {
+  "m4": 27.4,
+  "phys6": 4.0,
+  "yaw": 0.1
+ },
+ "format": "nosetouch-models-manifest-1",
+ "generated_by": "analysis/stage3 export_models (python -m stage3 export)",
+ "identity": {
+  "cache_version": "stage2_cache_v2",
+  "code": {
+   "motionlab_sha256": "8e6499135b67d94dc4e18201f1e562d64f627b75e4e70cc8326602253507f7c3",
+   "requirements_sha256": "3bc292af9bfa769a3539c3832b4e5e0e438e7e927d289e2509e55f7d27277d7b",
+   "stage2_scripts_sha256": "41b0539194ad9f72c3f54e09dade0820fe1c622ed439e04c19d28642ca69a916",
+   "stage2_sha256": "280f2618bef45a85a010b20bdf34ac7e923aa12ec5261629092a6bc5bcd43b1c",
+   "stage3_fit_sha16": "6638c1f7762e05b8"
+  },
+  "data_id": "11b6c9b51479331d70e9b72b9c6137d8371d5a1c39c33dc6e99485eb30a0ea41",
+  "snapshot_sha256": "7f49097a57918c892718b028ac2846314976b01c15f966167fc3b1d3e7246e2a"
+ },
+ "models": [
+  {
+   "aggregation": {
+    "kind": "sum_over_tau",
+    "tau": {
+     "1": 1.0,
+     "2": 1.2422060486503472,
+     "3": 1.5528229750425298,
+     "4": 1.6446657664871442,
+     "5": 1.972524195030716
+    }
+   },
+   "bytes": 985380,
+   "calibration": "platt",
+   "file": "final_cnn.json",
+   "format": "nosetouch-final-1",
+   "id": "cnn",
+   "isDefault": true,
+   "kind": "cnn1d_ensemble",
+   "label": "Final CNN",
+   "loso": {
+    "accuracy": 0.8929765886287625,
+    "ci95": [
+     0.8497392393917844,
+     0.9308723250914736
+    ],
+    "description": "final model as shipped: accuracy",
+    "source": "reports/stage2/results/final_numbers.json#final_accuracy",
+    "what": "one approach, the app's stored window (oracle bounds)"
+   },
+   "sha256": "eeb74a79d0339f17fb247bcedccf40ef0ec68ee479eb0d341e76edc90159e7cb",
+   "short": "1D CNN, 4 members",
+   "stage2Name": "m3_cal_deep_platt",
+   "trainedOn": {
+    "persons": 20,
+    "trials": 593
+   }
+  },
+  {
+   "aggregation": {
+    "b": 0.5824941118898527,
+    "form": "power",
+    "kind": "scaled_mean",
+    "name": "scale_sessions",
+    "s": {
+     "1": 0.8015005977115547,
+     "2": 1.2001956559851579,
+     "3": 1.5199320474097542,
+     "4": 1.7972158932363544,
+     "5": 2.0466791365587547
+    },
+    "s1": 0.8015005977115547
+   },
+   "bytes": 15060,
+   "calibration": "nested:isotonic_sym",
+   "file": "m4_production.json",
+   "format": "nosetouch-m4-production-1",
+   "id": "m4",
+   "isDefault": false,
+   "kind": "logistic",
+   "label": "Detector model",
+   "loso": {
+    "accuracy": 0.7282608695652174,
+    "ci95": [
+     0.6893281225800607,
+     0.7659215921817984
+    ],
+    "description": "production (calibrator nested): LOSO accuracy (half credit)",
+    "source": "reports/stage2/results/m4_numbers.json#prod_acc",
+    "what": "one recording end to end, cue-free (the detector picks the movement; an abstention counts half)"
+   },
+   "sha256": "b7345137e16c1e5678a9a8a4e1d4fea8d11459cf7e4c5052a05b5d6e578a6567",
+   "short": "lane m4, yaw logistic",
+   "stage2Name": "m4_cal_nested",
+   "trainedOn": {
+    "persons": 20,
+    "trials": 593
+   }
+  },
+  {
+   "aggregation": {
+    "alpha": 0.25,
+    "kind": "sum_over_k_pow"
+   },
+   "bytes": 3624,
+   "calibration": "none",
+   "file": "phys6.json",
+   "format": "nosetouch-phys6-1",
+   "id": "phys6",
+   "isDefault": false,
+   "kind": "logistic",
+   "label": "Physics logistic",
+   "loso": {
+    "accuracy": 0.8327759197324415,
+    "ci95": [
+     0.7915252740013176,
+     0.8758650462837655
+    ],
+    "description": "",
+    "source": "reports/stage2/results/final_numbers.json#m1_phys6_accuracy",
+    "what": "one approach, the app's stored window (oracle bounds)"
+   },
+   "sha256": "a641fc0b73bcc9563f118807d9127ad60666e638d63de984faa2fc83b9293637",
+   "short": "PHYS6: yaw, roll, lateral",
+   "stage2Name": "m1_lr_phys6_nested",
+   "trainedOn": {
+    "persons": 20,
+    "trials": 593
+   }
+  },
+  {
+   "aggregation": {
+    "calibrated_beyond_k1": false,
+    "kind": "mean_p"
+   },
+   "bytes": 2164,
+   "calibration": "none",
+   "file": "yaw_ref.json",
+   "format": "nosetouch-yaw-ref-1",
+   "id": "yaw",
+   "isDefault": false,
+   "kind": "logistic",
+   "label": "Yaw reference",
+   "loso": {
+    "accuracy": 0.7792642140468228,
+    "ci95": [
+     0.7310311901340997,
+     0.8294756312086092
+    ],
+    "description": "",
+    "source": "reports/stage2/results/final_numbers.json#ref_accuracy",
+    "what": "one approach, the app's stored window (oracle bounds)"
+   },
+   "sha256": "298d8084331ff8bbdc484e63b562538ad99ef98868128e46c8b23db90b3cd85d",
+   "short": "logistic on yaw, 8 instants",
+   "stage2Name": "example_yaw_logreg",
+   "trainedOn": {
+    "persons": 20,
+    "trials": 593
+   }
+  }
+ ],
+ "note": "the detector (segmentation, segment classifier, attempt rule) and the stopping thresholds (p_stop, k_max, p_answer) were fitted for lane m4's own hand classifier; lane prod, which would refit them for the final model, has not run",
+ "order": [
+  "cnn",
+  "m4",
+  "phys6",
+  "yaw"
+ ],
+ "versions": {
+  "numpy": "2.4.6",
+  "pandas": "3.1.0",
+  "python": "3.11.9",
+  "scikit_learn": "1.9.1",
+  "scipy": "1.17.1"
+ }
+}
